@@ -1,20 +1,25 @@
+[package]
+name = "ckt"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+monoio = { version = "0.2.4", features = ["threadpool"] }
+tempfile = "3.8"
+zstd = "0.13.3"
+
 [workspace]
-members = ["crates/foo"]
-resolver = "2"
+members = ["cli"]
+resolver = "3"
 
 [workspace.package]
-version = "0.0.0" # CHANGEME
-edition = "2024" # CHANGEME
-authors = [
-  "John Doe <noreply@alpenlabs.io>",  # CHANGEME
-  "Janet Doe <noreply@alpenlabs.io>", # CHANGEME
-]
-description = "Alpen Rust Workspace Template" # CHANGEME
-license = "MIT OR Apache-2.0" # CHANGEME
-readme = "README.md"
-repository = "https://github.com/alpenlabs/rust-template-workspace" # CHANGEME
-categories = ["cryptography::cryptocurrencies"] # CHANGEME
-keywords = ["crypto", "bitcoin"] # CHANGEME
+edition = "2024"
+authors = ["Azz <azz@alpenlabs.io>"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/alpenlabs/ckt"
 
 [workspace.lints]
 rust.missing_debug_implementations = "warn"
@@ -28,8 +33,6 @@ rust.unexpected_cfgs = { level = "warn", check-cfg = [
 rust.missing_docs = "warn"
 rustdoc.all = "warn"
 clippy.too_long_first_doc_paragraph = "warn"
-
-[workspace.dependencies]
 
 [profile.release]
 opt-level = "z"   # Optimized for size, use 3 for speed
