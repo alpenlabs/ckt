@@ -7,8 +7,6 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-monoio = { version = "0.2.4", features = ["threadpool"] }
-tempfile = "3.8"
 zstd = "0.13.3"
 
 [workspace]
