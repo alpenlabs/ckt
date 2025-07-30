@@ -17,7 +17,7 @@ use std::time::Instant;
 use stream::BufferedLineStream;
 
 use crate::writer::RemoteWriter;
-use ckt::ringbuf::RingBuffer;
+use cynosure::site_d::ringbuf::RingBuf;
 
 use mimalloc::MiMalloc;
 
@@ -371,7 +371,7 @@ async fn convert_bristol_to_ckt(
 
 /// Verify a CKT format file
 async fn verify_ckt_file(path: &Path) -> Result<VerificationStats> {
-    let ring_buf = RingBuffer::<u8>::new(64 * 1024 * 1024); // 64 MiB
+    let ring_buf = RingBuf::<u8>::new(64 * 1024 * 1024); // 64 MiB
     let (mut writer, reader) = ring_buf.split();
 
     let path_clone = path.to_owned();

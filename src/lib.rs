@@ -1,6 +1,5 @@
 pub mod reader;
 
-pub mod ringbuf;
 pub mod writer;
 
 /// A compact representation of a gate with 32-bit wire indices

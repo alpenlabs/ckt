@@ -167,6 +167,7 @@ dependencies = [
  "assert_cmd",
  "ckt",
  "clap",
+ "cynosure",
  "indicatif",
  "kanal",
  "mimalloc",
@@ -259,6 +260,12 @@ name = "crossbeam-utils"
 version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
+
+[[package]]
+name = "cynosure"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fc3fa07a126c3494c4fe80f9668f16d57a92b02191fab2383db01b379dc3cc75"
 
 [[package]]
 name = "difflib"
