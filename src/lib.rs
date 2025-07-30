@@ -1,4 +1,6 @@
 pub mod reader;
+
+pub mod ringbuf;
 pub mod writer;
 
 /// A compact representation of a gate with 32-bit wire indices
@@ -42,6 +44,7 @@ impl CompactGate {
 /// Memory layout:
 /// - 96 bytes: 8 gates × 12 bytes each
 /// - 1 byte: gate types (bit i = type of gate i, 0=XOR, 1=AND)
+#[repr(C)]
 pub struct GateBatch {
     /// Raw bytes for 8 gates (96 bytes total)
     pub gates: [u8; 96],
@@ -137,6 +140,22 @@ impl GateBatch {
             gates,
             gate_types: bytes[96],
         }
+    }
+
+    /// Cast bytes directly to a GateBatch reference (zero-copy)
+    /// SAFETY: The slice must be exactly 97 bytes and properly aligned
+    #[inline]
+    pub fn from_bytes_ref(bytes: &[u8]) -> &Self {
+        debug_assert_eq!(bytes.len(), 97, "GateBatch requires exactly 97 bytes");
+        debug_assert_eq!(
+            bytes.as_ptr() as usize % std::mem::align_of::<Self>(),
+            0,
+            "GateBatch must be properly aligned"
+        );
+
+        // SAFETY: GateBatch is repr(C) with layout [u8; 96] + u8, so we can safely cast
+        // as long as the slice is exactly 97 bytes and properly aligned
+        unsafe { &*(bytes.as_ptr() as *const Self) }
     }
 }
 

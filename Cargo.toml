@@ -7,7 +7,10 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-zstd = "0.13.3"
+zstd = { version = "0.13.3" }
+
+[dev-dependencies]
+monoio = { version = "0.2.4", features = ["sync"] }
 
 [workspace]
 members = ["cli"]
@@ -33,8 +36,9 @@ rustdoc.all = "warn"
 clippy.too_long_first_doc_paragraph = "warn"
 
 [profile.release]
-opt-level = "z"   # Optimized for size, use 3 for speed
+opt-level = 3
 lto = true        # Enable Link Time Optimization
 codegen-units = 1 # Reduced to increase optimizations
 panic = "abort"   # Abort on panic
-strip = "symbols" # Strip symbols from binary
+# strip = "symbols" # Strip symbols from binary
+# debug = true

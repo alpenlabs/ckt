@@ -17,6 +17,7 @@ use std::time::Instant;
 use stream::BufferedLineStream;
 
 use crate::writer::RemoteWriter;
+use ckt::ringbuf::RingBuffer;
 
 use mimalloc::MiMalloc;
 
@@ -122,7 +123,7 @@ async fn async_main(cli: Cli) -> Result<()> {
 
         Commands::Verify { file, detailed } => {
             if file.extension().and_then(|s| s.to_str()) == Some("ckt") {
-                let stats = verify_ckt_file(&file)?;
+                let stats = verify_ckt_file(&file).await?;
                 stats.print_summary();
                 if detailed {
                     stats.print_detailed();
@@ -369,48 +370,93 @@ async fn convert_bristol_to_ckt(
 }
 
 /// Verify a CKT format file
-fn verify_ckt_file(path: &Path) -> Result<VerificationStats> {
-    let file = File::open(path)?;
-    let buf_reader = BufReader::new(file);
-    let mut reader = CircuitReader::new(buf_reader)?;
+async fn verify_ckt_file(path: &Path) -> Result<VerificationStats> {
+    let ring_buf = RingBuffer::<u8>::new(64 * 1024 * 1024); // 64 MiB
+    let (mut writer, reader) = ring_buf.split();
 
-    // Get gate counts from reader
-    let total_gates = reader.total_gates();
-    let xor_gates = reader.xor_gates();
-    let and_gates = reader.and_gates();
+    let path_clone = path.to_owned();
+    let reader_task = monoio::spawn(async move {
+        let file = monoio::fs::File::open(path_clone)
+            .await
+            .map_err(|e| format!("Failed to open file: {}", e))?;
 
-    let pb = ProgressBar::new(total_gates as u64);
-    pb.set_style(
-        ProgressStyle::default_bar().template(
-            "{bar:40.cyan/blue} {pos:>7}/{len:7} [{elapsed_precise}] {msg} [{per_sec}]",
-        )?,
-    );
-    pb.set_message("Verifying CKT circuit...");
+        let metadata = file
+            .metadata()
+            .await
+            .map_err(|e| format!("Failed to get file metadata: {}", e))?;
+        let size = metadata.len();
+        let mut pos = 0;
 
-    let start_time = Instant::now();
-    let mut stats = VerificationStats::new();
-    stats.xor_gates = xor_gates as usize;
-    stats.and_gates = and_gates as usize;
-    stats.total_gates = total_gates as usize;
+        let mut buffer = Vec::with_capacity(64 * 1024 * 1024);
 
-    // Read through to verify file integrity
-    let mut verified_count = 0;
-    while let Some((_, _)) = reader.next_gate()? {
-        verified_count += 1;
-        if verified_count % 1_000_000 == 0 {
-            pb.set_position(verified_count as u64);
+        while pos < size {
+            let buf = std::mem::take(&mut buffer);
+            let (res, buf) = file.read_at(buf, pos).await;
+            let bytes_read = res.map_err(|e| format!("Failed to read file: {}", e))?;
+            writer.push_slice(&buf[..bytes_read]).await;
+            pos += bytes_read as u64;
+            buffer = buf;
         }
-    }
 
-    pb.finish_with_message(format!(
-        "✓ Verified {} gates",
-        format_number(stats.total_gates)
-    ));
+        Ok::<(), String>(())
+    });
+    let path = path.to_owned();
+    let decoder_task = monoio::spawn_blocking(move || {
+        // sleep for 50ms so the reader is ready
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let mut reader = CircuitReader::new(reader)
+            .map_err(|e| format!("Failed to create CircuitReader: {}", e))?;
 
-    stats.file_size = std::fs::metadata(path)?.len();
-    stats.processing_time = start_time.elapsed();
+        println!("Reader created");
 
-    Ok(stats)
+        // Get gate counts from reader
+        let total_gates = reader.total_gates();
+        let xor_gates = reader.xor_gates();
+        let and_gates = reader.and_gates();
+
+        let pb = ProgressBar::new(total_gates as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template(
+                    "{bar:40.cyan/blue} {pos:>7}/{len:7} [{elapsed_precise}] {msg} [{per_sec}]",
+                )
+                .unwrap(),
+        );
+        pb.set_message("Verifying CKT circuit...");
+
+        let start_time = Instant::now();
+        let mut stats = VerificationStats::new();
+        stats.xor_gates = xor_gates as usize;
+        stats.and_gates = and_gates as usize;
+        stats.total_gates = total_gates as usize;
+
+        // Read through to verify file integrity
+        let mut verified_count = 0;
+        while let Some((_, count)) = reader
+            .next_batch_ref()
+            .map_err(|e| format!("Error reading gate: {}", e))?
+        {
+            verified_count += count;
+            if verified_count % 1_000_000 == 0 {
+                pb.set_position(verified_count as u64);
+            }
+        }
+
+        pb.finish_with_message(format!(
+            "✓ Verified {} gates",
+            format_number(stats.total_gates)
+        ));
+
+        stats.file_size = std::fs::metadata(path)
+            .map_err(|e| format!("Error getting file metadata: {}", e))?
+            .len();
+        stats.processing_time = start_time.elapsed();
+
+        Ok::<_, String>(stats)
+    });
+
+    reader_task.await.unwrap();
+    Ok(decoder_task.await.unwrap().unwrap())
 }
 
 /// Verify a Bristol format file
@@ -508,13 +554,13 @@ async fn compare_circuits(path1: &Path, path2: &Path) -> Result<()> {
     println!("Comparing circuits...\n");
 
     let stats1 = if path1.extension().and_then(|s| s.to_str()) == Some("ckt") {
-        verify_ckt_file(path1)?
+        verify_ckt_file(path1).await?
     } else {
         verify_bristol_file(path1).await?
     };
 
     let stats2 = if path2.extension().and_then(|s| s.to_str()) == Some("ckt") {
-        verify_ckt_file(path2)?
+        verify_ckt_file(path2).await?
     } else {
         verify_bristol_file(path2).await?
     };
@@ -600,21 +646,24 @@ fn extract_ckt_to_bristol(ckt_path: &Path, bristol_path: &Path) -> Result<()> {
     let start_time = Instant::now();
     let mut count = 0;
 
-    while let Some((gate, gate_type)) = reader.next_gate()? {
-        let gate_str = match gate_type {
-            GateType::XOR => "XOR",
-            GateType::AND => "AND",
-        };
+    while let Some((batch, num_gates)) = reader.next_batch()? {
+        for i in 0..num_gates {
+            let (gate, gate_type) = batch.get_gate(i);
+            let gate_str = match gate_type {
+                GateType::XOR => "XOR",
+                GateType::AND => "AND",
+            };
 
-        writeln!(
-            writer,
-            "2 1 {} {} {} {}",
-            gate.input1, gate.input2, gate.output, gate_str
-        )?;
+            writeln!(
+                writer,
+                "2 1 {} {} {} {}",
+                gate.input1, gate.input2, gate.output, gate_str
+            )?;
 
-        count += 1;
-        if count % 1_000_000 == 0 {
-            pb.set_position(count as u64);
+            count += 1;
+            if count % 1_000_000 == 0 {
+                pb.set_position(count as u64);
+            }
         }
     }
 
