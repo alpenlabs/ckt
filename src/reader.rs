@@ -1,59 +1,45 @@
-use std::io::{BufReader, Read, Result, Seek};
-use zstd::Decoder;
-
 use crate::{CircuitHeader, GateBatch};
+use std::io::{Read, Result, Seek};
 
 /// Reader for compressed circuit format with batch API
 pub struct CircuitReader<R: Read> {
-    decoder: Decoder<'static, BufReader<R>>,
+    reader: R,
     buffer: Vec<u8>,
-    buffer_pos: usize,
-    buffer_len: usize,
+    /// Start of valid data in buffer
+    valid_start: usize,
+    /// End of valid data in buffer (exclusive)
+    valid_end: usize,
     total_gates_read: usize,
     header: CircuitHeader,
-    finished: bool,
+    total_bytes: usize,
+    bytes_read: usize,
 }
 
 impl<R: Read> CircuitReader<R> {
     /// Create a new compressed reader
-    pub fn new(mut reader: R) -> Result<Self> {
+    pub fn new(mut reader: R, total_bytes: usize) -> Result<Self> {
         // Read header first (8 bytes)
         let mut header_bytes = [0u8; 8];
         reader.read_exact(&mut header_bytes)?;
 
-        // Parse header
-        let xor_gates = u32::from_le_bytes([
-            header_bytes[0],
-            header_bytes[1],
-            header_bytes[2],
-            header_bytes[3],
-        ]);
-        let and_gates = u32::from_le_bytes([
-            header_bytes[4],
-            header_bytes[5],
-            header_bytes[6],
-            header_bytes[7],
-        ]);
-
         let header = CircuitHeader {
-            xor_gates,
-            and_gates,
+            xor_gates: u32::from_le_bytes(header_bytes[0..4].try_into().unwrap()),
+            and_gates: u32::from_le_bytes(header_bytes[4..8].try_into().unwrap()),
         };
 
         // Use 64MB buffer for better throughput
-        const BUFFER_SIZE: usize = 256 * 1024 * 1024;
-
-        // Simple allocation without manual alignment (let allocator handle it)
+        const BUFFER_SIZE: usize = 64 * 1024 * 1024;
         let buffer = vec![0u8; BUFFER_SIZE];
 
         Ok(Self {
-            decoder: Decoder::new(reader)?,
+            reader,
             buffer,
-            buffer_pos: 0,
-            buffer_len: 0,
+            valid_start: 0,
+            valid_end: 0,
             total_gates_read: 0,
             header,
-            finished: false,
+            total_bytes,
+            bytes_read: 8,
         })
     }
 
@@ -83,118 +69,171 @@ impl<R: Read> CircuitReader<R> {
     }
 
     /// Read next batch of gates
-    /// Returns the batch and the number of valid gates in it (0-8)
+    /// Returns the batch and the number of valid gates in it (1-8)
     #[inline]
     pub fn next_batch(&mut self) -> Result<Option<(GateBatch, usize)>> {
-        if self.finished {
-            return Ok(None);
-        }
-
         // Check if we've read all gates
         let total_gates = self.total_gates() as usize;
         if self.total_gates_read >= total_gates {
-            self.finished = true;
             return Ok(None);
         }
 
-        // Ensure we have enough data for a batch
-        const BATCH_SIZE: usize = 97;
-        if !self.ensure_bytes_available(BATCH_SIZE)? {
-            self.finished = true;
-            return Ok(None);
+        // Ensure we have a full batch worth of data
+        self.ensure_bytes_available(GateBatch::SIZE)?;
+
+        // Check if we actually got enough data
+        if self.available_bytes() < GateBatch::SIZE {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "Unexpected end of circuit data",
+            ));
         }
 
-        // Extract batch directly from buffer
-        // Use the safe version to avoid issues
-        let end = self.buffer_pos + BATCH_SIZE;
-        let batch_slice = &self.buffer[self.buffer_pos..end];
-        let mut batch_bytes = [0u8; 97];
-        batch_bytes.copy_from_slice(batch_slice);
+        // Extract batch from buffer
+        let mut batch_bytes = [0u8; GateBatch::SIZE];
+        batch_bytes
+            .copy_from_slice(&self.buffer[self.valid_start..self.valid_start + GateBatch::SIZE]);
         let batch = GateBatch::from_bytes(&batch_bytes);
-        self.buffer_pos += BATCH_SIZE;
+        self.valid_start += GateBatch::SIZE;
 
-        // Calculate how many gates are in this batch
+        // Calculate how many gates are valid in this batch
         let gates_remaining = total_gates - self.total_gates_read;
         let gates_in_batch = gates_remaining.min(8);
-
         self.total_gates_read += gates_in_batch;
 
         Ok(Some((batch, gates_in_batch)))
     }
 
     /// Read next batch of gates as a zero-copy reference
-    /// Returns a reference to the batch and the number of valid gates in it (0-8)
+    ///
+    /// The returned reference is valid only as long as you hold the reference
+    /// and don't call any other methods on this reader. The borrow checker
+    /// enforces this safety guarantee at compile time.
     #[inline]
     pub fn next_batch_ref(&mut self) -> Result<Option<(&GateBatch, usize)>> {
-        if self.finished {
-            return Ok(None);
-        }
-
         // Check if we've read all gates
         let total_gates = self.total_gates() as usize;
         if self.total_gates_read >= total_gates {
-            self.finished = true;
             return Ok(None);
         }
 
-        // Ensure we have enough data for a batch
-        const BATCH_SIZE: usize = 97;
-        if !self.ensure_bytes_available(BATCH_SIZE)? {
-            self.finished = true;
-            return Ok(None);
+        // Ensure we have a full batch worth of data
+        self.ensure_bytes_available(GateBatch::SIZE)?;
+
+        // Check if we actually got enough data
+        if self.available_bytes() < GateBatch::SIZE {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                "Unexpected end of circuit data",
+            ));
         }
 
         // Cast buffer bytes directly to GateBatch reference (zero-copy)
-        let end = self.buffer_pos + BATCH_SIZE;
-        let batch_slice = &self.buffer[self.buffer_pos..end];
+        let batch_slice = &self.buffer[self.valid_start..self.valid_start + GateBatch::SIZE];
         let batch_ref = GateBatch::from_bytes_ref(batch_slice);
-        self.buffer_pos += BATCH_SIZE;
+        self.valid_start += GateBatch::SIZE;
 
-        // Calculate how many gates are in this batch
+        // Calculate how many gates are valid in this batch
         let gates_remaining = total_gates - self.total_gates_read;
         let gates_in_batch = gates_remaining.min(8);
-
         self.total_gates_read += gates_in_batch;
 
         Ok(Some((batch_ref, gates_in_batch)))
     }
 
-    /// Ensure at least `needed` bytes are available in the buffer
+    /// Get number of bytes currently available in buffer
     #[inline]
-    fn ensure_bytes_available(&mut self, needed: usize) -> Result<bool> {
-        let available = self.buffer_len - self.buffer_pos;
-
-        if available >= needed {
-            return Ok(true);
-        }
-
-        // // Prefetch aggressively: refill when buffer is less than 50% full
-        // let buffer_half = self.buffer.len() / 2;
-        if available < needed {
-            self.refill_buffer()?;
-        }
-
-        // Check again after refill
-        Ok(self.buffer_len - self.buffer_pos >= needed)
+    fn available_bytes(&self) -> usize {
+        self.valid_end - self.valid_start
     }
 
-    /// Refill the buffer with more data
-    fn refill_buffer(&mut self) -> Result<()> {
-        // Move remaining data to start of buffer
-        if self.buffer_len > self.buffer_pos {
-            let remaining = self.buffer_len - self.buffer_pos;
-            self.buffer.copy_within(self.buffer_pos..self.buffer_len, 0);
-            self.buffer_len = remaining;
-        } else {
-            self.buffer_len = 0;
+    /// Ensure at least `needed` bytes are available in the buffer
+    fn ensure_bytes_available(&mut self, needed: usize) -> Result<()> {
+        // Fast path: already have enough bytes
+        if self.available_bytes() >= needed {
+            return Ok(());
         }
-        self.buffer_pos = 0;
 
-        // Fill the rest of the buffer
-        let space_available = self.buffer.len() - self.buffer_len;
-        if space_available > 0 {
-            let bytes_read = self.decoder.read(&mut self.buffer[self.buffer_len..])?;
-            self.buffer_len += bytes_read;
+        // Check if file has enough remaining bytes
+        let bytes_remaining_in_file = self.total_bytes - self.bytes_read;
+        let bytes_available_total = self.available_bytes() + bytes_remaining_in_file;
+
+        if bytes_available_total < needed {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::UnexpectedEof,
+                format!(
+                    "Not enough data: need {} bytes but only {} available",
+                    needed, bytes_available_total
+                ),
+            ));
+        }
+
+        // Try to fill first without compacting
+        self.fill_buffer()?;
+
+        // If still not enough space and we can compact, do it now
+        if self.available_bytes() < needed {
+            let space_at_end = self.buffer.len() - self.valid_end;
+            if space_at_end < needed && self.valid_start > 0 {
+                self.compact_buffer();
+                self.fill_buffer()?; // Try filling again after compact
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Move remaining valid data to start of buffer
+    fn compact_buffer(&mut self) {
+        let available = self.available_bytes();
+        if available > 0 && self.valid_start > 0 {
+            self.buffer.copy_within(self.valid_start..self.valid_end, 0);
+            self.valid_start = 0;
+            self.valid_end = available;
+        } else if available == 0 {
+            self.valid_start = 0;
+            self.valid_end = 0;
+        }
+    }
+
+    /// Fill buffer with more data from reader
+    fn fill_buffer(&mut self) -> Result<()> {
+        // Calculate how many bytes we still need to read from the file
+        let mut bytes_remaining = self.total_bytes - self.bytes_read;
+
+        if bytes_remaining == 0 {
+            return Ok(()); // Already read everything
+        }
+
+        // Keep reading until buffer is full or no more data
+        while self.valid_end < self.buffer.len() && bytes_remaining > 0 {
+            // Calculate how much to read this iteration
+            let buffer_space = self.buffer.len() - self.valid_end;
+            let to_read = buffer_space.min(bytes_remaining);
+
+            if to_read == 0 {
+                break; // Buffer is full
+            }
+
+            let bytes_read = self
+                .reader
+                .read(&mut self.buffer[self.valid_end..self.valid_end + to_read])?;
+            dbg!(bytes_read);
+
+            if bytes_read == 0 {
+                // EOF reached but we expected more data
+                if bytes_remaining > 0 {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::UnexpectedEof,
+                        format!("Unexpected EOF: expected {} more bytes", bytes_remaining),
+                    ));
+                }
+                break;
+            }
+
+            self.valid_end += bytes_read;
+            self.bytes_read += bytes_read;
+            bytes_remaining -= bytes_read;
         }
 
         Ok(())
@@ -207,18 +246,8 @@ pub fn read_header<R: Read>(reader: &mut R) -> Result<CircuitHeader> {
     reader.read_exact(&mut header_bytes)?;
 
     Ok(CircuitHeader {
-        xor_gates: u32::from_le_bytes([
-            header_bytes[0],
-            header_bytes[1],
-            header_bytes[2],
-            header_bytes[3],
-        ]),
-        and_gates: u32::from_le_bytes([
-            header_bytes[4],
-            header_bytes[5],
-            header_bytes[6],
-            header_bytes[7],
-        ]),
+        xor_gates: u32::from_le_bytes(header_bytes[0..4].try_into().unwrap()),
+        and_gates: u32::from_le_bytes(header_bytes[4..8].try_into().unwrap()),
     })
 }
 
@@ -226,14 +255,9 @@ pub fn read_header<R: Read>(reader: &mut R) -> Result<CircuitHeader> {
 pub fn read_header_seekable<S: Read + Seek>(reader: &mut S) -> Result<CircuitHeader> {
     use std::io::SeekFrom;
 
-    // Save current position
     let current_pos = reader.stream_position()?;
-
-    // Seek to start and read header
     reader.seek(SeekFrom::Start(0))?;
     let header = read_header(reader)?;
-
-    // Restore position
     reader.seek(SeekFrom::Start(current_pos))?;
 
     Ok(header)
@@ -268,9 +292,10 @@ mod tests {
             writer.finish()?;
         }
 
+        let len = buffer.len();
         // Read back with batch reader
         let cursor = Cursor::new(buffer);
-        let mut reader = CircuitReader::new(cursor)?;
+        let mut reader = CircuitReader::new(cursor, len)?;
 
         assert_eq!(reader.total_gates(), 1000);
         assert_eq!(reader.xor_gates(), 500);
@@ -321,9 +346,10 @@ mod tests {
             writer.finish()?;
         }
 
+        let len = buffer.len();
         // Read back with batch reader
         let cursor = Cursor::new(buffer);
-        let mut reader = CircuitReader::new(cursor)?;
+        let mut reader = CircuitReader::new(cursor, len)?;
 
         // First batch should have 8 gates
         let (batch1, count1) = reader.next_batch()?.unwrap();
@@ -363,9 +389,10 @@ mod tests {
             writer.finish()?;
         }
 
-        // Read back using batch API
+        let len = buffer.len();
+        // Read back with batch reader
         let cursor = Cursor::new(buffer);
-        let mut reader = CircuitReader::new(cursor)?;
+        let mut reader = CircuitReader::new(cursor, len)?;
 
         let mut total_gates = 0;
         while let Some((_, count)) = reader.next_batch()? {
@@ -400,9 +427,10 @@ mod tests {
             writer.finish()?;
         }
 
-        // Read back with zero-copy batch reader
+        let len = buffer.len();
+        // Read back with batch reader
         let cursor = Cursor::new(buffer);
-        let mut reader = CircuitReader::new(cursor)?;
+        let mut reader = CircuitReader::new(cursor, len)?;
 
         let mut total_gates = 0;
         let mut gate_index = 0;

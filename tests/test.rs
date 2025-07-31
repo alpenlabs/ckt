@@ -78,7 +78,7 @@ fn test_batch_serialization() {
     );
 
     let bytes = batch.to_bytes();
-    assert_eq!(bytes.len(), 97);
+    assert_eq!(bytes.len(), GateBatch::SIZE);
 
     let restored = GateBatch::from_bytes(&bytes);
 
@@ -139,33 +139,35 @@ fn test_generic_read_write_with_memory_buffer() {
         cursor.set_position(0);
         let mut reader = CircuitReader::new(cursor).unwrap();
 
+        let (batch, count) = reader.next_batch_ref().unwrap().unwrap();
+        assert_eq!(count, 4);
+
         // Read and verify gates
-        let (gate1, type1) = reader.next_gate().unwrap().unwrap();
+        let (gate1, type1) = batch.get_gate(0);
         assert_eq!(gate1.input1, 100);
         assert_eq!(gate1.input2, 200);
         assert_eq!(gate1.output, 300);
         assert_eq!(type1, GateType::XOR);
 
-        let (gate2, type2) = reader.next_gate().unwrap().unwrap();
+        let (gate2, type2) = batch.get_gate(1);
         assert_eq!(gate2.input1, 400);
         assert_eq!(gate2.input2, 500);
         assert_eq!(gate2.output, 600);
         assert_eq!(type2, GateType::AND);
 
-        let (gate3, type3) = reader.next_gate().unwrap().unwrap();
+        let (gate3, type3) = batch.get_gate(2);
         assert_eq!(gate3.input1, 700);
         assert_eq!(gate3.input2, 800);
         assert_eq!(gate3.output, 900);
         assert_eq!(type3, GateType::XOR);
 
-        let (gate4, type4) = reader.next_gate().unwrap().unwrap();
+        let (gate4, type4) = batch.get_gate(3);
         assert_eq!(gate4.input1, 1000);
         assert_eq!(gate4.input2, 1100);
         assert_eq!(gate4.output, 1200);
         assert_eq!(type4, GateType::AND);
 
         // Should be at end (reader knows from header there are only 4 gates)
-        assert!(reader.next_gate().unwrap().is_none());
         assert_eq!(reader.gates_read(), 4);
     }
 }

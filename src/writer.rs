@@ -1,5 +1,4 @@
 use std::io::{Result, Seek, Write};
-use zstd::Encoder;
 
 use crate::{CompactGate, GateBatch, GateType};
 
@@ -11,7 +10,7 @@ const BATCHES_UNTIL_FLUSH: usize = 1000;
 /// - 8 bytes: header (xor_count, and_count as u32 little-endian)
 /// - Compressed zstd stream of 97-byte batches
 pub struct CircuitWriter<W: Write + Seek> {
-    encoder: Encoder<'static, W>,
+    writer: W,
     current_batch: GateBatch,
     gates_in_batch: usize,
     total_gates_written: usize,
@@ -21,20 +20,12 @@ pub struct CircuitWriter<W: Write + Seek> {
 }
 
 impl<W: Write + Seek> CircuitWriter<W> {
-    pub fn new(writer: W) -> Result<Self> {
-        Self::with_compression_level(writer, 3)
-    }
-
-    /// Create a new compressed writer with the specified compression level
-    pub fn with_compression_level(mut writer: W, level: i32) -> Result<Self> {
+    pub fn new(mut writer: W) -> Result<Self> {
         // Write placeholder header (8 bytes: xor_count, and_count)
         writer.write_all(&[0u8; 8])?;
 
-        // Create in-memory encoder
-        let encoder = Encoder::new(writer, level)?;
-
         Ok(Self {
-            encoder,
+            writer,
             current_batch: GateBatch::new(),
             gates_in_batch: 0,
             total_gates_written: 0,
@@ -63,7 +54,7 @@ impl<W: Write + Seek> CircuitWriter<W> {
             self.batches_waiting_for_flush += 1;
         }
         if self.batches_waiting_for_flush >= BATCHES_UNTIL_FLUSH {
-            self.encoder.flush()?;
+            self.writer.flush()?;
             self.batches_waiting_for_flush = 0;
         }
 
@@ -74,7 +65,7 @@ impl<W: Write + Seek> CircuitWriter<W> {
     fn write_batch_to_encoder(&mut self) -> Result<()> {
         if self.gates_in_batch > 0 {
             let bytes = self.current_batch.to_bytes();
-            self.encoder.write_all(&bytes)?;
+            self.writer.write_all(&bytes)?;
 
             // Reset for next batch
             self.current_batch = GateBatch::new();
@@ -88,18 +79,15 @@ impl<W: Write + Seek> CircuitWriter<W> {
         // Flush any remaining gates
         self.write_batch_to_encoder()?;
 
-        // Finish compression and get compressed data
-        let mut writer = self.encoder.finish()?;
-
         // Seek back to beginning and write actual counts
-        writer.seek(std::io::SeekFrom::Start(0))?;
-        writer.write_all(&self.xor_gates.to_le_bytes())?;
-        writer.write_all(&self.and_gates.to_le_bytes())?;
+        self.writer.seek(std::io::SeekFrom::Start(0))?;
+        self.writer.write_all(&self.xor_gates.to_le_bytes())?;
+        self.writer.write_all(&self.and_gates.to_le_bytes())?;
 
         // Seek to end for any subsequent operations
-        writer.seek(std::io::SeekFrom::End(0))?;
-        writer.flush()?;
+        self.writer.seek(std::io::SeekFrom::End(0))?;
+        self.writer.flush()?;
 
-        Ok((writer, self.total_gates_written))
+        Ok((self.writer, self.total_gates_written))
     }
 }

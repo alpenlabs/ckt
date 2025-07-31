@@ -3,7 +3,7 @@ mod writer;
 
 use ckt::reader::CircuitReader;
 use ckt::writer::CircuitWriter;
-use ckt::{CompactGate, GateType};
+use ckt::{CompactGate, GateType, hp};
 use clap::{Parser, Subcommand};
 use indicatif::{ProgressBar, ProgressStyle};
 use kanal::unbounded_async;
@@ -17,7 +17,6 @@ use std::time::Instant;
 use stream::BufferedLineStream;
 
 use crate::writer::RemoteWriter;
-use cynosure::site_d::ringbuf::RingBuf;
 
 use mimalloc::MiMalloc;
 
@@ -46,10 +45,6 @@ enum Commands {
         /// Output CKT format file (defaults to input.ckt)
         #[arg(short, long, value_name = "OUTPUT")]
         output: Option<PathBuf>,
-
-        /// Compression level (0-22, default: 3)
-        #[arg(short = 'l', long, default_value = "3")]
-        compression_level: i32,
     },
 
     /// Verify and analyze a circuit file
@@ -107,18 +102,14 @@ fn main() -> Result<()> {
 
 async fn async_main(cli: Cli) -> Result<()> {
     match cli.command {
-        Commands::Convert {
-            input,
-            output,
-            compression_level,
-        } => {
+        Commands::Convert { input, output } => {
             let output = output.unwrap_or_else(|| {
                 let mut path = input.clone();
                 path.set_extension("ckt");
                 path
             });
 
-            convert_bristol_to_ckt(&input, &output, compression_level).await?;
+            convert_bristol_to_ckt(&input, &output).await?;
         }
 
         Commands::Verify { file, detailed } => {
@@ -223,11 +214,7 @@ fn parse_bristol_gate_line(line: &str) -> Result<(GateType, CompactGate)> {
 }
 
 /// Convert Bristol format to CKT format with parallel parsing
-async fn convert_bristol_to_ckt(
-    bristol_path: &Path,
-    ckt_path: &Path,
-    compression_level: i32,
-) -> Result<()> {
+async fn convert_bristol_to_ckt(bristol_path: &Path, ckt_path: &Path) -> Result<()> {
     println!(
         "Converting {} -> {}",
         bristol_path.display(),
@@ -286,7 +273,7 @@ async fn convert_bristol_to_ckt(
     let ckt_path_clone = ckt_path.to_owned();
     let encoder_thread = monoio::spawn_blocking(move || {
         let writer = RemoteWriter::new(writer_tx.to_sync(), 0);
-        let mut writer = CircuitWriter::with_compression_level(writer, compression_level)
+        let mut writer = CircuitWriter::new(writer)
             .map_err(|e| format!("Create circuit writer error: {}", e))?;
         let mut stats = ConversionStats::new();
         let start_time = Instant::now();
@@ -371,92 +358,65 @@ async fn convert_bristol_to_ckt(
 
 /// Verify a CKT format file
 async fn verify_ckt_file(path: &Path) -> Result<VerificationStats> {
-    let ring_buf = RingBuf::<u8>::new(64 * 1024 * 1024); // 64 MiB
-    let (mut writer, reader) = ring_buf.split();
+    let file = monoio::fs::File::open(path).await?;
+    let mut reader = hp::reader::CircuitReader::new(file, 1_000_000)
+        .await
+        .map_err(|e| format!("Failed to create CircuitReader: {}", e))?;
 
-    let path_clone = path.to_owned();
-    let reader_task = monoio::spawn(async move {
-        let file = monoio::fs::File::open(path_clone)
-            .await
-            .map_err(|e| format!("Failed to open file: {}", e))?;
+    // Get gate counts from reader
+    let total_gates = reader.total_gates();
+    let xor_gates = reader.xor_gates();
+    let and_gates = reader.and_gates();
 
-        let metadata = file
-            .metadata()
-            .await
-            .map_err(|e| format!("Failed to get file metadata: {}", e))?;
-        let size = metadata.len();
-        let mut pos = 0;
+    let pb = ProgressBar::new(total_gates as u64);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("{bar:40.cyan/blue} {pos:>7}/{len:7} [{elapsed_precise}] {msg} [{per_sec}]")
+            .unwrap(),
+    );
+    pb.set_message("Verifying CKT circuit...");
 
-        let mut buffer = Vec::with_capacity(64 * 1024 * 1024);
+    let start_time = Instant::now();
+    let mut stats = VerificationStats::new();
+    stats.xor_gates = xor_gates as usize;
+    stats.and_gates = and_gates as usize;
+    stats.total_gates = total_gates as usize;
 
-        while pos < size {
-            let buf = std::mem::take(&mut buffer);
-            let (res, buf) = file.read_at(buf, pos).await;
-            let bytes_read = res.map_err(|e| format!("Failed to read file: {}", e))?;
-            writer.push_slice(&buf[..bytes_read]).await;
-            pos += bytes_read as u64;
-            buffer = buf;
-        }
+    let mut recorded_xors = 0;
+    let mut recorded_ands = 0;
 
-        Ok::<(), String>(())
-    });
-    let path = path.to_owned();
-    let decoder_task = monoio::spawn_blocking(move || {
-        // sleep for 50ms so the reader is ready
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        let mut reader = CircuitReader::new(reader)
-            .map_err(|e| format!("Failed to create CircuitReader: {}", e))?;
-
-        println!("Reader created");
-
-        // Get gate counts from reader
-        let total_gates = reader.total_gates();
-        let xor_gates = reader.xor_gates();
-        let and_gates = reader.and_gates();
-
-        let pb = ProgressBar::new(total_gates as u64);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template(
-                    "{bar:40.cyan/blue} {pos:>7}/{len:7} [{elapsed_precise}] {msg} [{per_sec}]",
-                )
-                .unwrap(),
-        );
-        pb.set_message("Verifying CKT circuit...");
-
-        let start_time = Instant::now();
-        let mut stats = VerificationStats::new();
-        stats.xor_gates = xor_gates as usize;
-        stats.and_gates = and_gates as usize;
-        stats.total_gates = total_gates as usize;
-
-        // Read through to verify file integrity
-        let mut verified_count = 0;
-        while let Some((_, count)) = reader
-            .next_batch_ref()
-            .map_err(|e| format!("Error reading gate: {}", e))?
-        {
-            verified_count += count;
-            if verified_count % 1_000_000 == 0 {
-                pb.set_position(verified_count as u64);
+    // Read through to verify file integrity
+    let mut verified_count = 0;
+    while let Some((batch, count)) = reader
+        .next_batch()
+        .await
+        .map_err(|e| format!("Error reading gate: {}", e))?
+    {
+        for i in 0..count {
+            match batch.gate_type(i) {
+                GateType::XOR => recorded_xors += 1,
+                GateType::AND => recorded_ands += 1,
             }
         }
+        verified_count += count;
+        if verified_count % 10_000_000 == 0 {
+            pb.set_position(verified_count as u64);
+        }
+    }
 
-        pb.finish_with_message(format!(
-            "✓ Verified {} gates",
-            format_number(stats.total_gates)
-        ));
+    assert_eq!(recorded_ands, and_gates);
+    assert_eq!(recorded_xors, xor_gates);
 
-        stats.file_size = std::fs::metadata(path)
-            .map_err(|e| format!("Error getting file metadata: {}", e))?
-            .len();
-        stats.processing_time = start_time.elapsed();
+    pb.finish_with_message(format!(
+        "✓ Verified {} gates",
+        format_number(stats.total_gates)
+    ));
 
-        Ok::<_, String>(stats)
-    });
-
-    reader_task.await.unwrap();
-    Ok(decoder_task.await.unwrap().unwrap())
+    stats.file_size = std::fs::metadata(path)
+        .map_err(|e| format!("Error getting file metadata: {}", e))?
+        .len();
+    stats.processing_time = start_time.elapsed();
+    Ok(stats)
 }
 
 /// Verify a Bristol format file
@@ -524,9 +484,10 @@ fn print_file_info(path: &Path) -> Result<()> {
     if path.extension().and_then(|s| s.to_str()) == Some("ckt") {
         // Quick read of CKT header using reader
         let file = File::open(path)?;
+        let len = file.metadata()?.len() as usize;
         let buf_reader = BufReader::new(file);
 
-        match CircuitReader::new(buf_reader) {
+        match CircuitReader::new(buf_reader, len) {
             Ok(reader) => {
                 let gate_count = reader.total_gates();
                 println!("Format: CKT (compressed binary)");
@@ -626,8 +587,9 @@ fn extract_ckt_to_bristol(ckt_path: &Path, bristol_path: &Path) -> Result<()> {
     );
 
     let input_file = File::open(ckt_path)?;
+    let len = input_file.metadata()?.len() as usize;
     let buf_reader = BufReader::new(input_file);
-    let mut reader = CircuitReader::new(buf_reader)?;
+    let mut reader = CircuitReader::new(buf_reader, len)?;
 
     // Get gate count from reader
     let gate_count = reader.total_gates();
