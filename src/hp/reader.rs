@@ -1,7 +1,7 @@
 use monoio::fs::File;
 
-use super::hints::{likely, prefetch_read_data, unlikely};
 use crate::{CircuitHeader, GateBatch};
+use cynosure::hints::{likely, prefetch_read_data, unlikely};
 use std::io::{Read, Result, Seek};
 
 /// High performance file reader for CKT format from a [monoio::fs::File]

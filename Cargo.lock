@@ -154,6 +154,7 @@ checksum = "9555578bc9e57714c812a1f84e4fc5b4d21fcb063490c624de019f7464c91268"
 name = "ckt"
 version = "0.1.0"
 dependencies = [
+ "cynosure",
  "monoio",
 ]
 
@@ -256,6 +257,12 @@ name = "crossbeam-utils"
 version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d0a5c400df2834b80a4c3327b3aad3a4c4cd4de0629063962b03235697506a28"
+
+[[package]]
+name = "cynosure"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "702df65d44cb1b12630f8e3b9ce3e79251b1db513c9b0f32cd15fb89bae65abb"
 
 [[package]]
 name = "difflib"

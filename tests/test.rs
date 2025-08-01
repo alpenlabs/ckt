@@ -137,7 +137,8 @@ fn test_generic_read_write_with_memory_buffer() {
 
         // Reset and create reader
         cursor.set_position(0);
-        let mut reader = CircuitReader::new(cursor).unwrap();
+        let buffer_len = buffer.get_ref().len();
+        let mut reader = CircuitReader::new(cursor, buffer_len).unwrap();
 
         let (batch, count) = reader.next_batch_ref().unwrap().unwrap();
         assert_eq!(count, 4);
@@ -295,14 +296,18 @@ fn test_partial_batch_handling() {
         assert_eq!(header.and_gates, 5);
 
         buffer.set_position(0);
-        let mut reader = CircuitReader::new(buffer).unwrap();
+        let buffer_len = buffer.get_ref().len();
+        let mut reader = CircuitReader::new(buffer, buffer_len).unwrap();
 
         let mut count = 0;
-        while let Some((gate, _)) = reader.next_gate().unwrap() {
-            assert_eq!(gate.input1, count * 3);
-            assert_eq!(gate.input2, count * 3 + 1);
-            assert_eq!(gate.output, count * 3 + 2);
-            count += 1;
+        while let Some((batch, gates_in_batch)) = reader.next_batch().unwrap() {
+            for i in 0..gates_in_batch {
+                let (gate, _) = batch.get_gate(i);
+                assert_eq!(gate.input1, count * 3);
+                assert_eq!(gate.input2, count * 3 + 1);
+                assert_eq!(gate.output, count * 3 + 2);
+                count += 1;
+            }
         }
         // Should read exactly 10 gates (as specified in header)
         assert_eq!(count, 10);
@@ -328,8 +333,9 @@ fn test_empty_circuit() {
         assert_eq!(header.and_gates, 0);
 
         buffer.set_position(0);
-        let mut reader = CircuitReader::new(buffer).unwrap();
-        assert!(reader.next_gate().unwrap().is_none());
+        let buffer_len = buffer.get_ref().len();
+        let mut reader = CircuitReader::new(buffer, buffer_len).unwrap();
+        assert!(reader.next_batch().unwrap().is_none());
     }
 }
 
@@ -363,15 +369,19 @@ fn test_large_circuit_streaming() {
         assert_eq!(header.and_gates, 0);
 
         buffer.set_position(0);
-        let mut reader = CircuitReader::new(buffer).unwrap();
+        let buffer_len = buffer.get_ref().len();
+        let mut reader = CircuitReader::new(buffer, buffer_len).unwrap();
 
         let mut count = 0;
-        while let Some((gate, gate_type)) = reader.next_gate().unwrap() {
-            assert_eq!(gate.input1, count);
-            assert_eq!(gate.input2, count + 1);
-            assert_eq!(gate.output, count + 2);
-            assert_eq!(gate_type, GateType::XOR);
-            count += 1;
+        while let Some((batch, gates_in_batch)) = reader.next_batch().unwrap() {
+            for i in 0..gates_in_batch {
+                let (gate, gate_type) = batch.get_gate(i);
+                assert_eq!(gate.input1, count);
+                assert_eq!(gate.input2, count + 1);
+                assert_eq!(gate.output, count + 2);
+                assert_eq!(gate_type, GateType::XOR);
+                count += 1;
+            }
         }
         assert_eq!(count, GATE_COUNT);
     }
@@ -478,13 +488,14 @@ fn test_reader_with_exact_buffer_boundaries() {
         assert_eq!(header.and_gates, 0);
 
         buffer.set_position(0);
-        let mut reader = CircuitReader::new(buffer).unwrap();
+        let buffer_len = buffer.get_ref().len();
+        let mut reader = CircuitReader::new(buffer, buffer_len).unwrap();
 
         let mut count = 0;
-        while reader.next_gate().unwrap().is_some() {
-            count += 1;
+        while let Some((_, gates_in_batch)) = reader.next_batch().unwrap() {
+            count += gates_in_batch;
         }
-        assert_eq!(count, GATE_COUNT);
+        assert_eq!(count, GATE_COUNT as usize);
     }
 }
 
@@ -525,14 +536,18 @@ fn test_seekable_header_reading() {
         assert_eq!(buffer.position(), 0);
 
         // Now read the circuit normally
-        let mut reader = CircuitReader::new(buffer).unwrap();
+        let buffer_len = buffer.get_ref().len();
+        let mut reader = CircuitReader::new(buffer, buffer_len).unwrap();
         let mut count = 0;
-        while let Some((gate, _)) = reader.next_gate().unwrap() {
-            // Verify expected gates
-            assert_eq!(gate.input1, count * 2);
-            assert_eq!(gate.input2, count * 2 + 1);
-            assert_eq!(gate.output, count * 3);
-            count += 1;
+        while let Some((batch, gates_in_batch)) = reader.next_batch().unwrap() {
+            for i in 0..gates_in_batch {
+                let (gate, _) = batch.get_gate(i);
+                // Verify expected gates
+                assert_eq!(gate.input1, count * 2);
+                assert_eq!(gate.input2, count * 2 + 1);
+                assert_eq!(gate.output, count * 3);
+                count += 1;
+            }
         }
         // Should read exactly 42 gates (as specified in header)
         assert_eq!(count, EXPECTED_GATES);
