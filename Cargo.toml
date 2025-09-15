@@ -12,6 +12,7 @@ monoio = { version = "0.2.4", features = ["sync"], optional = true }
 
 [dev-dependencies]
 monoio = { version = "0.2.4", features = ["sync"] }
+tempfile = "3.0"
 
 [features]
 default = ["high-performance"]

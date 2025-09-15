@@ -156,6 +156,7 @@ version = "0.1.0"
 dependencies = [
  "cynosure",
  "monoio",
+ "tempfile",
 ]
 
 [[package]]

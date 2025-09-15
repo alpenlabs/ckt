@@ -2,6 +2,7 @@ pub mod reader;
 
 #[cfg(feature = "high-performance")]
 pub mod hp;
+pub mod v2;
 pub mod writer;
 
 /// A compact representation of a gate with 32-bit wire indices

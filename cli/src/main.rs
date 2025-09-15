@@ -86,6 +86,21 @@ enum Commands {
         #[arg(short, long, value_name = "OUTPUT")]
         output: Option<PathBuf>,
     },
+
+    /// Search for gates with specific inputs or outputs in a CKT file
+    Search {
+        /// Input CKT format file
+        #[arg(value_name = "FILE")]
+        file: PathBuf,
+
+        /// Input wire IDs to search for (can specify multiple)
+        #[arg(short, long, value_name = "INPUT", num_args = 1..)]
+        inputs: Vec<u32>,
+
+        /// Output wire IDs to search for (can specify multiple)
+        #[arg(short, long, value_name = "OUTPUT", num_args = 1..)]
+        outputs: Vec<u32>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -144,6 +159,14 @@ async fn async_main(cli: Cli) -> Result<()> {
             });
 
             extract_ckt_to_bristol(&input, &output)?;
+        }
+
+        Commands::Search {
+            file,
+            inputs,
+            outputs,
+        } => {
+            search_ckt_file(&file, &inputs, &outputs).await?;
         }
     }
 
@@ -639,7 +662,113 @@ fn extract_ckt_to_bristol(ckt_path: &Path, bristol_path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Statistics from verification
+/// Search for gates with specific inputs or outputs in a CKT file
+async fn search_ckt_file(file: &Path, inputs: &[u32], outputs: &[u32]) -> Result<()> {
+    use ckt::hp::reader::CircuitReader;
+    use monoio::fs::File;
+
+    if inputs.is_empty() && outputs.is_empty() {
+        eprintln!("Error: Must specify at least one input (-i) or output (-o) to search for");
+        std::process::exit(1);
+    }
+
+    println!("🔍 Searching CKT file: {}", file.display());
+    println!("   Looking for:");
+    if !inputs.is_empty() {
+        println!("   - Inputs: {:?}", inputs);
+    }
+    if !outputs.is_empty() {
+        println!("   - Outputs: {:?}", outputs);
+    }
+    println!();
+
+    let start = std::time::Instant::now();
+
+    // Open file with high performance reader
+    let file_handle = File::open(file).await?;
+    let mut reader = CircuitReader::new(file_handle, 1024).await?;
+
+    println!("📊 Circuit Info:");
+    println!(
+        "   Total gates: {}",
+        format_number(reader.total_gates() as usize)
+    );
+    println!(
+        "   XOR gates: {}",
+        format_number(reader.xor_gates() as usize)
+    );
+    println!(
+        "   AND gates: {}",
+        format_number(reader.and_gates() as usize)
+    );
+    println!();
+
+    let mut gate_index = 0u64;
+    let mut matches_found = 0u64;
+
+    println!("🔎 Searching for matches...\n");
+
+    // Process all gate batches
+    while let Some((batch, gates_in_batch)) = reader.next_batch().await? {
+        for i in 0..gates_in_batch {
+            let (gate, gate_type) = batch.get_gate(i);
+
+            let mut is_match = false;
+            let mut match_reason = Vec::new();
+
+            // Check if any of the inputs match
+            for &input in inputs {
+                if gate.input1 == input {
+                    is_match = true;
+                    match_reason.push(format!("input1={}", input));
+                }
+                if gate.input2 == input {
+                    is_match = true;
+                    match_reason.push(format!("input2={}", input));
+                }
+            }
+
+            // Check if the output matches
+            for &output in outputs {
+                if gate.output == output {
+                    is_match = true;
+                    match_reason.push(format!("output={}", output));
+                }
+            }
+
+            if is_match {
+                matches_found += 1;
+                println!("✓ Match #{} at gate index {}", matches_found, gate_index);
+                println!("  Type: {:?}", gate_type);
+                println!(
+                    "  Gate: ({}, {}) -> {}",
+                    gate.input1, gate.input2, gate.output
+                );
+                println!("  Matched: {}", match_reason.join(", "));
+                println!();
+            }
+
+            gate_index += 1;
+        }
+    }
+
+    let elapsed = start.elapsed();
+
+    println!("📈 Search Complete:");
+    println!("   Gates examined: {}", format_number(gate_index as usize));
+    println!(
+        "   Matches found: {}",
+        format_number(matches_found as usize)
+    );
+    println!("   Time: {:.2?}", elapsed);
+
+    if matches_found == 0 {
+        println!("\n⚠️  No matching gates found");
+    }
+
+    Ok(())
+}
+
 #[derive(Debug)]
 struct VerificationStats {
     total_gates: usize,
