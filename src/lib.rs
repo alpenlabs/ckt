@@ -4,6 +4,8 @@ pub mod reader;
 pub mod hp;
 pub mod writer;
 
+mod analysis;
+
 /// A compact representation of a gate with 32-bit wire indices
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct CompactGate {
