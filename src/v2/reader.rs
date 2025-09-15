@@ -274,13 +274,7 @@ impl<R: Read> CircuitReaderV2<R> {
 
         // Determine the length from the first byte
         let first_byte = self.buffer[self.buffer_offset];
-        let length = match first_byte >> 6 {
-            0b00 => 1, // Most common case for small values
-            0b01 => 2,
-            0b10 => 4,
-            0b11 => 8, // Least common case
-            _ => unreachable!(),
-        };
+        let length = 1 << (first_byte >> 6); // Branchless: 00->1, 01->2, 10->4, 11->8
 
         // Now ensure we have that many bytes
         if unlikely(!self.ensure_bytes_available(length)?) {
@@ -303,13 +297,7 @@ impl<R: Read> CircuitReaderV2<R> {
 
         // Determine the length from the first byte
         let first_byte = self.buffer[self.buffer_offset];
-        let length = match first_byte >> 6 {
-            0b00 => 1, // Most common case for relative wire IDs
-            0b01 => 2,
-            0b10 => 4,
-            0b11 => 8, // Least common case
-            _ => unreachable!(),
-        };
+        let length = 1 << (first_byte >> 6); // Branchless: 00->1, 01->2, 10->4, 11->8
 
         // Now ensure we have that many bytes
         if unlikely(!self.ensure_bytes_available(length)?) {

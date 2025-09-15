@@ -85,13 +85,11 @@ impl StandardVarInt {
 
         let first = buffer[0];
 
-        let (length, mask) = match first >> 6 {
-            0b00 => (1, 0x3F), // 0xxxxxxx
-            0b01 => (2, 0x3F), // 01xxxxxx
-            0b10 => (4, 0x3F), // 10xxxxxx
-            0b11 => (8, 0x3F), // 11xxxxxx
-            _ => unreachable!(),
-        };
+        // Branchless length computation: 00->1, 01->2, 10->4, 11->8
+        let length = 1 << (first >> 6);
+
+        // Branchless mask computation: 0xxxxxxx->0x7F, others->0x3F
+        let mask = 0x3F + ((first >> 6 == 0) as u8) * 0x40;
 
         if unlikely(buffer.len() < length) {
             return Err(Error::new(
@@ -251,13 +249,9 @@ impl FlaggedVarInt {
 
         let first = buffer[0];
 
-        let (length, rel_bit, mask) = match first >> 6 {
-            0b00 => (1, (first >> 5) & 1, 0x1F), // 00rxxxxx
-            0b01 => (2, (first >> 5) & 1, 0x1F), // 01rxxxxx
-            0b10 => (4, (first >> 5) & 1, 0x1F), // 10rxxxxx
-            0b11 => (8, (first >> 5) & 1, 0x1F), // 11rxxxxx
-            _ => unreachable!(),
-        };
+        let length = 1 << (first >> 6);
+        let rel_bit = (first >> 5) & 1;
+        let mask = 0x1F; // Always 5 bits for FlaggedVarInt
 
         if unlikely(buffer.len() < length) {
             return Err(Error::new(
