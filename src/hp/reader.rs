@@ -108,6 +108,45 @@ impl CircuitReader {
         Ok(Some((batch_ref, gates_in_batch)))
     }
 
+    /// Skip a number of batches without processing them
+    pub async fn skip_batches(&mut self, num_batches: usize) -> Result<()> {
+        if num_batches == 0 {
+            return Ok(());
+        }
+
+        let bytes_to_skip = num_batches * GateBatch::SIZE;
+        let gates_to_skip = (num_batches * 8).min(self.gates_remaining);
+
+        // Update gates remaining
+        self.gates_remaining = self.gates_remaining.saturating_sub(gates_to_skip);
+
+        // First, skip any data remaining in the buffer
+        let buffer_remaining = self.max_valid_bytes - self.buffer_offset;
+        if buffer_remaining > 0 {
+            let skip_from_buffer = buffer_remaining.min(bytes_to_skip);
+            self.buffer_offset += skip_from_buffer;
+
+            if skip_from_buffer == bytes_to_skip {
+                return Ok(());
+            }
+
+            // If we've consumed the entire buffer, reset it
+            if self.buffer_offset >= self.max_valid_bytes {
+                self.buffer_offset = 0;
+                self.max_valid_bytes = 0;
+            }
+
+            // Calculate remaining bytes to skip from file
+            let remaining_to_skip = bytes_to_skip - skip_from_buffer;
+            self.bytes_read += remaining_to_skip as u64;
+        } else {
+            // Buffer is empty, skip directly in file
+            self.bytes_read += bytes_to_skip as u64;
+        }
+
+        Ok(())
+    }
+
     /// Fill buffer with more raw gates. Only call when self.buffer_offset == self.max_valid_bytes
     ///
     /// This will read bytes into self.buffer. It guarantees that this data's length is a multiple of GateBatch::SIZE.
