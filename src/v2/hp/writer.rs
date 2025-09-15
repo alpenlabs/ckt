@@ -1,6 +1,6 @@
 use cynosure::hints::{likely, unlikely};
 use monoio::fs::File;
-use std::io::{Error, ErrorKind, Result};
+use std::io::Result;
 
 use crate::v2::{CircuitHeaderV2, Gate, GateType, Level, VERSION, varints::*};
 
@@ -92,27 +92,6 @@ impl CircuitWriterV2 {
 
     /// Write a single gate with optimal wire ID encoding
     async fn write_gate(&mut self, gate: &Gate, gate_type: GateType) -> Result<()> {
-        // Validate gate against circuit constraints
-        if unlikely(gate.input1 >= self.wire_counter || gate.input2 >= self.wire_counter) {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                format!(
-                    "Gate inputs ({}, {}) reference unavailable wires (counter: {})",
-                    gate.input1, gate.input2, self.wire_counter
-                ),
-            ));
-        }
-
-        if unlikely(gate.output != self.wire_counter) {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                format!(
-                    "Gate output {} does not match expected wire counter {}",
-                    gate.output, self.wire_counter
-                ),
-            ));
-        }
-
         // Encode input1 with optimal encoding
         let input1_varint = FlaggedVarInt::optimal_encoding(gate.input1, self.wire_counter)?;
         let mut temp_buf = [0u8; 8]; // Max FlaggedVarInt size
