@@ -2,7 +2,7 @@
 //!
 //! Implements two varint types:
 //! - StandardVarInt: Standard QUIC varint encoding
-//! - WireVarInt: Modified QUIC varint with relative/absolute bit
+//! - FlaggedVarInt: Modified QUIC varint with context-dependent flag bit
 
 use cynosure::hints::{likely, unlikely};
 use std::io::{Error, ErrorKind, Result};
@@ -123,18 +123,18 @@ impl StandardVarInt {
     }
 }
 
-/// Wire ID varint with relative/absolute encoding bit
+/// Flagged varint with context-dependent flag bit
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct WireVarInt {
+pub struct FlaggedVarInt {
     value: u64,
     is_relative: bool,
 }
 
-impl WireVarInt {
+impl FlaggedVarInt {
     /// Maximum value that can be encoded (2^61 - 1)
     pub const MAX_VALUE: u64 = (1u64 << 61) - 1;
 
-    /// Create a new absolute WireVarInt
+    /// Create a new absolute FlaggedVarInt
     pub fn absolute(value: u64) -> Result<Self> {
         if value > Self::MAX_VALUE {
             return Err(Error::new(
@@ -142,13 +142,13 @@ impl WireVarInt {
                 format!("Value {} exceeds maximum {}", value, Self::MAX_VALUE),
             ));
         }
-        Ok(WireVarInt {
+        Ok(FlaggedVarInt {
             value,
             is_relative: false,
         })
     }
 
-    /// Create a new relative WireVarInt
+    /// Create a new relative FlaggedVarInt
     pub fn relative(value: u64) -> Result<Self> {
         if value > Self::MAX_VALUE {
             return Err(Error::new(
@@ -156,10 +156,29 @@ impl WireVarInt {
                 format!("Value {} exceeds maximum {}", value, Self::MAX_VALUE),
             ));
         }
-        Ok(WireVarInt {
+        Ok(FlaggedVarInt {
             value,
             is_relative: true,
         })
+    }
+
+    /// Create a new FlaggedVarInt with arbitrary flag meaning
+    pub fn with_flag(value: u64, flag: bool) -> Result<Self> {
+        if value > Self::MAX_VALUE {
+            return Err(Error::new(
+                ErrorKind::InvalidData,
+                format!("Value {} exceeds maximum {}", value, Self::MAX_VALUE),
+            ));
+        }
+        Ok(FlaggedVarInt {
+            value,
+            is_relative: flag,
+        })
+    }
+
+    /// Get the flag value (context-dependent meaning)
+    pub fn flag(self) -> bool {
+        self.is_relative
     }
 
     /// Get the raw value
@@ -254,7 +273,7 @@ impl WireVarInt {
             value = (value << 8) | (buffer[i] as u64);
         }
 
-        Ok((WireVarInt { value, is_relative }, length))
+        Ok((FlaggedVarInt { value, is_relative }, length))
     }
 
     /// Get the encoded size in bytes for a given value
@@ -279,7 +298,7 @@ impl WireVarInt {
         }
     }
 
-    /// Choose optimal encoding (absolute vs relative) and create WireVarInt
+    /// Choose optimal encoding (absolute vs relative) and create FlaggedVarInt
     pub fn optimal_encoding(absolute_id: u64, counter: u64) -> Result<Self> {
         let relative_value = counter.saturating_sub(absolute_id);
 
@@ -328,7 +347,7 @@ mod tests {
     }
 
     #[test]
-    fn test_wire_varint_encode_decode() {
+    fn test_flagged_varint_encode_decode() {
         let test_values = [
             (0u64, false),
             (0u64, true),
@@ -342,17 +361,17 @@ mod tests {
 
         for &(value, is_relative) in &test_values {
             let varint = if is_relative {
-                WireVarInt::relative(value).unwrap()
+                FlaggedVarInt::relative(value).unwrap()
             } else {
-                WireVarInt::absolute(value).unwrap()
+                FlaggedVarInt::absolute(value).unwrap()
             };
 
             let mut buffer = vec![0u8; 16]; // Max size
             let encoded_size = varint.encode(&mut buffer).unwrap();
 
-            assert_eq!(encoded_size, WireVarInt::encoded_size(value));
+            assert_eq!(encoded_size, FlaggedVarInt::encoded_size(value));
 
-            let (decoded, bytes_consumed) = WireVarInt::decode(&buffer).unwrap();
+            let (decoded, bytes_consumed) = FlaggedVarInt::decode(&buffer).unwrap();
             assert_eq!(decoded.value(), value);
             assert_eq!(decoded.is_relative(), is_relative);
             assert_eq!(bytes_consumed, encoded_size);
@@ -360,15 +379,28 @@ mod tests {
     }
 
     #[test]
-    fn test_wire_varint_decode_to_absolute() {
+    fn test_with_flag() {
+        let varint = FlaggedVarInt::with_flag(42, true).unwrap();
+        assert_eq!(varint.value(), 42);
+        assert_eq!(varint.flag(), true);
+        assert_eq!(varint.is_relative(), true);
+
+        let varint = FlaggedVarInt::with_flag(100, false).unwrap();
+        assert_eq!(varint.value(), 100);
+        assert_eq!(varint.flag(), false);
+        assert_eq!(varint.is_absolute(), true);
+    }
+
+    #[test]
+    fn test_flagged_varint_decode_to_absolute() {
         let counter = 1000u64;
 
         // Test absolute encoding
-        let abs_varint = WireVarInt::absolute(500).unwrap();
+        let abs_varint = FlaggedVarInt::absolute(500).unwrap();
         assert_eq!(abs_varint.decode_to_absolute(counter), 500);
 
         // Test relative encoding
-        let rel_varint = WireVarInt::relative(50).unwrap();
+        let rel_varint = FlaggedVarInt::relative(50).unwrap();
         assert_eq!(rel_varint.decode_to_absolute(counter), 950); // 1000 - 50
     }
 
@@ -377,12 +409,12 @@ mod tests {
         let counter = 1000u64;
 
         // Absolute should be chosen for small absolute values
-        let varint = WireVarInt::optimal_encoding(5, counter).unwrap();
+        let varint = FlaggedVarInt::optimal_encoding(5, counter).unwrap();
         assert!(varint.is_absolute());
         assert_eq!(varint.value(), 5);
 
         // Relative should be chosen for recent references
-        let varint = WireVarInt::optimal_encoding(995, counter).unwrap();
+        let varint = FlaggedVarInt::optimal_encoding(995, counter).unwrap();
         assert!(varint.is_relative());
         assert_eq!(varint.value(), 5); // 1000 - 995
     }
@@ -395,23 +427,23 @@ mod tests {
         assert_eq!(StandardVarInt::encoded_size(16383), 2);
         assert_eq!(StandardVarInt::encoded_size(16384), 4);
 
-        assert_eq!(WireVarInt::encoded_size(0), 1);
-        assert_eq!(WireVarInt::encoded_size(31), 1);
-        assert_eq!(WireVarInt::encoded_size(32), 2);
-        assert_eq!(WireVarInt::encoded_size(8191), 2);
-        assert_eq!(WireVarInt::encoded_size(8192), 4);
+        assert_eq!(FlaggedVarInt::encoded_size(0), 1);
+        assert_eq!(FlaggedVarInt::encoded_size(31), 1);
+        assert_eq!(FlaggedVarInt::encoded_size(32), 2);
+        assert_eq!(FlaggedVarInt::encoded_size(8191), 2);
+        assert_eq!(FlaggedVarInt::encoded_size(8192), 4);
     }
 
     #[test]
     fn test_max_value_limits() {
         // Should succeed at max value
         assert!(StandardVarInt::new(StandardVarInt::MAX_VALUE).is_ok());
-        assert!(WireVarInt::absolute(WireVarInt::MAX_VALUE).is_ok());
-        assert!(WireVarInt::relative(WireVarInt::MAX_VALUE).is_ok());
+        assert!(FlaggedVarInt::absolute(FlaggedVarInt::MAX_VALUE).is_ok());
+        assert!(FlaggedVarInt::relative(FlaggedVarInt::MAX_VALUE).is_ok());
 
         // Should fail above max value
         assert!(StandardVarInt::new(StandardVarInt::MAX_VALUE + 1).is_err());
-        assert!(WireVarInt::absolute(WireVarInt::MAX_VALUE + 1).is_err());
-        assert!(WireVarInt::relative(WireVarInt::MAX_VALUE + 1).is_err());
+        assert!(FlaggedVarInt::absolute(FlaggedVarInt::MAX_VALUE + 1).is_err());
+        assert!(FlaggedVarInt::relative(FlaggedVarInt::MAX_VALUE + 1).is_err());
     }
 }

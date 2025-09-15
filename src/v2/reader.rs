@@ -117,15 +117,23 @@ impl<R: Read> CircuitReaderV2<R> {
             return Ok(None);
         }
 
-        // Read level header (num_xor, num_and as StandardVarInts)
-        let num_xor = match self.read_standard_varint()? {
+        // Read level header (num_xor as FlaggedVarInt with AND gate flag)
+        let num_xor_flagged = match self.read_flagged_varint()? {
             Some(val) => val,
             None => return Ok(None),
         };
 
-        let num_and = match self.read_standard_varint()? {
-            Some(val) => val,
-            None => return Ok(None),
+        let num_xor = num_xor_flagged.value();
+        let has_and_gates = num_xor_flagged.flag();
+
+        // Only read num_and if flag indicates AND gates are present
+        let num_and = if has_and_gates {
+            match self.read_standard_varint()? {
+                Some(val) => val,
+                None => return Ok(None),
+            }
+        } else {
+            0
         };
 
         if unlikely(num_xor == 0 && num_and == 0) {
@@ -158,15 +166,23 @@ impl<R: Read> CircuitReaderV2<R> {
             return Ok(None);
         }
 
-        // Read level header
-        let num_xor = match self.read_standard_varint()? {
+        // Read level header (num_xor as FlaggedVarInt with AND gate flag)
+        let num_xor_flagged = match self.read_flagged_varint()? {
             Some(val) => val,
             None => return Ok(None),
         };
 
-        let num_and = match self.read_standard_varint()? {
-            Some(val) => val,
-            None => return Ok(None),
+        let num_xor = num_xor_flagged.value();
+        let has_and_gates = num_xor_flagged.flag();
+
+        // Only read num_and if flag indicates AND gates are present
+        let num_and = if has_and_gates {
+            match self.read_standard_varint()? {
+                Some(val) => val,
+                None => return Ok(None),
+            }
+        } else {
+            0
         };
 
         if unlikely(num_xor == 0 && num_and == 0) {
@@ -225,21 +241,21 @@ impl<R: Read> CircuitReaderV2<R> {
 
     /// Read a single gate and advance wire counter
     fn read_gate(&mut self) -> Result<Gate> {
-        // Read input1 as WireVarInt
+        // Read input1 as FlaggedVarInt
         let input1_varint = self
-            .read_wire_varint()?
+            .read_flagged_varint()?
             .ok_or_else(|| Error::new(ErrorKind::UnexpectedEof, "Expected input1 wire ID"))?;
         let input1 = input1_varint.decode_to_absolute(self.wire_counter);
 
-        // Read input2 as WireVarInt
+        // Read input2 as FlaggedVarInt
         let input2_varint = self
-            .read_wire_varint()?
+            .read_flagged_varint()?
             .ok_or_else(|| Error::new(ErrorKind::UnexpectedEof, "Expected input2 wire ID"))?;
         let input2 = input2_varint.decode_to_absolute(self.wire_counter);
 
-        // Read output as WireVarInt
+        // Read output as FlaggedVarInt
         let output_varint = self
-            .read_wire_varint()?
+            .read_flagged_varint()?
             .ok_or_else(|| Error::new(ErrorKind::UnexpectedEof, "Expected output wire ID"))?;
         let output = output_varint.decode_to_absolute(self.wire_counter);
 
@@ -278,8 +294,8 @@ impl<R: Read> CircuitReaderV2<R> {
         Ok(Some(varint.value()))
     }
 
-    /// Read a WireVarInt from the buffer
-    fn read_wire_varint(&mut self) -> Result<Option<WireVarInt>> {
+    /// Read a FlaggedVarInt from the buffer
+    fn read_flagged_varint(&mut self) -> Result<Option<FlaggedVarInt>> {
         // First ensure we have at least 1 byte to read the length
         if unlikely(!self.ensure_bytes_available(1)?) {
             return Ok(None);
@@ -301,7 +317,7 @@ impl<R: Read> CircuitReaderV2<R> {
         }
 
         let buffer_slice = &self.buffer[self.buffer_offset..];
-        let (varint, bytes_consumed) = WireVarInt::decode(buffer_slice)?;
+        let (varint, bytes_consumed) = FlaggedVarInt::decode(buffer_slice)?;
         self.buffer_offset += bytes_consumed;
 
         Ok(Some(varint))

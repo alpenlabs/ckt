@@ -97,9 +97,17 @@ impl CircuitReaderV2 {
             return Ok(None);
         }
 
-        // Read level header (num_xor, num_and as StandardVarInts)
-        let num_xor = self.read_standard_varint().await?;
-        let num_and = self.read_standard_varint().await?;
+        // Read level header (num_xor as FlaggedVarInt with AND gate flag)
+        let num_xor_flagged = self.read_flagged_varint().await?;
+        let num_xor = num_xor_flagged.value();
+        let has_and_gates = num_xor_flagged.flag();
+
+        // Only read num_and if flag indicates AND gates are present
+        let num_and = if has_and_gates {
+            self.read_standard_varint().await?
+        } else {
+            0
+        };
 
         if unlikely(num_xor == 0 && num_and == 0) {
             return Ok(None);
@@ -133,9 +141,17 @@ impl CircuitReaderV2 {
             return Ok(None);
         }
 
-        // Read level header
-        let num_xor = self.read_standard_varint().await?;
-        let num_and = self.read_standard_varint().await?;
+        // Read level header (num_xor as FlaggedVarInt with AND gate flag)
+        let num_xor_flagged = self.read_flagged_varint().await?;
+        let num_xor = num_xor_flagged.value();
+        let has_and_gates = num_xor_flagged.flag();
+
+        // Only read num_and if flag indicates AND gates are present
+        let num_and = if has_and_gates {
+            self.read_standard_varint().await?
+        } else {
+            0
+        };
 
         if unlikely(num_xor == 0 && num_and == 0) {
             return Ok(None);
@@ -172,16 +188,16 @@ impl CircuitReaderV2 {
 
     /// Read a single gate and advance wire counter
     async fn read_gate(&mut self) -> Result<Gate> {
-        // Read input1 as WireVarInt
-        let input1_varint = self.read_wire_varint().await?;
+        // Read input1 as FlaggedVarInt
+        let input1_varint = self.read_flagged_varint().await?;
         let input1 = input1_varint.decode_to_absolute(self.wire_counter);
 
-        // Read input2 as WireVarInt
-        let input2_varint = self.read_wire_varint().await?;
+        // Read input2 as FlaggedVarInt
+        let input2_varint = self.read_flagged_varint().await?;
         let input2 = input2_varint.decode_to_absolute(self.wire_counter);
 
-        // Read output as WireVarInt
-        let output_varint = self.read_wire_varint().await?;
+        // Read output as FlaggedVarInt
+        let output_varint = self.read_flagged_varint().await?;
         let output = output_varint.decode_to_absolute(self.wire_counter);
 
         // Advance wire counter (output should equal current counter)
@@ -215,8 +231,8 @@ impl CircuitReaderV2 {
         Ok(varint.value())
     }
 
-    /// Read a WireVarInt from the buffer
-    async fn read_wire_varint(&mut self) -> Result<WireVarInt> {
+    /// Read a FlaggedVarInt from the buffer
+    async fn read_flagged_varint(&mut self) -> Result<FlaggedVarInt> {
         // First ensure we have at least 1 byte to read the length
         self.ensure_bytes_available(1).await?;
 
@@ -234,7 +250,7 @@ impl CircuitReaderV2 {
         self.ensure_bytes_available(length).await?;
 
         let buffer_slice = &self.buffer[self.buffer_offset..];
-        let (varint, bytes_consumed) = WireVarInt::decode(buffer_slice)?;
+        let (varint, bytes_consumed) = FlaggedVarInt::decode(buffer_slice)?;
         self.buffer_offset += bytes_consumed;
 
         Ok(varint)

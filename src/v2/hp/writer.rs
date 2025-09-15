@@ -57,15 +57,20 @@ impl CircuitWriterV2 {
             return Ok(());
         }
 
-        // Write level header: num_xor, num_and
-        let num_xor_varint = StandardVarInt::new(level.xor_gates.len() as u64)?;
-        let mut temp_buf = [0u8; 8]; // Max StandardVarInt size
-        let bytes_used = num_xor_varint.encode(&mut temp_buf)?;
+        // Write level header: num_xor with AND gate flag, optionally num_and
+        let has_and_gates = !level.and_gates.is_empty();
+        let num_xor_flagged =
+            FlaggedVarInt::with_flag(level.xor_gates.len() as u64, has_and_gates)?;
+        let mut temp_buf = [0u8; 8]; // Max FlaggedVarInt size
+        let bytes_used = num_xor_flagged.encode(&mut temp_buf)?;
         self.buffer.extend_from_slice(&temp_buf[..bytes_used]);
 
-        let num_and_varint = StandardVarInt::new(level.and_gates.len() as u64)?;
-        let bytes_used = num_and_varint.encode(&mut temp_buf)?;
-        self.buffer.extend_from_slice(&temp_buf[..bytes_used]);
+        // Only write num_and if there are AND gates (flag optimization)
+        if has_and_gates {
+            let num_and_varint = StandardVarInt::new(level.and_gates.len() as u64)?;
+            let bytes_used = num_and_varint.encode(&mut temp_buf)?;
+            self.buffer.extend_from_slice(&temp_buf[..bytes_used]);
+        }
 
         // Write all XOR gates
         for gate in &level.xor_gates {
@@ -109,18 +114,18 @@ impl CircuitWriterV2 {
         }
 
         // Encode input1 with optimal encoding
-        let input1_varint = WireVarInt::optimal_encoding(gate.input1, self.wire_counter)?;
-        let mut temp_buf = [0u8; 8]; // Max WireVarInt size
+        let input1_varint = FlaggedVarInt::optimal_encoding(gate.input1, self.wire_counter)?;
+        let mut temp_buf = [0u8; 8]; // Max FlaggedVarInt size
         let bytes_used = input1_varint.encode(&mut temp_buf)?;
         self.buffer.extend_from_slice(&temp_buf[..bytes_used]);
 
         // Encode input2 with optimal encoding
-        let input2_varint = WireVarInt::optimal_encoding(gate.input2, self.wire_counter)?;
+        let input2_varint = FlaggedVarInt::optimal_encoding(gate.input2, self.wire_counter)?;
         let bytes_used = input2_varint.encode(&mut temp_buf)?;
         self.buffer.extend_from_slice(&temp_buf[..bytes_used]);
 
         // Encode output (usually relative(0) since output == counter)
-        let output_varint = WireVarInt::optimal_encoding(gate.output, self.wire_counter)?;
+        let output_varint = FlaggedVarInt::optimal_encoding(gate.output, self.wire_counter)?;
         let bytes_used = output_varint.encode(&mut temp_buf)?;
         self.buffer.extend_from_slice(&temp_buf[..bytes_used]);
 

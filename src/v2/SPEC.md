@@ -25,9 +25,9 @@ Length | Format
 8 bytes| 11xxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx xxxxxxxx (0-4611686018427387903)
 ```
 
-### WireVarInt
+### FlaggedVarInt
 
-Used for gate wire IDs with byte-slice API. Based on QUIC varint but steals 1 bit for relative/absolute flag:
+Used for gate wire IDs and level metadata with byte-slice API. Based on QUIC varint but steals 1 bit for a flag:
 
 ```
 Length | Format                                    | Max Value
@@ -38,9 +38,9 @@ Length | Format                                    | Max Value
 8 bytes| 11rxxxxx xxxxxxxx xxxxxxxx xxxxxxxx ... | 2^61-1
 ```
 
-Where `r` is the relative/absolute bit:
-- `0` = Absolute wire ID
-- `1` = Relative to current counter position
+Where the flag bit has context-dependent meaning:
+- **For wire IDs**: `0` = Absolute wire ID, `1` = Relative to current counter position  
+- **For num_xors**: `0` = No AND gates in level, `1` = AND gates follow
 
 ### Varint API
 
@@ -64,7 +64,7 @@ pub fn decode(buffer: &[u8]) -> Result<(Self, usize)>
 
 Where each level contains:
 ```
-[num_xor: StandardVarInt] [num_and: StandardVarInt] [XorGates...] [AndGates...]
+[num_xor: FlaggedVarInt] [num_and: StandardVarInt (optional)] [XorGates...] [AndGates...]
 ```
 
 ### Header Structure (Fixed Size: 25 bytes)
@@ -86,10 +86,10 @@ Each level in the circuit is encoded as:
 
 ```rust
 struct Level {
-    num_xor: StandardVarInt,        // Number of XOR gates in this level (1-8 bytes)
-    num_and: StandardVarInt,        // Number of AND gates in this level (1-8 bytes)
+    num_xor: FlaggedVarInt,         // Number of XOR gates + AND gate presence flag (1-8 bytes)
+    num_and: StandardVarInt,        // Number of AND gates (1-8 bytes, only if flag=1)
     xor_gates: [Gate; num_xor],     // All XOR gates in this level
-    and_gates: [Gate; num_and],     // All AND gates in this level
+    and_gates: [Gate; num_and],     // All AND gates in this level (only if flag=1)
 }
 ```
 
@@ -101,9 +101,9 @@ Gates within a level can be processed in parallel since they only depend on:
 
 ```rust
 struct Gate {
-    input1: WireVarInt,             // First input wire ID (1-8 bytes)
-    input2: WireVarInt,             // Second input wire ID (1-8 bytes)
-    output: WireVarInt,             // Output wire ID (1-8 bytes, usually 1 byte as relative(0))
+    input1: FlaggedVarInt,          // First input wire ID (1-8 bytes)
+    input2: FlaggedVarInt,          // Second input wire ID (1-8 bytes)
+    output: FlaggedVarInt,          // Output wire ID (1-8 bytes, usually 1 byte as relative(0))
 }
 ```
 
@@ -130,15 +130,15 @@ For each gate processed:
 For each wire ID to encode:
 
 ```rust
-fn encode_wire_id(absolute_id: u64, counter: u64) -> WireVarInt {
+fn encode_wire_id(absolute_id: u64, counter: u64) -> FlaggedVarInt {
     let relative_value = counter.saturating_sub(absolute_id);
     
     if absolute_id <= relative_value {
         // Absolute encoding is smaller/equal
-        WireVarInt::absolute(absolute_id)
+        FlaggedVarInt::absolute(absolute_id)
     } else {
         // Relative encoding is smaller  
-        WireVarInt::relative(relative_value)
+        FlaggedVarInt::relative(relative_value)
     }
 }
 ```
@@ -146,7 +146,7 @@ fn encode_wire_id(absolute_id: u64, counter: u64) -> WireVarInt {
 ### Decoding Logic
 
 ```rust
-fn decode_wire_id(varint: WireVarInt, counter: u64) -> u64 {
+fn decode_wire_id(varint: FlaggedVarInt, counter: u64) -> u64 {
     if varint.is_relative() {
         counter.saturating_sub(varint.value())
     } else {
@@ -156,6 +156,44 @@ fn decode_wire_id(varint: WireVarInt, counter: u64) -> u64 {
 
 // Built-in method for convenience
 varint.decode_to_absolute(counter)
+```
+
+### Level Encoding Logic
+
+```rust
+fn encode_level(level: &Level) -> Result<Vec<u8>> {
+    let mut buffer = Vec::new();
+    
+    // Encode num_xor with AND gate presence flag
+    let has_and_gates = !level.and_gates.is_empty();
+    let num_xor_flagged = FlaggedVarInt::with_flag(level.xor_gates.len() as u64, has_and_gates)?;
+    num_xor_flagged.encode(&mut buffer)?;
+    
+    // Only encode num_and if there are AND gates
+    if has_and_gates {
+        let num_and_varint = StandardVarInt::new(level.and_gates.len() as u64)?;
+        num_and_varint.encode(&mut buffer)?;
+    }
+    
+    // Encode gates...
+    Ok(buffer)
+}
+
+fn decode_level(data: &[u8]) -> Result<Level> {
+    let (num_xor_flagged, mut offset) = FlaggedVarInt::decode(data)?;
+    let num_xor = num_xor_flagged.value();
+    let has_and_gates = num_xor_flagged.flag();
+    
+    let num_and = if has_and_gates {
+        let (varint, consumed) = StandardVarInt::decode(&data[offset..])?;
+        offset += consumed;
+        varint.value()
+    } else {
+        0
+    };
+    
+    // Decode gates...
+}
 ```
 
 ## Level Organization
@@ -222,10 +260,9 @@ Level 2:
 04 00 00 00 00 00 00 00        // primary_inputs = 4 (8 bytes, little-endian u64)
 ```
 
-**Level 0** (XOR and AND gates that only use primary inputs):
+**Level 0** (2 XOR gates, no AND gates):
 ```
-02          // num_xor = 2
-00          // num_and = 0
+00000100    // num_xor = 2, flag=0 (no AND gates) - saves 1 byte!
 // XOR Gate 1: XOR(0,1) -> 4, counter=4
 00000000    // input1: absolute(0) 
 00000001    // input2: absolute(1)
@@ -236,17 +273,19 @@ Level 2:
 00100000    // output: relative(0) = 5-5
 ```
 
-**Level 1** (AND gate that uses outputs from Level 0):
+**Level 1** (0 XOR gates, 1 AND gate):
 ```
-00          // num_xor = 0
-01          // num_and = 1
+00100000    // num_xor = 0, flag=1 (has AND gates)
+01          // num_and = 1 (only present because flag=1)
 // AND Gate 3: AND(4,5) -> 6, counter=6
 00100010    // input1: relative(2) = 6-4 
 00100001    // input2: relative(1) = 6-5  
 00100000    // output: relative(0) = 6-6
 ```
 
-Total size: 25 + 8 + 4 = **37 bytes** vs v1's ~97+ bytes for same circuit.
+Total size: 25 + 7 + 4 = **36 bytes** vs v1's ~97+ bytes for same circuit.
+
+**Space Savings**: This optimization saves 1 byte per level with no AND gates. In typical circuits with 99% XOR gates, this results in significant space savings across many levels.
 
 ## Implementation Notes
 
