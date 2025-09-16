@@ -1,6 +1,6 @@
 use std::collections::*;
 
-use super::circuit::Circuit;
+use super::circuit::{Circuit, LevelWires};
 use super::coords::*;
 use super::gate::*;
 
@@ -46,7 +46,7 @@ impl<'c> GateSatisfactionTracker<'c> {
     /// Checks if there's wires that haven't been computed based on the size of
     /// the sets of evaluated idxs and whatnot.
     fn has_uncomputed_wires(&self) -> bool {
-        self.evaluated_idxs.len() == self.circuit.num_wires() as usize
+        self.evaluated_idxs.len() < self.circuit.num_wires() as usize
     }
 
     /// Promotes a gate's satisfaction value.
@@ -96,26 +96,6 @@ impl<'c> GateSatisfactionTracker<'c> {
     }
 }
 
-/// Information about the wires that are made available at a particular level,
-/// either as an input or as an output of an evaluatable gate.
-#[derive(Clone, Debug, Hash, PartialEq, Eq, PartialOrd, Ord)]
-pub struct LevelWires {
-    wires: Vec<AbsWireIdx>,
-}
-
-impl LevelWires {
-    pub fn new(wires: Vec<AbsWireIdx>) -> Self {
-        Self { wires }
-    }
-
-    pub fn new_inputs(inputs: usize) -> Self {
-        Self::new((0..inputs).map(AbsWireIdx::from).collect())
-    }
-
-    pub fn wires(&self) -> &[AbsWireIdx] {
-        &self.wires
-    }
-}
 
 /// Updates to wires as of a level.
 pub struct LevelWireUpdates {
@@ -131,7 +111,7 @@ pub struct LevelWireUpdates {
 
 /// Takes a circuit and returns a list of levels, containing the wires that can
 /// be evaluated on each level.
-fn gen_level_allocs(circuit: &Circuit) -> Vec<LevelWires> {
+pub fn gen_level_allocs(circuit: &Circuit) -> Vec<LevelWires> {
     let mut tracker = GateSatisfactionTracker::new(circuit);
     for w in circuit.input_idxs_iter().clone() {
         tracker.mark_input_wire(w);

@@ -1,6 +1,6 @@
 //! Circuit analysis routines.
 
-mod builder;
+pub mod builder;
 pub mod circuit;
 mod coords;
 mod gate;

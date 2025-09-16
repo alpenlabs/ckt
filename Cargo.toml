@@ -9,6 +9,7 @@ repository.workspace = true
 [dependencies]
 cynosure = { version = "0.2.0", optional = true }
 monoio = { version = "0.2.4", features = ["sync"], optional = true }
+rand = "0.9.2"
 
 [dev-dependencies]
 monoio = { version = "0.2.4", features = ["sync"] }
