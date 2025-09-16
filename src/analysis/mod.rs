@@ -4,6 +4,6 @@
 
 pub mod builder;
 pub mod circuit;
-mod coords;
+pub mod coords;
 pub mod example_circuits;
-mod gate;
+pub mod gate;
