@@ -487,7 +487,121 @@ pub fn compute_state_slot_assignments(
     let max_slots = tracker.max_slots_used();
 
     (
-        CompactLevelGroupedCircuit::new(circuit.num_inputs(), circuit.num_outputs(), max_slots, result),
+        CompactLevelGroupedCircuit::new(
+            circuit.num_inputs(),
+            circuit.num_outputs(),
+            max_slots,
+            result,
+        ),
         EvalStateDebugInfo::new(debug_info),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_gate_satisfaction_tracker_same_input_wires() {
+        let mut circuit = Circuit::new(2);
+
+        // Create a gate where both inputs come from the same wire (wire 0)
+        // This tests the case where inp1 == inp2
+        let gate = Gate::new(
+            AbsWireIdx::from(0u32), // input wire 0
+            AbsWireIdx::from(0u32), // same input wire 0
+            GateType::AND,
+        );
+        let gate_wire = circuit.add_gate(gate);
+
+        // Create another gate that uses wire 1 twice
+        let gate2 = Gate::new(
+            AbsWireIdx::from(1u32), // input wire 1
+            AbsWireIdx::from(1u32), // same input wire 1
+            GateType::XOR,
+        );
+        let gate2_wire = circuit.add_gate(gate2);
+
+        // Create a final gate that combines the outputs
+        let gate3 = Gate::new(gate_wire, gate2_wire, GateType::XOR);
+        let _final_wire = circuit.add_gate(gate3);
+
+        // Now test the GateSatisfactionTracker with this circuit
+        let mut tracker = GateSatisfactionTracker::new(&circuit);
+
+        // Mark input wires as ready
+        tracker.mark_input_wire(AbsWireIdx::from(0u32));
+        tracker.mark_input_wire(AbsWireIdx::from(1u32));
+
+        // After marking input wire 0, gate_wire should be ready because
+        // both its inputs (wire 0, wire 0) are satisfied by the single input
+        assert!(
+            tracker.ready_idxs().contains(&gate_wire),
+            "Gate with identical input wires should be ready after single input satisfaction"
+        );
+
+        // Similarly, gate2_wire should be ready after wire 1 is marked
+        assert!(
+            tracker.ready_idxs().contains(&gate2_wire),
+            "Second gate with identical input wires should also be ready"
+        );
+
+        // Mark the first gate as evaluated
+        tracker.mark_wire_evaled(gate_wire);
+
+        // Mark the second gate as evaluated
+        tracker.mark_wire_evaled(gate2_wire);
+
+        // Now the final gate should be ready since both its inputs are satisfied
+        assert!(
+            tracker.ready_idxs().contains(&_final_wire),
+            "Final gate should be ready after both input gates are evaluated"
+        );
+
+        // Verify we can mark the final gate as evaluated without issues
+        tracker.mark_wire_evaled(_final_wire);
+
+        // All wires should now be evaluated
+        assert_eq!(
+            tracker.evaluated_idxs.len(),
+            5, // 2 inputs + 3 gates
+            "All wires should be marked as evaluated"
+        );
+    }
+
+    #[test]
+    fn test_gate_satisfaction_no_triple_satisfy() {
+        let mut circuit = Circuit::new(1);
+
+        // Create two gates that both use the same input wire
+        let gate1 = Gate::new(
+            AbsWireIdx::from(0u32), // input wire 0
+            AbsWireIdx::from(0u32), // same wire 0
+            GateType::AND,
+        );
+        let gate1_wire = circuit.add_gate(gate1);
+
+        let gate2 = Gate::new(
+            AbsWireIdx::from(0u32), // input wire 0 again
+            AbsWireIdx::from(0u32), // same wire 0 again
+            GateType::XOR,
+        );
+        let gate2_wire = circuit.add_gate(gate2);
+
+        let mut tracker = GateSatisfactionTracker::new(&circuit);
+
+        // Mark the input wire - this should make both gates ready
+        tracker.mark_input_wire(AbsWireIdx::from(0u32));
+
+        // Both gates should be ready
+        assert!(tracker.ready_idxs().contains(&gate1_wire));
+        assert!(tracker.ready_idxs().contains(&gate2_wire));
+
+        // Verify that marking evaluated doesn't cause issues
+        tracker.mark_wire_evaled(gate1_wire);
+        tracker.mark_wire_evaled(gate2_wire);
+
+        // Should complete without panicking
+        assert_eq!(tracker.evaluated_idxs.len(), 3); // 1 input + 2 gates
+    }
 }
