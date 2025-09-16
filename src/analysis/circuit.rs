@@ -2,9 +2,10 @@
 
 use std::collections::*;
 
-use rand::seq::SliceRandom;
 use rand::rng;
+use rand::seq::SliceRandom;
 
+use super::builder::{CircuitEvalGroups as LevelGroupedCircuit, EvalStateDebugInfo};
 use super::coords::*;
 use super::gate::*;
 
@@ -183,7 +184,7 @@ impl LevelWires {
 /// where each level contains wires that can be evaluated in parallel.
 pub fn evaluate_circuit_layered(
     circuit: &Circuit,
-    level_wires: Vec<LevelWires>,
+    level_grouped_circuit: LevelGroupedCircuit,
     inputs: &[bool],
 ) -> BTreeMap<AbsWireIdx, bool> {
     // Validate inputs
@@ -199,7 +200,7 @@ pub fn evaluate_circuit_layered(
     let mut rng = rng();
 
     // Process each level
-    for (level_idx, level) in level_wires.iter().enumerate() {
+    for (level_idx, level) in level_grouped_circuit.iter_with_index() {
         if level_idx == 0 {
             // Level 0: input wires
             for (i, &wire_idx) in level.wires().iter().enumerate() {
@@ -233,6 +234,114 @@ pub fn evaluate_circuit_layered(
     wire_values
 }
 
+/// Circuit evaluation groups organized by level.
+#[derive(Clone, Debug)]
+pub struct CompactLevelGroupedCircuit {
+    /// The number of inputs.
+    num_inputs: usize,
+
+    /// Gate groups for each evaluation level (excluding level 0 which are inputs).
+    levels: Vec<CompactLevelGates>,
+}
+
+impl CompactLevelGroupedCircuit {
+    pub fn new(num_inputs: usize, levels: Vec<CompactLevelGates>) -> Self {
+        Self { num_inputs, levels }
+    }
+
+    pub fn num_inputs(&self) -> usize {
+        self.num_inputs
+    }
+
+    pub fn levels(&self) -> &[CompactLevelGates] {
+        &self.levels
+    }
+
+    pub fn into_levels(self) -> Vec<CompactLevelGates> {
+        self.levels
+    }
+
+    /// Returns an iterator over the indexes of input state slots.
+    pub fn input_slot_idxs_iter(&self) -> impl Iterator<Item = LevelStateIdx> + Clone {
+        (0..self.num_inputs()).map(|i| LevelStateIdx::from(i as u32))
+    }
+}
+
+/// Hook trait for layer-by-layer circuit evaluation.
+pub trait EvalHook {
+    /// Called after each layer is evaluated with the current state.
+    ///
+    /// # Arguments
+    /// - `level_idx`: The level that was just evaluated (0 = inputs, 1+ = gate levels)
+    /// - `state`: Current flat state after evaluation
+    fn after_layer(&mut self, level_idx: usize, state: &[bool]);
+}
+
+impl EvalHook for () {
+    fn after_layer(&mut self, level_idx: usize, state: &[bool]) {
+        // no-op
+    }
+}
+
+/// Evaluates a CompactLevelGroupedCircuit using a flat state model.
+///
+/// This function operates on the compact representation and uses state slot indices
+/// for efficient evaluation. A hook can be provided to inspect the state after each layer.
+pub fn evaluate_compact_circuit(
+    circuit: &CompactLevelGroupedCircuit,
+    debug_info: &EvalStateDebugInfo,
+    inputs: &[bool],
+    hook: &mut impl EvalHook,
+) -> Vec<bool> {
+    // Validate inputs
+    assert_eq!(
+        inputs.len(),
+        circuit.num_inputs(),
+        "circuit: expected {} inputs, got {}",
+        circuit.num_inputs(),
+        inputs.len()
+    );
+
+    // Initialize state with enough capacity for all slots that will be used
+    let max_slot_count = debug_info
+        .levels()
+        .iter()
+        .map(|level| level.slot_to_wire().len())
+        .max()
+        .unwrap_or(0);
+    let mut state = vec![false; max_slot_count];
+
+    // Level 0: Set input values
+    for (i, &input_val) in inputs.iter().enumerate() {
+        state[i] = input_val;
+    }
+    hook.after_layer(0, &state);
+
+    // Process each gate level
+    for (level_idx, level_gates) in circuit.levels().iter().enumerate() {
+        // Evaluate AND gates
+        for gate_io in level_gates.and_gates_iter() {
+            let input1_val = state[u32::from(gate_io.input1()) as usize];
+            let input2_val = state[u32::from(gate_io.input2()) as usize];
+            let output_val = input1_val & input2_val;
+            state[u32::from(gate_io.output()) as usize] = output_val;
+        }
+
+        // Evaluate XOR gates
+        for gate_io in level_gates.xor_gates_iter() {
+            let input1_val = state[u32::from(gate_io.input1()) as usize];
+            let input2_val = state[u32::from(gate_io.input2()) as usize];
+            let output_val = input1_val ^ input2_val;
+            state[u32::from(gate_io.output()) as usize] = output_val;
+        }
+
+        // Call hook after this level (level_idx + 1 because inputs are level 0)
+        hook.after_layer(level_idx + 1, &state);
+    }
+
+    state
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -251,15 +360,18 @@ mod tests {
 
             // Run layered evaluator multiple times to test randomization
             for trial in 0..5 {
-                let layered_result = evaluate_circuit_layered(circuit, level_wires.clone(), &inputs);
+                let layered_result =
+                    evaluate_circuit_layered(circuit, level_wires.clone(), &inputs);
 
                 // Convert HashMap to BTreeMap for comparison
-                let direct_btree: BTreeMap<AbsWireIdx, bool> = direct_result.iter().map(|(&k, &v)| (k, v)).collect();
+                let direct_btree: BTreeMap<AbsWireIdx, bool> =
+                    direct_result.iter().map(|(&k, &v)| (k, v)).collect();
 
                 // Compare results
                 assert_eq!(
                     direct_btree, layered_result,
-                    "Evaluators produced different results on trial {} for inputs: {:?}", trial, inputs
+                    "Evaluators produced different results on trial {} for inputs: {:?}",
+                    trial, inputs
                 );
             }
         }
@@ -284,8 +396,16 @@ mod tests {
         let mut circuit = Circuit::new(4);
 
         // Add gates: gate0 = a & b, gate1 = c & d, gate2 = gate0 ^ gate1
-        let gate0 = Gate::new(AbsWireIdx::from(0u32), AbsWireIdx::from(1u32), GateType::AND);
-        let gate1 = Gate::new(AbsWireIdx::from(2u32), AbsWireIdx::from(3u32), GateType::AND);
+        let gate0 = Gate::new(
+            AbsWireIdx::from(0u32),
+            AbsWireIdx::from(1u32),
+            GateType::AND,
+        );
+        let gate1 = Gate::new(
+            AbsWireIdx::from(2u32),
+            AbsWireIdx::from(3u32),
+            GateType::AND,
+        );
         let gate0_wire = circuit.add_gate(gate0);
         let gate1_wire = circuit.add_gate(gate1);
         let gate2 = Gate::new(gate0_wire, gate1_wire, GateType::XOR);
@@ -300,7 +420,11 @@ mod tests {
     fn test_single_gate_circuit() {
         // Test simple single gate circuit: a & b
         let mut circuit = Circuit::new(2);
-        let gate = Gate::new(AbsWireIdx::from(0u32), AbsWireIdx::from(1u32), GateType::AND);
+        let gate = Gate::new(
+            AbsWireIdx::from(0u32),
+            AbsWireIdx::from(1u32),
+            GateType::AND,
+        );
         let _gate_wire = circuit.add_gate(gate);
 
         let test_cases = generate_all_inputs(2);
@@ -318,19 +442,15 @@ mod tests {
             // a=01 (1), b=10 (2), c=10 (2), d=01 (1)
             // Input order: [a0,a1,b0,b1,c0,c1,d0,d1]
             vec![true, false, false, true, false, true, true, false],
-
             // Test case 2: 2+1 != 0+0 (should be different, output=true)
             // a=10 (2), b=01 (1), c=00 (0), d=00 (0)
             vec![false, true, true, false, false, false, false, false],
-
             // Test case 3: 0+0 == 0+0 (should be equal, output=false)
             // a=00 (0), b=00 (0), c=00 (0), d=00 (0)
             vec![false, false, false, false, false, false, false, false],
-
             // Test case 4: 3+3 != 2+2 (6 != 4, should be different, output=true)
             // a=11 (3), b=11 (3), c=10 (2), d=10 (2)
             vec![true, true, true, true, false, true, false, true],
-
             // Test case 5: 1+1 == 2+0 (both equal 2, should be equal, output=false)
             // a=01 (1), b=01 (1), c=10 (2), d=00 (0)
             vec![true, false, true, false, false, true, false, false],
@@ -349,20 +469,22 @@ mod tests {
         let mut test_cases = Vec::new();
 
         // Test some systematic patterns
-        for a in 0..4 {  // 2-bit values 0-3
+        for a in 0..4 {
+            // 2-bit values 0-3
             for b in 0..4 {
-                for c in 0..2 {  // Limited to reduce test time
+                for c in 0..2 {
+                    // Limited to reduce test time
                     for d in 0..2 {
                         let mut inputs = vec![false; 8];
                         // Convert to bit arrays: [a0,a1,b0,b1,c0,c1,d0,d1]
-                        inputs[0] = (a & 1) != 0;      // a0
-                        inputs[1] = (a & 2) != 0;      // a1
-                        inputs[2] = (b & 1) != 0;      // b0
-                        inputs[3] = (b & 2) != 0;      // b1
-                        inputs[4] = (c & 1) != 0;      // c0
-                        inputs[5] = (c & 2) != 0;      // c1
-                        inputs[6] = (d & 1) != 0;      // d0
-                        inputs[7] = (d & 2) != 0;      // d1
+                        inputs[0] = (a & 1) != 0; // a0
+                        inputs[1] = (a & 2) != 0; // a1
+                        inputs[2] = (b & 1) != 0; // b0
+                        inputs[3] = (b & 2) != 0; // b1
+                        inputs[4] = (c & 1) != 0; // c0
+                        inputs[5] = (c & 2) != 0; // c1
+                        inputs[6] = (d & 1) != 0; // d0
+                        inputs[7] = (d & 2) != 0; // d1
                         test_cases.push(inputs);
                     }
                 }
@@ -370,5 +492,139 @@ mod tests {
         }
 
         test_evaluators_consistency(&circuit, test_cases);
+    }
+
+    #[test]
+    fn test_compact_evaluation_with_hook() {
+        // Create a simple test circuit: (a & b) ^ (c & d)
+        let mut circuit = Circuit::new(4);
+
+        let gate0 = Gate::new(
+            AbsWireIdx::from(0u32),
+            AbsWireIdx::from(1u32),
+            GateType::AND,
+        );
+        let gate1 = Gate::new(
+            AbsWireIdx::from(2u32),
+            AbsWireIdx::from(3u32),
+            GateType::AND,
+        );
+        let gate0_wire = circuit.add_gate(gate0);
+        let gate1_wire = circuit.add_gate(gate1);
+        let gate2 = Gate::new(gate0_wire, gate1_wire, GateType::XOR);
+        let _gate2_wire = circuit.add_gate(gate2);
+
+        // Generate level allocations
+        let level_wires = gen_level_allocs(&circuit);
+
+        // Get compact representation
+        let (compact_circuit, debug_info) =
+            crate::analysis::builder::compute_state_slot_assignments(&circuit, &level_wires);
+
+        // Test hook that captures state at each level
+        #[derive(Default)]
+        struct TestHook {
+            level_states: Vec<(usize, Vec<bool>)>,
+        }
+
+        impl EvalHook for TestHook {
+            fn after_layer(&mut self, level_idx: usize, state: &[bool]) {
+                self.level_states.push((level_idx, state.to_vec()));
+            }
+        }
+
+        // Test with inputs [true, false, false, true] => (T&F) ^ (F&T) = F ^ F = F
+        let inputs = vec![true, false, false, true];
+        let mut hook = TestHook::default();
+
+        let result = evaluate_compact_circuit(&compact_circuit, &debug_info, &inputs, &mut hook);
+
+        // Verify the hook captured states at each level
+        assert!(hook.level_states.len() >= 3); // inputs + at least 2 gate levels
+
+        // Level 0 should have the input values
+        let (level_0_idx, level_0_state) = &hook.level_states[0];
+        assert_eq!(*level_0_idx, 0);
+        assert_eq!(level_0_state[0], true); // a
+        assert_eq!(level_0_state[1], false); // b
+        assert_eq!(level_0_state[2], false); // c
+        assert_eq!(level_0_state[3], true); // d
+
+        // Compare with direct evaluation
+        let direct_result = evaluate_circuit_direct(&circuit, inputs);
+
+        // Find the output wire (should be the last gate added)
+        let output_wire = AbsWireIdx::from((circuit.num_wires() - 1) as u32);
+        let expected_output = direct_result[&output_wire];
+
+        // The final result should contain the expected output in the correct slot
+        // We need to find which slot contains the output value
+        let output_slot_idx = debug_info
+            .levels()
+            .last()
+            .and_then(|last_level| {
+                last_level
+                    .slot_to_wire()
+                    .iter()
+                    .position(|&wire| wire == output_wire)
+            })
+            .expect("Output wire should be found in final level");
+
+        assert_eq!(result[output_slot_idx], expected_output);
+    }
+
+    #[test]
+    fn test_compact_vs_direct_evaluator_consistency() {
+        // Test that compact evaluator produces same results as direct evaluator
+        let mut circuit = Circuit::new(3);
+
+        // Build circuit: (a & b) ^ c
+        let gate0 = Gate::new(
+            AbsWireIdx::from(0u32),
+            AbsWireIdx::from(1u32),
+            GateType::AND,
+        );
+        let gate0_wire = circuit.add_gate(gate0);
+        let gate1 = Gate::new(gate0_wire, AbsWireIdx::from(2u32), GateType::XOR);
+        let gate1_wire = circuit.add_gate(gate1);
+
+        // Generate compact representation
+        let level_wires = gen_level_allocs(&circuit);
+        let (compact_circuit, debug_info) =
+            crate::analysis::builder::compute_state_slot_assignments(&circuit, &level_wires);
+
+        // Test all possible input combinations
+        for i in 0..8 {
+            let inputs = vec![(i & 1) != 0, (i & 2) != 0, (i & 4) != 0];
+
+            // Run direct evaluator
+            let direct_result = evaluate_circuit_direct(&circuit, inputs.clone());
+            let direct_output = direct_result[&gate1_wire];
+
+            // Run compact evaluator
+            let mut no_op_hook = NoOpHook;
+            let compact_result =
+                evaluate_compact_circuit(&compact_circuit, &debug_info, &inputs, &mut no_op_hook);
+
+            // Find output slot
+            let output_slot_idx = debug_info
+                .levels()
+                .last()
+                .and_then(|last_level| {
+                    last_level
+                        .slot_to_wire()
+                        .iter()
+                        .position(|&wire| wire == gate1_wire)
+                })
+                .expect("Output wire should be found");
+
+            let compact_output = compact_result[output_slot_idx];
+
+            assert_eq!(
+                direct_output, compact_output,
+                "Evaluators disagree for inputs {:?}: direct={}, compact={}",
+                inputs, direct_output, compact_output
+            );
+        }
     }
 }

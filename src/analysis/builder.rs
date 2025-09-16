@@ -1,6 +1,6 @@
 use std::collections::*;
 
-use super::circuit::{Circuit, LevelWires};
+use super::circuit::{Circuit, CompactLevelGroupedCircuit, LevelWires};
 use super::coords::*;
 use super::gate::*;
 
@@ -96,7 +96,6 @@ impl<'c> GateSatisfactionTracker<'c> {
     }
 }
 
-
 /// Updates to wires as of a level.
 pub struct LevelWireUpdates {
     /// Wires that are last used in this layer that can be removed from the state.
@@ -109,9 +108,9 @@ pub struct LevelWireUpdates {
     produced: Vec<AbsWireIdx>,
 }
 
-/// Takes a circuit and returns a list of levels, containing the wires that can
-/// be evaluated on each level.
-pub fn gen_level_allocs(circuit: &Circuit) -> Vec<LevelWires> {
+/// Takes a circuit and returns a level-grouped circuit with wires organized
+/// by evaluation levels.
+pub fn gen_level_allocs(circuit: &Circuit) -> CircuitEvalGroups {
     let mut tracker = GateSatisfactionTracker::new(circuit);
     for w in circuit.input_idxs_iter().clone() {
         tracker.mark_input_wire(w);
@@ -141,7 +140,7 @@ pub fn gen_level_allocs(circuit: &Circuit) -> Vec<LevelWires> {
         levels.push(LevelWires::new(ready_gates));
     }
 
-    levels
+    CircuitEvalGroups::new(levels)
 }
 
 /// Information about a wire's lifespan across evaluation levels
@@ -292,29 +291,127 @@ impl StateAllocationTracker {
     }
 }
 
+/// Debug information about which wire produced the value in each slot for a level
+#[derive(Clone, Debug)]
+pub struct LevelSlotWireDebug {
+    /// For each slot index, which wire produced the value in that slot
+    /// Index in vec = slot number, Value = wire that produced that slot's value
+    slot_to_wire: Vec<AbsWireIdx>,
+}
+
+impl LevelSlotWireDebug {
+    pub fn new() -> Self {
+        Self {
+            slot_to_wire: Vec::new(),
+        }
+    }
+
+    pub fn set_slot_wire(&mut self, slot: LevelStateIdx, wire: AbsWireIdx) {
+        let slot_idx: usize = u32::from(slot) as usize;
+
+        // Extend the vec if needed
+        if slot_idx >= self.slot_to_wire.len() {
+            self.slot_to_wire
+                .resize(slot_idx + 1, AbsWireIdx::from(0u32));
+        }
+
+        self.slot_to_wire[slot_idx] = wire;
+    }
+
+    pub fn slot_to_wire(&self) -> &[AbsWireIdx] {
+        &self.slot_to_wire
+    }
+}
+
+/// Debug information about state slot assignments during circuit evaluation
+#[derive(Clone, Debug)]
+pub struct EvalStateDebugInfo {
+    /// Debug information for each level including level 0 (inputs)
+    levels: Vec<LevelSlotWireDebug>,
+}
+
+impl EvalStateDebugInfo {
+    pub fn new(levels: Vec<LevelSlotWireDebug>) -> Self {
+        Self { levels }
+    }
+
+    pub fn levels(&self) -> &[LevelSlotWireDebug] {
+        &self.levels
+    }
+
+    pub fn into_levels(self) -> Vec<LevelSlotWireDebug> {
+        self.levels
+    }
+}
+
+/// Circuit wires organized by evaluation levels
+#[derive(Clone, Debug)]
+pub struct CircuitEvalGroups {
+    /// Wire groups for each evaluation level, where level 0 contains input wires
+    levels: Vec<LevelWires>,
+}
+
+impl CircuitEvalGroups {
+    pub fn new(levels: Vec<LevelWires>) -> Self {
+        Self { levels }
+    }
+
+    pub fn levels(&self) -> &[LevelWires] {
+        &self.levels
+    }
+
+    pub fn into_levels(self) -> Vec<LevelWires> {
+        self.levels
+    }
+
+    pub fn len(&self) -> usize {
+        self.levels.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.levels.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &LevelWires> {
+        self.levels.iter()
+    }
+
+    pub fn iter_with_index(&self) -> impl Iterator<Item = (usize, &LevelWires)> {
+        self.levels.iter().enumerate()
+    }
+}
+
 /// Computes efficient state slot assignments for wire values in a circuit evaluation.
 ///
 /// Takes a circuit and its level-wise wire organization, and produces compact gate IO
 /// mappings that reuse state slots when wires are no longer needed.
+///
+/// Returns both the circuit evaluation groups and debugging information about
+/// which wire produced the value in each slot for each level.
 pub fn compute_state_slot_assignments(
     circuit: &Circuit,
-    level_wires: &[LevelWires],
-) -> Vec<CompactLevelGates> {
+    eval_groups: &CircuitEvalGroups,
+) -> (CompactLevelGroupedCircuit, EvalStateDebugInfo) {
     // First analyze wire lifespans
-    let lifespans = analyze_wire_lifespans(circuit, level_wires);
+    let lifespans = analyze_wire_lifespans(circuit, eval_groups.levels());
 
     let mut result = Vec::new();
+    let mut debug_info = Vec::new();
     let mut tracker = StateAllocationTracker::new();
 
-    for (level_idx, level) in level_wires.iter().enumerate() {
+    for (level_idx, level) in eval_groups.iter_with_index() {
         // Free slots for wires that are no longer needed after this level
         tracker.free_wires_at_level(&lifespans, level_idx);
+
+        // Initialize debug info for this level
+        let mut level_debug = LevelSlotWireDebug::new();
 
         // Process wires in this level
         if level_idx == 0 {
             // Level 0: Assign slots to input wires
             for &wire_idx in level.wires() {
-                tracker.assign_new_slot(wire_idx);
+                let slot = tracker.assign_new_slot(wire_idx);
+                level_debug.set_slot_wire(slot, wire_idx);
             }
         } else {
             // Level > 0: Process gates and assign output slots
@@ -330,6 +427,7 @@ pub fn compute_state_slot_assignments(
                         .expect("Input wire should have been assigned a slot");
 
                     let output_slot = tracker.assign_new_slot(wire_idx);
+                    level_debug.set_slot_wire(output_slot, wire_idx);
 
                     let compact_io = CompactGateIo::new(input1_slot, input2_slot, output_slot);
                     level_gates.push((gate.ty(), compact_io));
@@ -338,7 +436,12 @@ pub fn compute_state_slot_assignments(
 
             result.push(CompactLevelGates::from_ty_iter(level_gates.into_iter()));
         }
+
+        debug_info.push(level_debug);
     }
 
-    result
+    (
+        CompactLevelGroupedCircuit::new(circuit.num_inputs(), result),
+        EvalStateDebugInfo::new(debug_info),
+    )
 }

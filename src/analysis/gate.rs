@@ -78,7 +78,7 @@ pub enum GateType {
 }
 
 /// Compact representation of the gates in a level
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct CompactLevelGates {
     /// The number of AND gates in the level.
     and_gates: usize,
@@ -160,7 +160,7 @@ impl CompactLevelGates {
     }
 
     /// Returns an iterator over the XOR gates.
-    fn xor_gates_iter(&self) -> impl Iterator<Item = CompactGateIo> {
+    pub fn xor_gates_iter(&self) -> impl Iterator<Item = CompactGateIo> {
         self.gates
             .iter()
             .skip(self.and_gates)
