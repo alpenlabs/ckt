@@ -289,6 +289,11 @@ impl StateAllocationTracker {
             self.wire_to_slot.remove(&wire_idx);
         }
     }
+
+    /// Gets the maximum number of slots that have been allocated
+    pub fn max_slots_used(&self) -> usize {
+        self.next_slot_id as usize
+    }
 }
 
 /// Debug information about which wire produced the value in each slot for a level
@@ -408,14 +413,27 @@ pub fn compute_state_slot_assignments(
 
         // Process wires in this level
         if level_idx == 0 {
-            // Level 0: Assign slots to input wires
+            // Level 0: Assign slots to input wires and track input outputs
+            let mut level_outputs = Vec::new();
+
             for &wire_idx in level.wires() {
                 let slot = tracker.assign_new_slot(wire_idx);
                 level_debug.set_slot_wire(slot, wire_idx);
+
+                // Check if this input wire is also an output
+                for (output_idx, &output_wire) in circuit.outputs().iter().enumerate() {
+                    if output_wire == wire_idx {
+                        level_outputs.push(OutputStateCopy::new(output_idx, slot));
+                    }
+                }
             }
+
+            // Create a "dummy" CompactLevelGates for level 0 with no gates but with outputs
+            result.push(CompactLevelGates::new(0, 0, Vec::new(), level_outputs));
         } else {
             // Level > 0: Process gates and assign output slots
             let mut level_gates = Vec::new();
+            let mut level_outputs = Vec::new();
 
             for &wire_idx in level.wires() {
                 if let Some(gate) = circuit.get_wire_as_gate(wire_idx) {
@@ -431,17 +449,45 @@ pub fn compute_state_slot_assignments(
 
                     let compact_io = CompactGateIo::new(input1_slot, input2_slot, output_slot);
                     level_gates.push((gate.ty(), compact_io));
+
+                    // Check if this wire is an output and add it to level outputs
+                    for (output_idx, &output_wire) in circuit.outputs().iter().enumerate() {
+                        if output_wire == wire_idx {
+                            level_outputs.push(OutputStateCopy::new(output_idx, output_slot));
+                        }
+                    }
                 }
             }
 
-            result.push(CompactLevelGates::from_ty_iter(level_gates.into_iter()));
+            // Separate gates by type for proper construction
+            let mut and_gates = Vec::new();
+            let mut xor_gates = Vec::new();
+            for (ty, io) in level_gates {
+                match ty {
+                    super::gate::GateType::AND => and_gates.push(io),
+                    super::gate::GateType::XOR => xor_gates.push(io),
+                }
+            }
+
+            // Combine all gates and construct CompactLevelGates
+            let mut all_gates = and_gates.clone();
+            all_gates.extend(xor_gates.clone());
+
+            result.push(CompactLevelGates::new(
+                and_gates.len(),
+                xor_gates.len(),
+                all_gates,
+                level_outputs,
+            ));
         }
 
         debug_info.push(level_debug);
     }
 
+    let max_slots = tracker.max_slots_used();
+
     (
-        CompactLevelGroupedCircuit::new(circuit.num_inputs(), result),
+        CompactLevelGroupedCircuit::new(circuit.num_inputs(), circuit.num_outputs(), max_slots, result),
         EvalStateDebugInfo::new(debug_info),
     )
 }

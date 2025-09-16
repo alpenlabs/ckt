@@ -88,6 +88,9 @@ pub struct CompactLevelGates {
 
     /// The IO for all of the gates in the level.
     gates: Vec<CompactGateIo>,
+
+    /// Output mappings for values that should be copied to the output buffer after this level is evaluated.
+    outputs: Vec<OutputStateCopy>,
 }
 
 impl CompactLevelGates {
@@ -96,12 +99,18 @@ impl CompactLevelGates {
     /// # Panics
     ///
     /// If `and_gates` and `xor_gates` do not add to the length of `gates`.
-    pub fn new(and_gates: usize, xor_gates: usize, gates: Vec<CompactGateIo>) -> Self {
+    pub fn new(
+        and_gates: usize,
+        xor_gates: usize,
+        gates: Vec<CompactGateIo>,
+        outputs: Vec<OutputStateCopy>,
+    ) -> Self {
         assert_eq!(and_gates + xor_gates, gates.len());
         Self {
             and_gates,
             xor_gates,
             gates,
+            outputs,
         }
     }
 
@@ -129,7 +138,7 @@ impl CompactLevelGates {
         // Copy over the XOR gates.
         gates.extend(buffered_xor_gates.drain(..));
 
-        Self::new(and_gates, xor_gates, gates)
+        Self::new(and_gates, xor_gates, gates, Vec::new())
     }
 
     /// Constructs a new instance from two iterators over the two types of gate.
@@ -151,7 +160,7 @@ impl CompactLevelGates {
             gates.push(g);
         }
 
-        Self::new(and_gates, xor_gates, gates)
+        Self::new(and_gates, xor_gates, gates, Vec::new())
     }
 
     /// Returns an iterator over the AND gates.
@@ -166,6 +175,11 @@ impl CompactLevelGates {
             .skip(self.and_gates)
             .take(self.xor_gates)
             .copied()
+    }
+
+    /// Gets the output mappings for this level.
+    pub fn outputs(&self) -> &[OutputStateCopy] {
+        &self.outputs
     }
 }
 

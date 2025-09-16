@@ -105,32 +105,32 @@ mod tests {
         // Test case 1: 1+2 == 2+1 (should be equal)
         // a=01 (1), b=10 (2), c=10 (2), d=01 (1)
         let inputs1 = vec![true, false, false, true, false, true, true, false]; // [a0,a1,b0,b1,c0,c1,d0,d1]
-        let result1 = evaluate_circuit_direct(&circuit, inputs1);
+        let (result1, _) = evaluate_circuit_direct(&circuit, inputs1);
         let output_wire = AbsWireIdx::from(circuit.num_wires() - 1);
         assert_eq!(result1[&output_wire], false, "1+2 should equal 2+1"); // 0 means equal
-        
+
         // Test case 2: 2+1 != 0+0 (should be different)
         // a=10 (2), b=01 (1), c=00 (0), d=00 (0)
         let inputs2 = vec![false, true, true, false, false, false, false, false];
-        let result2 = evaluate_circuit_direct(&circuit, inputs2);
+        let (result2, _) = evaluate_circuit_direct(&circuit, inputs2);
         assert_eq!(result2[&output_wire], true, "2+1 should not equal 0+0"); // 1 means different
-        
+
         // Test case 3: 0+0 == 0+0 (should be equal)
         // a=00 (0), b=00 (0), c=00 (0), d=00 (0)
         let inputs3 = vec![false, false, false, false, false, false, false, false];
-        let result3 = evaluate_circuit_direct(&circuit, inputs3);
+        let (result3, _) = evaluate_circuit_direct(&circuit, inputs3);
         assert_eq!(result3[&output_wire], false, "0+0 should equal 0+0"); // 0 means equal
-        
+
         // Test case 4: 3+3 != 2+2 (both equal 6 and 4 respectively)
-        // a=11 (3), b=11 (3), c=10 (2), d=10 (2)  
+        // a=11 (3), b=11 (3), c=10 (2), d=10 (2)
         let inputs4 = vec![true, true, true, true, false, true, false, true];
-        let result4 = evaluate_circuit_direct(&circuit, inputs4);
+        let (result4, _) = evaluate_circuit_direct(&circuit, inputs4);
         assert_eq!(result4[&output_wire], true, "3+3 should not equal 2+2"); // 1 means different
-        
+
         // Test case 5: 1+1 == 2+0 (both equal 2)
         // a=01 (1), b=01 (1), c=10 (2), d=00 (0)
         let inputs5 = vec![true, false, true, false, false, true, false, false];
-        let result5 = evaluate_circuit_direct(&circuit, inputs5);
+        let (result5, _) = evaluate_circuit_direct(&circuit, inputs5);
         assert_eq!(result5[&output_wire], false, "1+1 should equal 2+0"); // 0 means equal
     }
 }
