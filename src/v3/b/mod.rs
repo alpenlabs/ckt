@@ -299,7 +299,8 @@ impl CircuitStats {
 ///
 /// This function reads the entire file and verifies that the stored checksum
 /// matches the computed checksum of: hash(gate_data || header_fields_after_checksum)
-pub fn verify_checksum<R: std::io::Read>(mut reader: R) -> std::io::Result<bool> {
+/// Returns the checksum if verification succeeds
+pub fn verify_checksum<R: std::io::Read>(mut reader: R) -> std::io::Result<[u8; 32]> {
     use blake3::Hasher;
     use std::io::{Error, ErrorKind};
 
@@ -345,11 +346,19 @@ pub fn verify_checksum<R: std::io::Read>(mut reader: R) -> std::io::Result<bool>
 
     // Compare checksums
     let computed_hash = hasher.finalize();
-    Ok(computed_hash.as_bytes() == &stored_checksum)
+    if computed_hash.as_bytes() == &stored_checksum {
+        Ok(stored_checksum)
+    } else {
+        Err(Error::new(
+            ErrorKind::InvalidData,
+            "Checksum verification failed",
+        ))
+    }
 }
 
 /// Verify the checksum of a v3b file from a path
-pub fn verify_checksum_file(path: &std::path::Path) -> std::io::Result<bool> {
+/// Returns the checksum if verification succeeds
+pub fn verify_checksum_file(path: &std::path::Path) -> std::io::Result<[u8; 32]> {
     let file = std::fs::File::open(path)?;
     verify_checksum(std::io::BufReader::new(file))
 }

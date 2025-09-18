@@ -198,6 +198,10 @@ impl<W: Write + Seek> CircuitWriter<W> {
         let hash = self.hasher.finalize();
         let checksum_bytes = hash.as_bytes();
 
+        // Store checksum for return
+        let mut checksum = [0u8; 32];
+        checksum.copy_from_slice(checksum_bytes);
+
         // Seek back to beginning and update header with actual counts and checksum
         self.writer.seek(SeekFrom::Start(self.header_position))?;
 
@@ -223,6 +227,7 @@ impl<W: Write + Seek> CircuitWriter<W> {
             primary_inputs: self.primary_inputs,
             total_levels: (self.current_level - 1) as u32, // Subtract 1 since we start at level 1
             bytes_written: self.bytes_written,
+            checksum,
         };
 
         Ok((self.writer, stats))
@@ -405,7 +410,7 @@ mod tests {
 
         // Verify checksum should pass
         let cursor = Cursor::new(data.clone());
-        assert!(super::super::verify_checksum(cursor)?);
+        let _checksum = super::super::verify_checksum(cursor)?;
 
         // Now corrupt the data
         let mut corrupted_data = data.clone();
@@ -417,7 +422,7 @@ mod tests {
         let cursor = Cursor::new(corrupted_data);
         let result = super::super::verify_checksum(cursor);
         assert!(
-            result.is_err() || !result.unwrap(),
+            result.is_err(),
             "Checksum verification should fail for corrupted data"
         );
 

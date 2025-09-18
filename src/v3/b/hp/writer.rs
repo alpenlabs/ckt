@@ -199,6 +199,10 @@ impl CircuitWriter {
         let hash = self.hasher.finalize();
         let checksum_bytes = hash.as_bytes();
 
+        // Store checksum for return
+        let mut checksum = [0u8; 32];
+        checksum.copy_from_slice(checksum_bytes);
+
         // Build complete header with checksum
         let mut header_bytes = Vec::with_capacity(CircuitHeader::SIZE);
         header_bytes.push(VERSION);
@@ -222,6 +226,7 @@ impl CircuitWriter {
             primary_inputs: self.primary_inputs,
             total_levels: (self.current_level - 1) as u32, // Subtract 1 since we start at level 1
             bytes_written: self.bytes_written,
+            checksum,
         };
 
         Ok((self.file, stats))

@@ -44,6 +44,7 @@ pub struct CircuitStats {
     pub primary_inputs: u64,
     pub total_levels: u32,
     pub bytes_written: u64,
+    pub checksum: [u8; 32],
 }
 
 impl CircuitStats {

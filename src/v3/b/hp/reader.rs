@@ -374,7 +374,8 @@ impl CircuitReader {
 }
 
 /// Async function to verify the BLAKE3 checksum of a v3b file
-pub async fn verify_checksum_async(file: File) -> Result<bool> {
+/// Returns the checksum if verification succeeds
+pub async fn verify_checksum_async(file: File) -> Result<[u8; 32]> {
     use blake3::Hasher;
 
     let len = file.metadata().await?.len();
@@ -430,5 +431,12 @@ pub async fn verify_checksum_async(file: File) -> Result<bool> {
 
     // Compare checksums
     let computed_hash = hasher.finalize();
-    Ok(computed_hash.as_bytes() == &stored_checksum)
+    if computed_hash.as_bytes() == &stored_checksum {
+        Ok(stored_checksum)
+    } else {
+        Err(Error::new(
+            ErrorKind::InvalidData,
+            "Checksum verification failed",
+        ))
+    }
 }

@@ -318,4 +318,72 @@ pub fn read_header_seekable<S: Read + Seek>(reader: &mut S) -> Result<CircuitHea
     Ok(header)
 }
 
+/// Verify the BLAKE3 checksum of a v3a file
+/// Returns the checksum if verification succeeds
+pub fn verify_checksum<R: std::io::Read>(mut reader: R) -> Result<[u8; 32]> {
+    use blake3::Hasher;
+
+    // Read header
+    let mut header_bytes = [0u8; CircuitHeader::SIZE];
+    reader.read_exact(&mut header_bytes)?;
+
+    // Validate version and type
+    if header_bytes[0] != VERSION {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            format!(
+                "Invalid version: expected {}, got {}",
+                VERSION, header_bytes[0]
+            ),
+        ));
+    }
+
+    if header_bytes[1] != FormatType::TypeA.to_byte() {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            format!(
+                "Invalid format type: expected {}, got {}",
+                FormatType::TypeA.to_byte(),
+                header_bytes[1]
+            ),
+        ));
+    }
+
+    // Extract stored checksum
+    let mut stored_checksum = [0u8; 32];
+    stored_checksum.copy_from_slice(&header_bytes[2..34]);
+
+    // Hash all gate data first
+    let mut hasher = Hasher::new();
+    let mut buffer = vec![0u8; 64 * 1024]; // 64KB buffer
+    loop {
+        let bytes_read = reader.read(&mut buffer)?;
+        if bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..bytes_read]);
+    }
+
+    // Then hash the header fields after checksum
+    hasher.update(&header_bytes[34..]);
+
+    // Compare checksums
+    let computed_hash = hasher.finalize();
+    if computed_hash.as_bytes() == &stored_checksum {
+        Ok(stored_checksum)
+    } else {
+        Err(Error::new(
+            ErrorKind::InvalidData,
+            "Checksum verification failed",
+        ))
+    }
+}
+
+/// Verify the checksum of a v3a file from a path
+/// Returns the checksum if verification succeeds
+pub fn verify_checksum_file(path: &std::path::Path) -> Result<[u8; 32]> {
+    let file = std::fs::File::open(path)?;
+    verify_checksum(std::io::BufReader::new(file))
+}
+
 // TODO: Add proper tests for v3a format with 34-bit wire IDs

@@ -129,6 +129,7 @@ impl CircuitWriter {
     }
 
     /// Finish writing and update header with actual gate counts and checksum
+    /// Returns the file handle, circuit stats including the computed checksum
     pub async fn finish(mut self) -> Result<(File, CircuitStats)> {
         // Flush any remaining gates in the current batch
         self.write_batch_to_buffer()?;
@@ -144,6 +145,10 @@ impl CircuitWriter {
         // Compute final checksum
         let hash = self.hasher.finalize();
         let checksum_bytes = hash.as_bytes();
+
+        // Store checksum for return
+        let mut checksum = [0u8; 32];
+        checksum.copy_from_slice(checksum_bytes);
 
         // Build complete header
         let mut header_bytes = Vec::with_capacity(CircuitHeader::SIZE);
@@ -167,6 +172,7 @@ impl CircuitWriter {
             primary_inputs: 0, // v3a doesn't track primary inputs
             total_levels: 0,   // v3a doesn't have levels
             bytes_written: self.bytes_written,
+            checksum,
         };
 
         Ok((self.file, stats))
@@ -249,8 +255,7 @@ mod tests {
         {
             let file = OpenOptions::new().read(true).open(&path).await?;
 
-            let valid = super::super::reader::verify_checksum_async(file).await?;
-            assert!(valid, "Checksum verification failed");
+            let _checksum = super::super::reader::verify_checksum_async(file).await?;
         }
 
         Ok(())
