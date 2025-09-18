@@ -5,10 +5,10 @@ use super::{
     AndGates, Gate, Level, WireLocation, XorGates,
     varints::{FlaggedVarInt, StandardVarInt},
 };
-use crate::v3::{CircuitHeaderV3B, FormatType, VERSION};
+use crate::v3::{FormatType, VERSION, b::CircuitHeader};
 
 /// Standard reader for CKT v3b format using std::io traits
-pub struct CircuitReaderV3B<R: Read> {
+pub struct CircuitReader<R: Read> {
     reader: R,
     /// Buffer for efficient reading
     buffer: Vec<u8>,
@@ -21,7 +21,7 @@ pub struct CircuitReaderV3B<R: Read> {
     /// Current level being read
     current_level: u32,
     /// Circuit header
-    header: CircuitHeaderV3B,
+    header: CircuitHeader,
     /// Number of levels read so far
     levels_read: usize,
     /// Total gates read so far
@@ -32,7 +32,7 @@ pub struct CircuitReaderV3B<R: Read> {
     level_sizes: Vec<usize>,
 }
 
-impl<R: Read> CircuitReaderV3B<R> {
+impl<R: Read> CircuitReader<R> {
     /// Create a new v3b reader and verify checksum
     pub fn new(reader: R) -> Result<Self> {
         Self::with_buffer_size(reader, 64 * 1024)
@@ -41,7 +41,7 @@ impl<R: Read> CircuitReaderV3B<R> {
     /// Create a new v3b reader with specified buffer size
     pub fn with_buffer_size(mut reader: R, buffer_size: usize) -> Result<Self> {
         // Read header (58 bytes)
-        let mut header_bytes = [0u8; CircuitHeaderV3B::SIZE];
+        let mut header_bytes = [0u8; CircuitHeader::SIZE];
         reader.read_exact(&mut header_bytes)?;
 
         // Validate version and type
@@ -68,7 +68,7 @@ impl<R: Read> CircuitReaderV3B<R> {
         let and_gates = u64::from_le_bytes(header_bytes[42..50].try_into().unwrap());
         let primary_inputs = u64::from_le_bytes(header_bytes[50..58].try_into().unwrap());
 
-        let header = CircuitHeaderV3B {
+        let header = CircuitHeader {
             version: header_bytes[0],
             format_type: header_bytes[1],
             checksum: stored_checksum,
@@ -97,7 +97,7 @@ impl<R: Read> CircuitReaderV3B<R> {
     }
 
     /// Get the circuit header
-    pub fn header(&self) -> &CircuitHeaderV3B {
+    pub fn header(&self) -> &CircuitHeader {
         &self.header
     }
 
@@ -209,8 +209,8 @@ impl<R: Read> CircuitReaderV3B<R> {
         // Read XOR gates into SoA
         for _ in 0..num_xor {
             let gate = self.read_gate()?;
-            xor_gates.input1s.push(gate.input1);
-            xor_gates.input2s.push(gate.input2);
+            xor_gates.input1s.push(gate.in1);
+            xor_gates.input2s.push(gate.in2);
             xor_gates.count += 1;
             self.wire_counter += 1;
             self.gates_read += 1;
@@ -219,8 +219,8 @@ impl<R: Read> CircuitReaderV3B<R> {
         // Read AND gates into SoA
         for _ in 0..num_and {
             let gate = self.read_gate()?;
-            and_gates.input1s.push(gate.input1);
-            and_gates.input2s.push(gate.input2);
+            and_gates.input1s.push(gate.in1);
+            and_gates.input2s.push(gate.in2);
             and_gates.count += 1;
             self.wire_counter += 1;
             self.gates_read += 1;
@@ -234,15 +234,6 @@ impl<R: Read> CircuitReaderV3B<R> {
         self.current_level += 1;
 
         Ok(Some((xor_gates, and_gates)))
-    }
-
-    /// Read all remaining levels
-    pub fn read_all_levels(&mut self) -> Result<Vec<Level>> {
-        let mut levels = Vec::new();
-        while let Some(level) = self.read_level()? {
-            levels.push(level);
-        }
-        Ok(levels)
     }
 
     /// Read a single gate with implicit output
@@ -347,8 +338,8 @@ impl<R: Read> CircuitReaderV3B<R> {
 }
 
 /// Read v3b header from a reader
-pub fn read_header<R: Read>(reader: &mut R) -> Result<CircuitHeaderV3B> {
-    let mut header_bytes = [0u8; CircuitHeaderV3B::SIZE];
+pub fn read_header<R: Read>(reader: &mut R) -> Result<CircuitHeader> {
+    let mut header_bytes = [0u8; CircuitHeader::SIZE];
     reader.read_exact(&mut header_bytes)?;
 
     // Validate version and type
@@ -375,7 +366,7 @@ pub fn read_header<R: Read>(reader: &mut R) -> Result<CircuitHeaderV3B> {
     let and_gates = u64::from_le_bytes(header_bytes[42..50].try_into().unwrap());
     let primary_inputs = u64::from_le_bytes(header_bytes[50..58].try_into().unwrap());
 
-    Ok(CircuitHeaderV3B {
+    Ok(CircuitHeader {
         version: header_bytes[0],
         format_type: header_bytes[1],
         checksum,

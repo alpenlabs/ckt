@@ -266,7 +266,7 @@ pub fn read_header_seekable<S: Read + Seek>(reader: &mut S) -> Result<CircuitHea
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{CompactGate, GateType, writer::CircuitWriter};
+    use crate::v1::{CompactGate, GateType, writer::CircuitWriter};
     use std::io::Cursor;
 
     #[test]

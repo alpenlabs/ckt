@@ -161,13 +161,6 @@ impl<const N: usize> Default for AndGates<N> {
     }
 }
 
-/// Gate type enumeration for v2
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GateType {
-    XOR,
-    AND,
-}
-
 #[cfg(all(test, feature = "high-performance"))]
 mod compatibility_tests {
     use super::*;
@@ -207,7 +200,7 @@ mod compatibility_tests {
             .open(file_path)
             .await?;
 
-        let mut monoio_writer = hp::writer::CircuitWriterV2::new(monoio_file, 4).await?;
+        let mut monoio_writer = hp::writer::CircuitWriter::new(monoio_file, 4).await?;
         monoio_writer.write_level(&level0).await?;
         monoio_writer.write_level(&level1).await?;
         let (_, monoio_stats) = monoio_writer.finish().await?;
@@ -238,7 +231,7 @@ mod compatibility_tests {
         let mut std_reader = reader::CircuitReaderV2::new(std_cursor)?;
 
         let monoio_file = OpenOptions::new().read(true).open(file_path).await?;
-        let mut monoio_reader = hp::reader::CircuitReaderV2::new(monoio_file, 64 * 1024).await?;
+        let mut monoio_reader = hp::reader::CircuitReader::new(monoio_file, 64 * 1024).await?;
 
         // Compare headers
         assert_eq!(std_reader.header(), monoio_reader.header());
@@ -285,7 +278,7 @@ mod compatibility_tests {
         std::fs::write(temp_file.path(), &data)?;
 
         let monoio_file = OpenOptions::new().read(true).open(temp_file.path()).await?;
-        let mut monoio_reader = hp::reader::CircuitReaderV2::new(monoio_file, 64 * 1024).await?;
+        let mut monoio_reader = hp::reader::CircuitReader::new(monoio_file, 64 * 1024).await?;
         let (monoio_xor, monoio_and) = monoio_reader.read_soa_level::<8>().await?.unwrap();
 
         // Compare SoA results

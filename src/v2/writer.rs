@@ -1,7 +1,10 @@
 use cynosure::hints::{likely, unlikely};
 use std::io::{Result, Seek, SeekFrom, Write};
 
-use crate::v2::{CircuitHeaderV2, Gate, GateType, Level, VERSION, varints::*};
+use crate::{
+    GateType,
+    v2::{CircuitHeaderV2, Gate, Level, VERSION, varints::*},
+};
 
 /// Standard writer for CKT v2 format using std::io traits
 pub struct CircuitWriterV2<W: Write + Seek> {

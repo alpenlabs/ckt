@@ -2,11 +2,11 @@ use cynosure::hints::{likely, prefetch_read_data, unlikely};
 use monoio::fs::File;
 use std::io::{Error, ErrorKind, Result};
 
-use crate::v3::a::GateBatch34;
-use crate::v3::{CircuitHeaderV3A, FormatType, VERSION};
+use crate::v3::a::{CircuitHeader, GateBatch34};
+use crate::v3::{FormatType, VERSION};
 
 /// High performance async reader for CKT v3a format using monoio
-pub struct CircuitReaderV3A {
+pub struct CircuitReader {
     file: File,
     /// Buffer used for file reads with monoio
     buffer: Vec<u8>,
@@ -17,25 +17,25 @@ pub struct CircuitReaderV3A {
     /// Total gates read so far
     total_gates_read: usize,
     /// Circuit header
-    header: CircuitHeaderV3A,
+    header: CircuitHeader,
     /// Total bytes in the file
     total_bytes: u64,
     /// How many bytes we've read from file
     bytes_read: u64,
 }
 
-impl CircuitReaderV3A {
+impl CircuitReader {
     /// Create a new v3a reader
     pub async fn new(file: File, max_buffer_size: usize) -> Result<Self> {
         let len = file.metadata().await?.len();
 
         // Read header (50 bytes)
         let (res, header_bytes) = file
-            .read_exact_at(Vec::with_capacity(CircuitHeaderV3A::SIZE), 0)
+            .read_exact_at(Vec::with_capacity(CircuitHeader::SIZE), 0)
             .await;
         res?;
 
-        if unlikely(header_bytes.len() != CircuitHeaderV3A::SIZE) {
+        if unlikely(header_bytes.len() != CircuitHeader::SIZE) {
             return Err(Error::new(
                 ErrorKind::UnexpectedEof,
                 "Incomplete header read",
@@ -65,7 +65,7 @@ impl CircuitReaderV3A {
         let xor_gates = u64::from_le_bytes(header_bytes[34..42].try_into().unwrap());
         let and_gates = u64::from_le_bytes(header_bytes[42..50].try_into().unwrap());
 
-        let header = CircuitHeaderV3A {
+        let header = CircuitHeader {
             version: header_bytes[0],
             format_type: header_bytes[1],
             checksum,
@@ -81,12 +81,12 @@ impl CircuitReaderV3A {
             total_gates_read: 0,
             header,
             total_bytes: len,
-            bytes_read: CircuitHeaderV3A::SIZE as u64,
+            bytes_read: CircuitHeader::SIZE as u64,
         })
     }
 
     /// Get the circuit header
-    pub fn header(&self) -> &CircuitHeaderV3A {
+    pub fn header(&self) -> &CircuitHeader {
         &self.header
     }
 
@@ -260,7 +260,7 @@ pub async fn verify_checksum_async(file: File) -> Result<bool> {
 
     // Read header
     let (res, header_bytes) = file
-        .read_exact_at(Vec::with_capacity(CircuitHeaderV3A::SIZE), 0)
+        .read_exact_at(Vec::with_capacity(CircuitHeader::SIZE), 0)
         .await;
     res?;
 
@@ -285,7 +285,7 @@ pub async fn verify_checksum_async(file: File) -> Result<bool> {
 
     // Hash all gate data first
     let mut hasher = Hasher::new();
-    let mut offset = CircuitHeaderV3A::SIZE as u64;
+    let mut offset = CircuitHeader::SIZE as u64;
     let buffer = vec![0u8; 1024 * 1024]; // 1MB buffer
 
     while offset < len {

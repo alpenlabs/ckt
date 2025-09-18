@@ -6,13 +6,15 @@ use super::{
     Gate, Level, WireLocation,
     varints::{FlaggedVarInt, StandardVarInt},
 };
-use crate::v3::{CircuitHeaderV3B, CircuitStats, FormatType, GateType, VERSION};
+use crate::{
+    GateType,
+    v3::{CircuitStats, FormatType, VERSION, b::CircuitHeader},
+};
 
 /// Standard writer for CKT v3b format using std::io traits
-pub struct CircuitWriterV3B<W: Write + Seek> {
+pub struct CircuitWriter<W: Write + Seek> {
     writer: W,
     buffer: Vec<u8>,
-    wire_counter: u64,
     current_level: u32,
     primary_inputs: u64,
     xor_gates_written: u64,
@@ -23,14 +25,13 @@ pub struct CircuitWriterV3B<W: Write + Seek> {
     hasher: Hasher,
 }
 
-impl<W: Write + Seek> CircuitWriterV3B<W> {
+impl<W: Write + Seek> CircuitWriter<W> {
     /// Create a new v3b writer with the given primary inputs count
     pub fn new(writer: W, primary_inputs: u64) -> Result<Self> {
         let mut circuit_writer = Self {
             writer,
             buffer: Vec::with_capacity(64 * 1024), // 64KB buffer
-            wire_counter: primary_inputs,
-            current_level: 1, // Start at level 1 (level 0 is implicit)
+            current_level: 1,                      // Start at level 1 (level 0 is implicit)
             primary_inputs,
             xor_gates_written: 0,
             and_gates_written: 0,
@@ -52,14 +53,14 @@ impl<W: Write + Seek> CircuitWriterV3B<W> {
 
         // Write placeholder header directly to writer (not through buffer)
         // This ensures it doesn't get hashed
-        let mut placeholder = vec![0u8; CircuitHeaderV3B::SIZE];
+        let mut placeholder = vec![0u8; CircuitHeader::SIZE];
         placeholder[0] = VERSION;
         placeholder[1] = FormatType::TypeB.to_byte();
         // Rest are zeros (checksum, counts)
         // We'll update with real values later
 
         self.writer.write_all(&placeholder)?;
-        self.bytes_written += CircuitHeaderV3B::SIZE as u64;
+        self.bytes_written += CircuitHeader::SIZE as u64;
 
         Ok(())
     }
@@ -116,8 +117,8 @@ impl<W: Write + Seek> CircuitWriterV3B<W> {
 
         // Encode input1 wire location
         let bytes1 = FlaggedVarInt::encode_wire_location(
-            gate.input1.level,
-            gate.input1.index,
+            gate.in1.level,
+            gate.in1.index,
             self.current_level,
             &mut temp_buf,
         )?;
@@ -126,16 +127,13 @@ impl<W: Write + Seek> CircuitWriterV3B<W> {
 
         // Encode input2 wire location
         let bytes2 = FlaggedVarInt::encode_wire_location(
-            gate.input2.level,
-            gate.input2.index,
+            gate.in2.level,
+            gate.in2.index,
             self.current_level,
             &mut temp_buf,
         )?;
         self.buffer.extend_from_slice(&temp_buf[..bytes2]);
         self.hasher.update(&temp_buf[..bytes2]);
-
-        // Output is implicit - just increment wire counter
-        self.wire_counter += 1;
 
         // Track gate type counts
         match gate_type {
@@ -152,11 +150,6 @@ impl<W: Write + Seek> CircuitWriterV3B<W> {
             self.write_level(level)?;
         }
         Ok(())
-    }
-
-    /// Get the current wire counter (next available wire ID)
-    pub fn wire_counter(&self) -> u64 {
-        self.wire_counter
     }
 
     /// Get current level
@@ -209,7 +202,7 @@ impl<W: Write + Seek> CircuitWriterV3B<W> {
         self.writer.seek(SeekFrom::Start(self.header_position))?;
 
         // Write complete header with checksum
-        let mut header_bytes = Vec::with_capacity(CircuitHeaderV3B::SIZE);
+        let mut header_bytes = Vec::with_capacity(CircuitHeader::SIZE);
         header_bytes.push(VERSION);
         header_bytes.push(FormatType::TypeB.to_byte());
         header_bytes.extend_from_slice(checksum_bytes);
@@ -249,13 +242,13 @@ pub fn convert_gate_to_v3b(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v3::b::reader::CircuitReaderV3B;
+    use crate::v3::b::reader::CircuitReader;
     use std::io::Cursor;
 
     #[test]
     fn test_writer_basic() -> Result<()> {
         let buffer = Cursor::new(Vec::new());
-        let mut writer = CircuitWriterV3B::new(buffer, 4)?; // 4 primary inputs
+        let mut writer = CircuitWriter::new(buffer, 4)?; // 4 primary inputs
 
         // Level 1: 2 XOR gates using primary inputs
         let mut level1 = Level::new(1);
@@ -287,7 +280,7 @@ mod tests {
         // Verify we can read it back
         let data = cursor.into_inner();
         let cursor = Cursor::new(data);
-        let mut reader = CircuitReaderV3B::new(cursor)?;
+        let mut reader = CircuitReader::new(cursor)?;
 
         assert_eq!(reader.header().xor_gates, 2);
         assert_eq!(reader.header().and_gates, 1);
@@ -306,7 +299,7 @@ mod tests {
     #[test]
     fn test_writer_multiple_levels() -> Result<()> {
         let buffer = Cursor::new(Vec::new());
-        let mut writer = CircuitWriterV3B::new(buffer, 2)?; // 2 primary inputs
+        let mut writer = CircuitWriter::new(buffer, 2)?; // 2 primary inputs
 
         // Level 1: Gates that only use primary inputs
         let mut level1 = Level::new(1);
@@ -343,7 +336,7 @@ mod tests {
     #[test]
     fn test_empty_level() -> Result<()> {
         let buffer = Cursor::new(Vec::new());
-        let mut writer = CircuitWriterV3B::new(buffer, 2)?;
+        let mut writer = CircuitWriter::new(buffer, 2)?;
 
         let empty_level = Level::new(1);
         writer.write_level(&empty_level)?; // Should succeed and do nothing
@@ -357,7 +350,7 @@ mod tests {
     #[test]
     fn test_previous_level_encoding() -> Result<()> {
         let buffer = Cursor::new(Vec::new());
-        let mut writer = CircuitWriterV3B::new(buffer, 2)?;
+        let mut writer = CircuitWriter::new(buffer, 2)?;
 
         // Level 1
         let mut level1 = Level::new(1);
@@ -388,7 +381,7 @@ mod tests {
     #[test]
     fn test_checksum_verification() -> Result<()> {
         let buffer = Cursor::new(Vec::new());
-        let mut writer = CircuitWriterV3B::new(buffer, 3)?; // 3 primary inputs
+        let mut writer = CircuitWriter::new(buffer, 3)?; // 3 primary inputs
 
         // Create some test levels
         let mut level1 = Level::new(1);
@@ -413,7 +406,7 @@ mod tests {
 
         // Read back and verify checksum
         let cursor = Cursor::new(data.clone());
-        let mut reader = CircuitReaderV3B::new(cursor)?;
+        let mut reader = CircuitReader::new(cursor)?;
 
         // Read all data
         while let Some(_level) = reader.read_level()? {

@@ -2,10 +2,13 @@ use cynosure::hints::{likely, unlikely};
 use monoio::fs::File;
 use std::io::Result;
 
-use crate::v2::{CircuitHeaderV2, Gate, GateType, Level, VERSION, varints::*};
+use crate::{
+    GateType,
+    v2::{CircuitHeaderV2, Gate, Level, VERSION, varints::*},
+};
 
 /// High-performance async writer for CKT v2 format using monoio
-pub struct CircuitWriterV2 {
+pub struct CircuitWriter {
     file: File,
     buffer: Vec<u8>,
     wire_counter: u64,
@@ -15,7 +18,7 @@ pub struct CircuitWriterV2 {
     bytes_written: u64,
 }
 
-impl CircuitWriterV2 {
+impl CircuitWriter {
     /// Create a new v2 writer with placeholder header
     pub async fn new(file: File, primary_inputs: u64) -> Result<Self> {
         let mut writer = Self {
@@ -224,7 +227,7 @@ mod tests {
             .open(file_path)
             .await?;
 
-        let mut writer = CircuitWriterV2::new(file, 4).await?; // 4 primary inputs
+        let mut writer = CircuitWriter::new(file, 4).await?; // 4 primary inputs
 
         // Create a simple level with 2 XOR gates and 1 AND gate
         let mut level = Level::new();
@@ -255,7 +258,7 @@ mod tests {
             .open(file_path)
             .await?;
 
-        let mut writer = CircuitWriterV2::new(file, 2).await?; // 2 primary inputs
+        let mut writer = CircuitWriter::new(file, 2).await?; // 2 primary inputs
 
         // Level 0: Gates that only use primary inputs
         let mut level0 = Level::new();

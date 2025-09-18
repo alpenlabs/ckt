@@ -3,13 +3,14 @@ use cynosure::hints::likely;
 use monoio::fs::File;
 use std::io::Result;
 
-use crate::v3::a::{CompactGate34, GateBatch34};
-use crate::v3::{CircuitHeaderV3A, CircuitStats, FormatType, GateType, VERSION};
+use crate::GateType;
+use crate::v3::a::{CircuitHeader, Gate, GateBatch34};
+use crate::v3::{CircuitStats, FormatType, VERSION};
 
 const BATCHES_UNTIL_FLUSH: usize = 1000;
 
 /// High-performance async writer for CKT v3a format using monoio
-pub struct CircuitWriterV3A {
+pub struct CircuitWriter {
     file: File,
     buffer: Vec<u8>,
     current_batch: GateBatch34,
@@ -22,11 +23,11 @@ pub struct CircuitWriterV3A {
     hasher: Hasher,
 }
 
-impl CircuitWriterV3A {
+impl CircuitWriter {
     /// Create a new v3a writer
     pub async fn new(file: File) -> Result<Self> {
         // Write placeholder header (50 bytes)
-        let placeholder = vec![0u8; CircuitHeaderV3A::SIZE];
+        let placeholder = vec![0u8; CircuitHeader::SIZE];
         let (res, _) = file.write_all_at(placeholder, 0).await;
         res?;
 
@@ -39,13 +40,13 @@ impl CircuitWriterV3A {
             xor_gates: 0,
             and_gates: 0,
             batches_waiting_for_flush: 0,
-            bytes_written: CircuitHeaderV3A::SIZE as u64,
+            bytes_written: CircuitHeader::SIZE as u64,
             hasher: Hasher::new(),
         })
     }
 
     /// Write a single gate
-    pub async fn write_gate(&mut self, gate: CompactGate34, gate_type: GateType) -> Result<()> {
+    pub async fn write_gate(&mut self, gate: Gate, gate_type: GateType) -> Result<()> {
         // Track gate type counts
         match gate_type {
             GateType::XOR => self.xor_gates += 1,
@@ -72,7 +73,7 @@ impl CircuitWriterV3A {
     }
 
     /// Write multiple gates
-    pub async fn write_gates(&mut self, gates: &[(CompactGate34, GateType)]) -> Result<()> {
+    pub async fn write_gates(&mut self, gates: &[(Gate, GateType)]) -> Result<()> {
         for &(gate, gate_type) in gates {
             self.write_gate(gate, gate_type).await?;
         }
@@ -145,7 +146,7 @@ impl CircuitWriterV3A {
         let checksum_bytes = hash.as_bytes();
 
         // Build complete header
-        let mut header_bytes = Vec::with_capacity(CircuitHeaderV3A::SIZE);
+        let mut header_bytes = Vec::with_capacity(CircuitHeader::SIZE);
         header_bytes.push(VERSION);
         header_bytes.push(FormatType::TypeA.to_byte());
         header_bytes.extend_from_slice(checksum_bytes);
@@ -175,7 +176,7 @@ impl CircuitWriterV3A {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v3::a::hp::reader::CircuitReaderV3A;
+    use crate::v3::a::hp::reader::CircuitReader;
     use monoio::fs::OpenOptions;
     use tempfile::NamedTempFile;
 
@@ -193,11 +194,11 @@ mod tests {
                 .open(&path)
                 .await?;
 
-            let mut writer = CircuitWriterV3A::new(file).await?;
+            let mut writer = CircuitWriter::new(file).await?;
 
             // Write some test gates
             for i in 0..100u64 {
-                let gate = CompactGate34::new(i, i + 1, i + 1000);
+                let gate = Gate::new(i, i + 1, i + 1000);
                 let gate_type = if i % 2 == 0 {
                     GateType::XOR
                 } else {
@@ -216,7 +217,7 @@ mod tests {
         {
             let file = OpenOptions::new().read(true).open(&path).await?;
 
-            let mut reader = CircuitReaderV3A::new(file, 64 * 1024).await?;
+            let mut reader = CircuitReader::new(file, 64 * 1024).await?;
 
             assert_eq!(reader.total_gates(), 100);
             assert_eq!(reader.xor_gates(), 50);
@@ -227,9 +228,9 @@ mod tests {
                 for i in 0..count {
                     let (gate, gate_type) = batch.get_gate(i);
                     let expected_i = gate_count as u64;
-                    assert_eq!(gate.input1, expected_i);
-                    assert_eq!(gate.input2, expected_i + 1);
-                    assert_eq!(gate.output, expected_i + 1000);
+                    assert_eq!(gate.in1, expected_i);
+                    assert_eq!(gate.in2, expected_i + 1);
+                    assert_eq!(gate.out, expected_i + 1000);
 
                     if expected_i % 2 == 0 {
                         assert_eq!(gate_type, GateType::XOR);
@@ -267,13 +268,13 @@ mod tests {
             .open(&path)
             .await?;
 
-        let mut writer = CircuitWriterV3A::new(file).await?;
+        let mut writer = CircuitWriter::new(file).await?;
 
         // Write 1M gates to test performance and correctness
         const TOTAL_GATES: u64 = 1_000_000;
 
         for i in 0..TOTAL_GATES {
-            let gate = CompactGate34::new(i * 2, i * 2 + 1, i + TOTAL_GATES);
+            let gate = Gate::new(i * 2, i * 2 + 1, i + TOTAL_GATES);
             writer.write_gate(gate, GateType::XOR).await?;
         }
 

@@ -1,7 +1,10 @@
 use std::io::{Result, Seek, Write};
 
-use super::{CompactGate34, GateBatch34};
-use crate::v3::{CircuitHeaderV3A, FormatType, GateType, VERSION};
+use super::{CircuitHeader, Gate, GateBatch34};
+use crate::{
+    GateType,
+    v3::{FormatType, VERSION},
+};
 
 const BATCHES_UNTIL_FLUSH: usize = 1000;
 
@@ -23,7 +26,7 @@ pub struct CircuitWriter<W: Write + Seek> {
 impl<W: Write + Seek> CircuitWriter<W> {
     pub fn new(mut writer: W) -> Result<Self> {
         // Write placeholder header (18 bytes: version + type + xor_count + and_count)
-        writer.write_all(&[0u8; CircuitHeaderV3A::SIZE])?;
+        writer.write_all(&[0u8; CircuitHeader::SIZE])?;
 
         Ok(Self {
             writer,
@@ -37,7 +40,7 @@ impl<W: Write + Seek> CircuitWriter<W> {
     }
 
     /// Write a single gate
-    pub fn write_gate(&mut self, gate: CompactGate34, gate_type: GateType) -> Result<()> {
+    pub fn write_gate(&mut self, gate: Gate, gate_type: GateType) -> Result<()> {
         // Track gate type counts
         match gate_type {
             GateType::XOR => self.xor_gates += 1,

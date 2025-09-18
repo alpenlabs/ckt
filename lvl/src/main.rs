@@ -1,5 +1,5 @@
-use ckt::hp::reader::CircuitReader;
-use ckt::GateType;
+use ckt::v3::a::hp::reader::CircuitReader;
+use ckt::v3::b::hp::writer::CircuitWriter;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use monoio::fs::File;
 use std::alloc::{GlobalAlloc, Layout};
@@ -7,7 +7,7 @@ use std::cell::Cell;
 use std::time::{Duration, Instant};
 
 mod new;
-use new::{Gate, GateType as NewGateType, Leveller};
+use new::Leveller;
 
 // Memory tracking wrapper around mimalloc
 struct TrackingAllocator {
@@ -79,7 +79,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // First pass: get total gates count
     let total_gates = {
-        let file = File::open("dv.copy.ckt").await?;
+        let file = File::open("dv.ckt").await?;
         let reader = CircuitReader::new(file, 10_000_000).await?;
         reader.total_gates()
     };
@@ -138,7 +138,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let overall_start = Instant::now();
 
     // Open file for reading
-    let file = File::open("dv.copy.ckt").await?;
+    let file = File::open("dv.ckt").await?;
     let mut reader = CircuitReader::new(file, 10_000_000).await?;
     let mut reader_exhausted = false;
 
@@ -150,17 +150,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Always process the entire batch to avoid missing gates
                 for i in 0..num_gates {
                     let (gate, gate_type) = batch.get_gate(i);
-                    let new_gate = Gate {
-                        in1: gate.input1 as u64,
-                        in2: gate.input2 as u64,
-                        out: gate.output as u64,
-                    };
-                    let new_gate_type = match gate_type {
-                        GateType::XOR => NewGateType::Xor,
-                        GateType::AND => NewGateType::And,
-                    };
-
-                    leveller.add_gate(new_gate, new_gate_type);
+                    leveller.add_gate(gate, gate_type);
                     total_gates_added += 1;
                 }
                 pb_load.inc(num_gates as u64);
@@ -182,6 +172,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         total_gates_added
     ));
 
+    let file = File::open("output.ckt").await.unwrap();
+    let mut writer = CircuitWriter::new(file, PRIMARY_INPUTS).await.unwrap();
+
     // Main processing loop
     loop {
         // Try to make a level
@@ -192,6 +185,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             total_gates_in_levels += level_gates;
             gates_since_check += level_gates;
             total_levels += 1;
+            writer.write_level(&level).await.unwrap();
 
             // Log level creation
             let _ = multi_pb.println(format!(
@@ -237,17 +231,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 // Always process the entire batch
                                 for i in 0..num_gates {
                                     let (gate, gate_type) = batch.get_gate(i);
-                                    let new_gate = Gate {
-                                        in1: gate.input1 as u64,
-                                        in2: gate.input2 as u64,
-                                        out: gate.output as u64,
-                                    };
-                                    let new_gate_type = match gate_type {
-                                        GateType::XOR => NewGateType::Xor,
-                                        GateType::AND => NewGateType::And,
-                                    };
-
-                                    leveller.add_gate(new_gate, new_gate_type);
+                                    leveller.add_gate(gate, gate_type);
                                     total_gates_added += 1;
                                     loaded += 1;
                                 }
@@ -285,17 +269,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             // Always process the entire batch
                             for i in 0..num_gates {
                                 let (gate, gate_type) = batch.get_gate(i);
-                                let new_gate = Gate {
-                                    in1: gate.input1 as u64,
-                                    in2: gate.input2 as u64,
-                                    out: gate.output as u64,
-                                };
-                                let new_gate_type = match gate_type {
-                                    GateType::XOR => NewGateType::Xor,
-                                    GateType::AND => NewGateType::And,
-                                };
-
-                                leveller.add_gate(new_gate, new_gate_type);
+                                leveller.add_gate(gate, gate_type);
                                 total_gates_added += 1;
                                 loaded += 1;
                             }
@@ -323,6 +297,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+    pb_level.set_message("Finalizing...");
+    writer.finish().await.unwrap();
     pb_load.finish_with_message("Complete!");
     pb_level.finish_with_message("Complete!");
 

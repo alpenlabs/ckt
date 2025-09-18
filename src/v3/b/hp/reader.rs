@@ -3,13 +3,13 @@ use monoio::fs::File;
 use std::io::{Error, ErrorKind, Result};
 
 use crate::v3::b::{
-    AndGates, Gate, Level, WireLocation, XorGates,
+    AndGates, CircuitHeader, Gate, Level, WireLocation, XorGates,
     varints::{FlaggedVarInt, StandardVarInt},
 };
-use crate::v3::{CircuitHeaderV3B, FormatType, VERSION};
+use crate::v3::{FormatType, VERSION};
 
 /// High performance async reader for CKT v3b format using monoio
-pub struct CircuitReaderV3B {
+pub struct CircuitReader {
     file: File,
     /// Buffer for efficient reading
     buffer: Vec<u8>,
@@ -17,12 +17,10 @@ pub struct CircuitReaderV3B {
     buffer_offset: usize,
     /// Valid data end in buffer
     max_valid_bytes: usize,
-    /// Current wire counter (next output wire ID)
-    wire_counter: u64,
     /// Current level being read
     current_level: u32,
     /// Circuit header
-    header: CircuitHeaderV3B,
+    header: CircuitHeader,
     /// Total bytes in the file
     total_bytes: u64,
     /// How many bytes we've read from file
@@ -35,18 +33,18 @@ pub struct CircuitReaderV3B {
     level_sizes: Vec<usize>,
 }
 
-impl CircuitReaderV3B {
+impl CircuitReader {
     /// Create a new v3b reader
     pub async fn new(file: File, max_buffer_size: usize) -> Result<Self> {
         let len = file.metadata().await?.len();
 
         // Read header (58 bytes)
         let (res, header_bytes) = file
-            .read_exact_at(Vec::with_capacity(CircuitHeaderV3B::SIZE), 0)
+            .read_exact_at(Vec::with_capacity(CircuitHeader::SIZE), 0)
             .await;
         res?;
 
-        if unlikely(header_bytes.len() != CircuitHeaderV3B::SIZE) {
+        if unlikely(header_bytes.len() != CircuitHeader::SIZE) {
             return Err(Error::new(
                 ErrorKind::UnexpectedEof,
                 "Incomplete header read",
@@ -77,7 +75,7 @@ impl CircuitReaderV3B {
         let and_gates = u64::from_le_bytes(header_bytes[42..50].try_into().unwrap());
         let primary_inputs = u64::from_le_bytes(header_bytes[50..58].try_into().unwrap());
 
-        let header = CircuitHeaderV3B {
+        let header = CircuitHeader {
             version: header_bytes[0],
             format_type: header_bytes[1],
             checksum,
@@ -95,11 +93,10 @@ impl CircuitReaderV3B {
             buffer: vec![0; max_buffer_size],
             buffer_offset: 0,
             max_valid_bytes: 0,
-            wire_counter: primary_inputs,
             current_level: 1, // Start at level 1 (level 0 is implicit)
             header,
             total_bytes: len,
-            bytes_read: CircuitHeaderV3B::SIZE as u64,
+            bytes_read: CircuitHeader::SIZE as u64,
             levels_read: 0,
             gates_read: 0,
             level_sizes,
@@ -107,13 +104,8 @@ impl CircuitReaderV3B {
     }
 
     /// Get the circuit header
-    pub fn header(&self) -> &CircuitHeaderV3B {
+    pub fn header(&self) -> &CircuitHeader {
         &self.header
-    }
-
-    /// Get current wire counter
-    pub fn wire_counter(&self) -> u64 {
-        self.wire_counter
     }
 
     /// Get current level
@@ -166,7 +158,6 @@ impl CircuitReaderV3B {
         for _ in 0..num_xor {
             let gate = self.read_gate().await?;
             level.xor_gates.push(gate);
-            self.wire_counter += 1;
             self.gates_read += 1;
         }
 
@@ -174,7 +165,6 @@ impl CircuitReaderV3B {
         for _ in 0..num_and {
             let gate = self.read_gate().await?;
             level.and_gates.push(gate);
-            self.wire_counter += 1;
             self.gates_read += 1;
         }
 
@@ -242,20 +232,18 @@ impl CircuitReaderV3B {
         // Read XOR gates into SoA
         for _ in 0..num_xor {
             let gate = self.read_gate().await?;
-            xor_gates.input1s.push(gate.input1);
-            xor_gates.input2s.push(gate.input2);
+            xor_gates.input1s.push(gate.in1);
+            xor_gates.input2s.push(gate.in2);
             xor_gates.count += 1;
-            self.wire_counter += 1;
             self.gates_read += 1;
         }
 
         // Read AND gates into SoA
         for _ in 0..num_and {
             let gate = self.read_gate().await?;
-            and_gates.input1s.push(gate.input1);
-            and_gates.input2s.push(gate.input2);
+            and_gates.input1s.push(gate.in1);
+            and_gates.input2s.push(gate.in2);
             and_gates.count += 1;
-            self.wire_counter += 1;
             self.gates_read += 1;
         }
 
@@ -267,15 +255,6 @@ impl CircuitReaderV3B {
         self.current_level += 1;
 
         Ok(Some((xor_gates, and_gates)))
-    }
-
-    /// Read all remaining levels
-    pub async fn read_all_levels(&mut self) -> Result<Vec<Level>> {
-        let mut levels = Vec::new();
-        while let Some(level) = self.read_level().await? {
-            levels.push(level);
-        }
-        Ok(levels)
     }
 
     /// Read a single gate with implicit output
@@ -402,7 +381,7 @@ pub async fn verify_checksum_async(file: File) -> Result<bool> {
 
     // Read header
     let (res, header_bytes) = file
-        .read_exact_at(Vec::with_capacity(CircuitHeaderV3B::SIZE), 0)
+        .read_exact_at(Vec::with_capacity(CircuitHeader::SIZE), 0)
         .await;
     res?;
 
@@ -430,7 +409,7 @@ pub async fn verify_checksum_async(file: File) -> Result<bool> {
 
     // Hash all gate data first
     let mut hasher = Hasher::new();
-    let mut offset = CircuitHeaderV3B::SIZE as u64;
+    let mut offset = CircuitHeader::SIZE as u64;
     let buffer = vec![0u8; 1024 * 1024]; // 1MB buffer
 
     while offset < len {

@@ -1,5 +1,7 @@
 //! CKT Format v1 - Original format with fixed 32-bit wire IDs
 
+use crate::GateType;
+
 pub mod reader;
 pub mod writer;
 
@@ -54,13 +56,6 @@ pub struct GateBatch {
     /// Packed gate types: bit i indicates type of gate i
     /// 0 = XOR, 1 = AND
     pub gate_types: u8,
-}
-
-/// Gate type enumeration
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GateType {
-    XOR,
-    AND,
 }
 
 const _: () = {

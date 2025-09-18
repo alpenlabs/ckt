@@ -1,47 +1,14 @@
 use std::{collections::BTreeSet, mem};
 
 use ahash::{HashMap, HashMapExt};
+use ckt::{
+    v3::{
+        a::Gate as GateA,
+        b::{CompactWireLocation, Gate as GateB, Level, WireLocation},
+    },
+    GateType,
+};
 use cynosure::hints::{cold_and_empty, likely, unlikely};
-
-// Compact wire location: 7 bytes (4 bytes level + 3 bytes index)
-#[derive(Clone, Copy)]
-#[repr(packed)]
-struct CompactWireLocation {
-    bytes: [u8; 7],
-}
-
-impl CompactWireLocation {
-    fn new(level: u32, index: u32) -> Self {
-        debug_assert!(index < (1 << 24), "Index exceeds 24 bits");
-        let mut bytes = [0u8; 7];
-        // Store level in first 4 bytes
-        bytes[0] = (level & 0xFF) as u8;
-        bytes[1] = ((level >> 8) & 0xFF) as u8;
-        bytes[2] = ((level >> 16) & 0xFF) as u8;
-        bytes[3] = ((level >> 24) & 0xFF) as u8;
-        // Store index in last 3 bytes
-        bytes[4] = (index & 0xFF) as u8;
-        bytes[5] = ((index >> 8) & 0xFF) as u8;
-        bytes[6] = ((index >> 16) & 0xFF) as u8;
-        Self { bytes }
-    }
-
-    fn to_wire_location(&self) -> WireLocation {
-        let level = self.bytes[0] as u32
-            | ((self.bytes[1] as u32) << 8)
-            | ((self.bytes[2] as u32) << 16)
-            | ((self.bytes[3] as u32) << 24);
-        let index =
-            self.bytes[4] as u32 | ((self.bytes[5] as u32) << 8) | ((self.bytes[6] as u32) << 16);
-        WireLocation { level, index }
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct WireLocation {
-    level: u32,
-    index: u32,
-}
 
 type WireId = u64;
 
@@ -74,7 +41,7 @@ impl CompactDependency {
         bytes[8] = ((out >> 30) & 0xF) as u8; // 4 bits
 
         // gate_type: bit 68
-        if gate_type == GateType::And {
+        if gate_type == GateType::AND {
             bytes[8] |= 0x10; // Set bit 4
         }
 
@@ -98,9 +65,9 @@ impl CompactDependency {
 
         // Unpack gate_type
         let gate_type = if (self.bytes[8] & 0x10) != 0 {
-            GateType::And
+            GateType::AND
         } else {
-            GateType::Xor
+            GateType::XOR
         };
 
         Dependency {
@@ -361,8 +328,8 @@ enum WireAvailability {
 
 #[derive(Debug, Clone, Default)]
 struct PendingLevel {
-    and_gates: Vec<WrittenGate>,
-    xor_gates: Vec<WrittenGate>,
+    and_gates: Vec<GateB>,
+    xor_gates: Vec<GateB>,
     outputs: GateOutputs,
 }
 
@@ -370,13 +337,6 @@ struct PendingLevel {
 struct GateOutputs {
     and_gates: BTreeSet<WireId>,
     xor_gates: BTreeSet<WireId>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Level {
-    pub id: u32,
-    pub and_gates: Vec<WrittenGate>,
-    pub xor_gates: Vec<WrittenGate>,
 }
 
 #[derive(Clone)]
@@ -407,44 +367,6 @@ impl Leveller {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Gate {
-    pub in1: u64,
-    pub in2: u64,
-    pub out: u64,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GateType {
-    And,
-    Xor,
-}
-
-#[derive(Clone, Copy)]
-pub struct WrittenGate {
-    in1: CompactWireLocation,
-    in2: CompactWireLocation,
-}
-
-impl WrittenGate {
-    pub fn get_in1(&self) -> WireLocation {
-        self.in1.to_wire_location()
-    }
-
-    pub fn get_in2(&self) -> WireLocation {
-        self.in2.to_wire_location()
-    }
-}
-
-impl std::fmt::Debug for WrittenGate {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WrittenGate")
-            .field("in1", &self.get_in1())
-            .field("in2", &self.get_in2())
-            .finish()
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
 enum Status {
     Waiting,
     Available(WireLocation),
@@ -458,7 +380,7 @@ fn append_if_not_exists<T: Eq>(set: &mut Vec<T>, item: T) {
 }
 
 impl Leveller {
-    fn check_in1(&mut self, gate: Gate, gate_type: GateType) -> Status {
+    fn check_in1(&mut self, gate: GateA, gate_type: GateType) -> Status {
         if unlikely(gate.in1 < self.primary_inputs) {
             return Status::Available(WireLocation {
                 level: 0,
@@ -510,7 +432,7 @@ impl Leveller {
         }
     }
 
-    fn check_in2(&mut self, gate: Gate, gate_type: GateType, in1_status: Status) -> Status {
+    fn check_in2(&mut self, gate: GateA, gate_type: GateType, in1_status: Status) -> Status {
         if unlikely(gate.in2 < self.primary_inputs) {
             return Status::Available(WireLocation {
                 level: 0,
@@ -609,7 +531,7 @@ impl Leveller {
 
     fn process_gate(
         &mut self,
-        gate: Gate,
+        gate: GateA,
         gate_type: GateType,
         newly_available: Option<(WireId, WireLocation)>, // save a hashmap lookup when we know one has just been made available
     ) {
@@ -644,17 +566,17 @@ impl Leveller {
             };
             // queue the gate in this level
             match gate_type {
-                GateType::And => {
-                    self.pending_level.and_gates.push(WrittenGate {
-                        in1: CompactWireLocation::new(in1_loc.level, in1_loc.index),
-                        in2: CompactWireLocation::new(in2_loc.level, in2_loc.index),
+                GateType::AND => {
+                    self.pending_level.and_gates.push(GateB {
+                        in1: in1_loc,
+                        in2: in2_loc,
                     });
                     self.pending_level.outputs.and_gates.insert(gate.out);
                 }
-                GateType::Xor => {
-                    self.pending_level.xor_gates.push(WrittenGate {
-                        in1: CompactWireLocation::new(in1_loc.level, in1_loc.index),
-                        in2: CompactWireLocation::new(in2_loc.level, in2_loc.index),
+                GateType::XOR => {
+                    self.pending_level.xor_gates.push(GateB {
+                        in1: in1_loc,
+                        in2: in2_loc,
                     });
                     self.pending_level.outputs.xor_gates.insert(gate.out);
                 }
@@ -714,7 +636,7 @@ impl Leveller {
         for (real_out, loc, waiting_list) in waiting_lists {
             for dep in waiting_list {
                 self.process_gate(
-                    Gate {
+                    GateA {
                         in1: real_out,
                         in2: dep.other_in,
                         out: dep.out,
@@ -737,7 +659,7 @@ impl Leveller {
         }
     }
 
-    pub fn add_gate(&mut self, gate: Gate, gate_type: GateType) {
+    pub fn add_gate(&mut self, gate: GateA, gate_type: GateType) {
         self.process_gate(gate, gate_type, None);
     }
 }
@@ -753,12 +675,12 @@ mod tests {
 
         // Add gate with both inputs as primary (0 and 1)
         leveller.add_gate(
-            Gate {
+            GateA {
                 in1: 0,
                 in2: 1,
                 out: 100,
             },
-            GateType::And,
+            GateType::AND,
         );
 
         // Should create first level immediately
@@ -769,8 +691,8 @@ mod tests {
 
         // Check the gate has correct inputs
         let gate = &level.and_gates[0];
-        let in1 = gate.get_in1();
-        let in2 = gate.get_in2();
+        let in1 = gate.in1;
+        let in2 = gate.in2;
         assert_eq!(in1.level, 0); // Primary input level
         assert_eq!(in1.index, 0);
         assert_eq!(in2.level, 0); // Primary input level
@@ -787,32 +709,32 @@ mod tests {
 
         // Gate A: inputs 0,1 -> output 100
         leveller.add_gate(
-            Gate {
+            GateA {
                 in1: 0,
                 in2: 1,
                 out: 100,
             },
-            GateType::And,
+            GateType::AND,
         );
 
         // Gate B: inputs 100,2 -> output 101 (depends on gate A)
         leveller.add_gate(
-            Gate {
+            GateA {
                 in1: 100,
                 in2: 2,
                 out: 101,
             },
-            GateType::Xor,
+            GateType::XOR,
         );
 
         // Gate C: inputs 101,3 -> output 102 (depends on gate B)
         leveller.add_gate(
-            Gate {
+            GateA {
                 in1: 101,
                 in2: 3,
                 out: 102,
             },
-            GateType::And,
+            GateType::AND,
         );
 
         // Level 1: Only gate A should be ready
@@ -844,42 +766,42 @@ mod tests {
 
         // Gate A: inputs 0,1 -> output 100
         leveller.add_gate(
-            Gate {
+            GateA {
                 in1: 0,
                 in2: 1,
                 out: 100,
             },
-            GateType::And,
+            GateType::AND,
         );
 
         // Gate B: inputs 100,2 -> output 101 (depends on A)
         leveller.add_gate(
-            Gate {
+            GateA {
                 in1: 100,
                 in2: 2,
                 out: 101,
             },
-            GateType::Xor,
+            GateType::XOR,
         );
 
         // Gate C: inputs 100,3 -> output 102 (also depends on A)
         leveller.add_gate(
-            Gate {
+            GateA {
                 in1: 100,
                 in2: 3,
                 out: 102,
             },
-            GateType::Xor,
+            GateType::XOR,
         );
 
         // Gate D: inputs 100,4 -> output 103 (also depends on A)
         leveller.add_gate(
-            Gate {
+            GateA {
                 in1: 4,
                 in2: 100, // Note: wire 100 as second input
                 out: 103,
             },
-            GateType::And,
+            GateType::AND,
         );
 
         // Level 1: Gate A
@@ -902,31 +824,31 @@ mod tests {
 
         // Level 1 gates
         leveller.add_gate(
-            Gate {
+            GateA {
                 in1: 0,
                 in2: 1,
                 out: 100,
             },
-            GateType::And,
+            GateType::AND,
         );
 
         leveller.add_gate(
-            Gate {
+            GateA {
                 in1: 2,
                 in2: 3,
                 out: 101,
             },
-            GateType::Xor,
+            GateType::XOR,
         );
 
         // Level 2 gate - depends on both level 1 gates
         leveller.add_gate(
-            Gate {
+            GateA {
                 in1: 100,
                 in2: 101,
                 out: 102,
             },
-            GateType::And,
+            GateType::AND,
         );
 
         // Level 1: Two parallel gates
@@ -950,50 +872,50 @@ mod tests {
 
         // This gate depends on outputs from other gates
         leveller.add_gate(
-            Gate {
+            GateA {
                 in1: 100,
                 in2: 101,
                 out: 200,
             },
-            GateType::And,
+            GateType::AND,
         );
 
         // Primary input gates (can execute immediately)
         leveller.add_gate(
-            Gate {
+            GateA {
                 in1: 0,
                 in2: 1,
                 out: 100,
             },
-            GateType::Xor,
+            GateType::XOR,
         );
 
         // Another dependent gate
         leveller.add_gate(
-            Gate {
+            GateA {
                 in1: 200,
                 in2: 102,
                 out: 201,
             },
-            GateType::Xor,
+            GateType::XOR,
         );
 
         leveller.add_gate(
-            Gate {
+            GateA {
                 in1: 2,
                 in2: 3,
                 out: 101,
             },
-            GateType::And,
+            GateType::AND,
         );
 
         leveller.add_gate(
-            Gate {
+            GateA {
                 in1: 4,
                 in2: 5,
                 out: 102,
             },
-            GateType::Xor,
+            GateType::XOR,
         );
 
         // Level 1: Three gates with primary inputs
@@ -1020,31 +942,31 @@ mod tests {
 
         // Add a gate that can't execute yet
         leveller.add_gate(
-            Gate {
+            GateA {
                 in1: 100,
                 in2: 101,
                 out: 200,
             },
-            GateType::And,
+            GateType::AND,
         );
 
         // Add gates that provide inputs
         leveller.add_gate(
-            Gate {
+            GateA {
                 in1: 0,
                 in2: 1,
                 out: 100,
             },
-            GateType::Xor,
+            GateType::XOR,
         );
 
         leveller.add_gate(
-            Gate {
+            GateA {
                 in1: 2,
                 in2: 3,
                 out: 101,
             },
-            GateType::And,
+            GateType::AND,
         );
 
         // Process first level

@@ -9,17 +9,51 @@ pub mod writer;
 #[cfg(feature = "high-performance")]
 pub mod hp;
 
-use super::GateType;
+use crate::{
+    GateType,
+    v3::{FormatType, VERSION},
+};
 
-/// A compact representation of a gate with 34-bit wire indices
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct CompactGate34 {
-    pub input1: u64, // Only lower 34 bits used
-    pub input2: u64, // Only lower 34 bits used
-    pub output: u64, // Only lower 34 bits used
+/// Circuit header for v3a format
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CircuitHeader {
+    pub version: u8,        // Always 3
+    pub format_type: u8,    // Always 0 (TypeA)
+    pub checksum: [u8; 32], // BLAKE3 hash of all data after checksum
+    pub xor_gates: u64,     // Total XOR gates
+    pub and_gates: u64,     // Total AND gates
 }
 
-impl CompactGate34 {
+impl CircuitHeader {
+    /// Header size in bytes: 1 + 1 + 32 + 8 + 8 = 50 bytes
+    pub const SIZE: usize = 50;
+
+    /// Create a new v3a header (checksum will be computed during write)
+    pub fn new(xor_gates: u64, and_gates: u64) -> Self {
+        Self {
+            version: VERSION,
+            format_type: FormatType::TypeA.to_byte(),
+            checksum: [0; 32], // Placeholder, will be filled when writing
+            xor_gates,
+            and_gates,
+        }
+    }
+
+    /// Get total gates
+    pub fn total_gates(&self) -> u64 {
+        self.xor_gates + self.and_gates
+    }
+}
+
+/// A gate with 34-bit wire indices
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Gate {
+    pub in1: u64, // Only lower 34 bits used
+    pub in2: u64, // Only lower 34 bits used
+    pub out: u64, // Only lower 34 bits used
+}
+
+impl Gate {
     /// Maximum value for 34-bit wire IDs
     pub const MAX_WIRE_ID: u64 = (1u64 << 34) - 1;
 
@@ -30,9 +64,9 @@ impl CompactGate34 {
         debug_assert!(output <= Self::MAX_WIRE_ID, "output exceeds 34 bits");
 
         Self {
-            input1: input1 & Self::MAX_WIRE_ID,
-            input2: input2 & Self::MAX_WIRE_ID,
-            output: output & Self::MAX_WIRE_ID,
+            in1: input1 & Self::MAX_WIRE_ID,
+            in2: input2 & Self::MAX_WIRE_ID,
+            out: output & Self::MAX_WIRE_ID,
         }
     }
 }
@@ -74,16 +108,16 @@ impl GateBatch34 {
     }
 
     /// Set a gate in the batch (with 34-bit wire IDs)
-    pub fn set_gate(&mut self, index: usize, gate: CompactGate34, gate_type: GateType) {
+    pub fn set_gate(&mut self, index: usize, gate: Gate, gate_type: GateType) {
         debug_assert!(index < 8, "Gate index must be 0-7");
 
         // Calculate bit position for this gate (index * 102 bits)
         let bit_offset = index * 102;
 
         // Pack the three 34-bit values
-        self.set_34bit_value(bit_offset, gate.input1);
-        self.set_34bit_value(bit_offset + 34, gate.input2);
-        self.set_34bit_value(bit_offset + 68, gate.output);
+        self.set_34bit_value(bit_offset, gate.in1);
+        self.set_34bit_value(bit_offset + 34, gate.in2);
+        self.set_34bit_value(bit_offset + 68, gate.out);
 
         // Set gate type
         match gate_type {
@@ -93,7 +127,7 @@ impl GateBatch34 {
     }
 
     /// Get a gate from the batch (with 34-bit wire IDs)
-    pub fn get_gate(&self, index: usize) -> (CompactGate34, GateType) {
+    pub fn get_gate(&self, index: usize) -> (Gate, GateType) {
         debug_assert!(index < 8, "Gate index must be 0-7");
 
         // Calculate bit position for this gate
@@ -104,7 +138,7 @@ impl GateBatch34 {
         let input2 = self.get_34bit_value(bit_offset + 34);
         let output = self.get_34bit_value(bit_offset + 68);
 
-        let gate = CompactGate34::new(input1, input2, output);
+        let gate = Gate::new(input1, input2, output);
         let gate_type = self.gate_type(index);
 
         (gate, gate_type)
@@ -122,7 +156,7 @@ impl GateBatch34 {
 
     /// Helper: Set a 34-bit value at the given bit offset
     fn set_34bit_value(&mut self, bit_offset: usize, value: u64) {
-        debug_assert!(value <= CompactGate34::MAX_WIRE_ID, "Value exceeds 34 bits");
+        debug_assert!(value <= Gate::MAX_WIRE_ID, "Value exceeds 34 bits");
 
         let byte_offset = bit_offset / 8;
         let bit_shift = bit_offset % 8;
@@ -209,7 +243,7 @@ impl GateBatch34 {
 
             // Shift and mask to get our 34 bits
             value >>= bit_shift;
-            value & CompactGate34::MAX_WIRE_ID
+            value & Gate::MAX_WIRE_ID
         }
     }
 
@@ -218,7 +252,7 @@ impl GateBatch34 {
         // Check each gate to see if it's non-zero
         for i in 0..8 {
             let (gate, _) = self.get_gate(i);
-            if gate.input1 == 0 && gate.input2 == 0 && gate.output == 0 {
+            if gate.in1 == 0 && gate.in2 == 0 && gate.out == 0 {
                 return i;
             }
         }

@@ -1,7 +1,10 @@
 use ckt::{
-    CompactGate, GateBatch, GateType,
-    reader::{CircuitReader, read_header, read_header_seekable},
-    writer::CircuitWriter,
+    GateType,
+    v1::{
+        CompactGate, GateBatch,
+        reader::{CircuitReader, read_header, read_header_seekable},
+        writer::CircuitWriter,
+    },
 };
 use std::io::Cursor;
 

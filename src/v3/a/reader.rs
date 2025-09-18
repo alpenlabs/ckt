@@ -1,5 +1,5 @@
 use super::GateBatch34;
-use crate::v3::{CircuitHeaderV3A, FormatType, VERSION};
+use crate::v3::{FormatType, VERSION, a::CircuitHeader};
 use std::io::{Error, ErrorKind, Read, Result, Seek};
 
 /// Reader for compressed circuit format with batch API
@@ -11,7 +11,7 @@ pub struct CircuitReader<R: Read> {
     /// End of valid data in buffer (exclusive)
     valid_end: usize,
     total_gates_read: usize,
-    header: CircuitHeaderV3A,
+    header: CircuitHeader,
     total_bytes: usize,
     bytes_read: usize,
 }
@@ -20,7 +20,7 @@ impl<R: Read> CircuitReader<R> {
     /// Create a new v3a reader
     pub fn new(mut reader: R, total_bytes: usize) -> Result<Self> {
         // Read header first (18 bytes: 1 version + 1 type + 8 xor + 8 and)
-        let mut header_bytes = [0u8; CircuitHeaderV3A::SIZE];
+        let mut header_bytes = [0u8; CircuitHeader::SIZE];
         reader.read_exact(&mut header_bytes)?;
 
         // Validate version and type
@@ -49,7 +49,7 @@ impl<R: Read> CircuitReader<R> {
         let mut checksum = [0u8; 32];
         checksum.copy_from_slice(&header_bytes[2..34]);
 
-        let header = CircuitHeaderV3A {
+        let header = CircuitHeader {
             version: header_bytes[0],
             format_type: header_bytes[1],
             checksum,
@@ -69,12 +69,12 @@ impl<R: Read> CircuitReader<R> {
             total_gates_read: 0,
             header,
             total_bytes,
-            bytes_read: CircuitHeaderV3A::SIZE,
+            bytes_read: CircuitHeader::SIZE,
         })
     }
 
     /// Get the circuit header
-    pub fn header(&self) -> &CircuitHeaderV3A {
+    pub fn header(&self) -> &CircuitHeader {
         &self.header
     }
 
@@ -267,8 +267,8 @@ impl<R: Read> CircuitReader<R> {
 }
 
 /// Read v3a circuit header (works with any reader)
-pub fn read_header<R: Read>(reader: &mut R) -> Result<CircuitHeaderV3A> {
-    let mut header_bytes = [0u8; CircuitHeaderV3A::SIZE];
+pub fn read_header<R: Read>(reader: &mut R) -> Result<CircuitHeader> {
+    let mut header_bytes = [0u8; CircuitHeader::SIZE];
     reader.read_exact(&mut header_bytes)?;
 
     // Validate version and type
@@ -297,7 +297,7 @@ pub fn read_header<R: Read>(reader: &mut R) -> Result<CircuitHeaderV3A> {
     let mut checksum = [0u8; 32];
     checksum.copy_from_slice(&header_bytes[2..34]);
 
-    Ok(CircuitHeaderV3A {
+    Ok(CircuitHeader {
         version: header_bytes[0],
         format_type: header_bytes[1],
         checksum,
@@ -307,7 +307,7 @@ pub fn read_header<R: Read>(reader: &mut R) -> Result<CircuitHeaderV3A> {
 }
 
 /// Read v3a circuit header from seekable stream and reset position
-pub fn read_header_seekable<S: Read + Seek>(reader: &mut S) -> Result<CircuitHeaderV3A> {
+pub fn read_header_seekable<S: Read + Seek>(reader: &mut S) -> Result<CircuitHeader> {
     use std::io::SeekFrom;
 
     let current_pos = reader.stream_position()?;

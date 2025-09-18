@@ -7,12 +7,59 @@
 //! - BLAKE3 checksums for data integrity
 //! - Structure-of-Arrays support for vectorization
 
+use crate::v3::{FormatType, VERSION};
+
 pub mod reader;
 pub mod varints;
 pub mod writer;
 
 #[cfg(feature = "high-performance")]
 pub mod hp;
+
+/// Circuit header for v3b format
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CircuitHeader {
+    pub version: u8,         // Always 3
+    pub format_type: u8,     // Always 1 (TypeB)
+    pub checksum: [u8; 32],  // BLAKE3 hash of all data after checksum
+    pub xor_gates: u64,      // Total XOR gates
+    pub and_gates: u64,      // Total AND gates
+    pub primary_inputs: u64, // Number of primary inputs
+}
+
+impl CircuitHeader {
+    /// Header size in bytes: 1 + 1 + 32 + 8 + 8 + 8 = 58 bytes
+    pub const SIZE: usize = 58;
+
+    /// Create a new v3b header with known counts (checksum will be computed during write)
+    pub fn with_counts(xor_gates: u64, and_gates: u64, primary_inputs: u64) -> Self {
+        Self {
+            version: VERSION,
+            format_type: FormatType::TypeB.to_byte(),
+            checksum: [0; 32], // Placeholder, will be filled when writing
+            xor_gates,
+            and_gates,
+            primary_inputs,
+        }
+    }
+
+    /// Create a header with primary inputs (gate counts will be updated later)
+    pub fn new(primary_inputs: u64) -> Self {
+        Self {
+            version: VERSION,
+            format_type: FormatType::TypeB.to_byte(),
+            checksum: [0; 32], // Placeholder, will be filled when writing
+            xor_gates: 0,
+            and_gates: 0,
+            primary_inputs,
+        }
+    }
+
+    /// Get total gates
+    pub fn total_gates(&self) -> u64 {
+        self.xor_gates + self.and_gates
+    }
+}
 
 /// Wire location within a level-organized circuit
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -40,7 +87,7 @@ impl WireLocation {
 #[derive(Clone, Copy)]
 #[repr(packed)]
 pub struct CompactWireLocation {
-    bytes: [u8; 7],
+    pub bytes: [u8; 7],
 }
 
 impl CompactWireLocation {
@@ -76,14 +123,17 @@ impl CompactWireLocation {
 /// The output is always the current wire counter when the gate is processed
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Gate {
-    pub input1: WireLocation,
-    pub input2: WireLocation,
+    pub in1: WireLocation,
+    pub in2: WireLocation,
 }
 
 impl Gate {
     /// Create a new gate
     pub fn new(input1: WireLocation, input2: WireLocation) -> Self {
-        Self { input1, input2 }
+        Self {
+            in1: input1,
+            in2: input2,
+        }
     }
 }
 
@@ -254,7 +304,7 @@ pub fn verify_checksum<R: std::io::Read>(mut reader: R) -> std::io::Result<bool>
     use std::io::{Error, ErrorKind};
 
     // Read header (58 bytes)
-    let mut header_bytes = [0u8; crate::v3::CircuitHeaderV3B::SIZE];
+    let mut header_bytes = [0u8; CircuitHeader::SIZE];
     reader.read_exact(&mut header_bytes)?;
 
     // Validate version and type

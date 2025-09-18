@@ -5,7 +5,7 @@ use std::io::{Error, ErrorKind, Result};
 use crate::v2::{AndGates, CircuitHeaderV2, Gate, Level, XorGates, varints::*};
 
 /// High performance file reader for CKT v2 format using monoio
-pub struct CircuitReaderV2 {
+pub struct CircuitReader {
     file: File,
     /// Buffer used for file reads with monoio
     buffer: Vec<u8>,
@@ -27,7 +27,7 @@ pub struct CircuitReaderV2 {
     gates_read: u64,
 }
 
-impl CircuitReaderV2 {
+impl CircuitReader {
     /// Create a new v2 reader
     pub async fn new(file: File, max_buffer_size: usize) -> Result<Self> {
         let len = file.metadata().await?.len();
@@ -323,7 +323,7 @@ impl CircuitReaderV2 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v2::hp::writer::CircuitWriterV2;
+    use crate::v2::hp::writer::CircuitWriter;
     use monoio::fs::OpenOptions;
     use tempfile::NamedTempFile;
 
@@ -341,7 +341,7 @@ mod tests {
                 .open(file_path)
                 .await?;
 
-            let mut writer = CircuitWriterV2::new(file, 4).await?; // 4 primary inputs
+            let mut writer = CircuitWriter::new(file, 4).await?; // 4 primary inputs
 
             let mut level = Level::new();
             level.xor_gates.push(Gate::new(0, 1, 4)); // XOR(0,1) -> 4
@@ -355,7 +355,7 @@ mod tests {
         // Read it back
         {
             let file = OpenOptions::new().read(true).open(file_path).await?;
-            let mut reader = CircuitReaderV2::new(file, 64 * 1024).await?;
+            let mut reader = CircuitReader::new(file, 64 * 1024).await?;
 
             assert_eq!(reader.header().xor_gates, 2);
             assert_eq!(reader.header().and_gates, 1);
@@ -390,7 +390,7 @@ mod tests {
                 .open(file_path)
                 .await?;
 
-            let mut writer = CircuitWriterV2::new(file, 2).await?; // 2 primary inputs
+            let mut writer = CircuitWriter::new(file, 2).await?; // 2 primary inputs
 
             let mut level = Level::new();
             level.xor_gates.push(Gate::new(0, 1, 2)); // XOR(0,1) -> 2
@@ -403,7 +403,7 @@ mod tests {
         // Read it back in SoA format
         {
             let file = OpenOptions::new().read(true).open(file_path).await?;
-            let mut reader = CircuitReaderV2::new(file, 64 * 1024).await?;
+            let mut reader = CircuitReader::new(file, 64 * 1024).await?;
 
             let (xor_gates, and_gates) = reader.read_soa_level::<8>().await?.unwrap();
 

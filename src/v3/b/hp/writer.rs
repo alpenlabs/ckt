@@ -3,14 +3,17 @@ use cynosure::hints::{likely, unlikely};
 use monoio::fs::File;
 use std::io::Result;
 
-use crate::v3::b::{
-    Gate, Level,
-    varints::{FlaggedVarInt, StandardVarInt},
+use crate::v3::{CircuitStats, FormatType, VERSION};
+use crate::{
+    GateType,
+    v3::b::{
+        CircuitHeader, Gate, Level,
+        varints::{FlaggedVarInt, StandardVarInt},
+    },
 };
-use crate::v3::{CircuitHeaderV3B, CircuitStats, FormatType, GateType, VERSION};
 
 /// High-performance async writer for CKT v3b format using monoio
-pub struct CircuitWriterV3B {
+pub struct CircuitWriter {
     file: File,
     buffer: Vec<u8>,
     wire_counter: u64,
@@ -23,11 +26,11 @@ pub struct CircuitWriterV3B {
     hasher: Hasher,
 }
 
-impl CircuitWriterV3B {
+impl CircuitWriter {
     /// Create a new v3b writer with the given primary inputs count
     pub async fn new(file: File, primary_inputs: u64) -> Result<Self> {
         // Write placeholder header (58 bytes)
-        let mut placeholder = vec![0u8; CircuitHeaderV3B::SIZE];
+        let mut placeholder = vec![0u8; CircuitHeader::SIZE];
         placeholder[0] = VERSION;
         placeholder[1] = FormatType::TypeB.to_byte();
         // Rest are zeros (checksum, counts)
@@ -43,7 +46,7 @@ impl CircuitWriterV3B {
             primary_inputs,
             xor_gates_written: 0,
             and_gates_written: 0,
-            bytes_written: CircuitHeaderV3B::SIZE as u64,
+            bytes_written: CircuitHeader::SIZE as u64,
             level_sizes: vec![primary_inputs as usize], // Level 0 size
             hasher: Hasher::new(),
         })
@@ -101,8 +104,8 @@ impl CircuitWriterV3B {
 
         // Encode input1 wire location
         let bytes1 = FlaggedVarInt::encode_wire_location(
-            gate.input1.level,
-            gate.input1.index,
+            gate.in1.level,
+            gate.in1.index,
             self.current_level,
             &mut temp_buf,
         )?;
@@ -111,8 +114,8 @@ impl CircuitWriterV3B {
 
         // Encode input2 wire location
         let bytes2 = FlaggedVarInt::encode_wire_location(
-            gate.input2.level,
-            gate.input2.index,
+            gate.in2.level,
+            gate.in2.index,
             self.current_level,
             &mut temp_buf,
         )?;
@@ -197,7 +200,7 @@ impl CircuitWriterV3B {
         let checksum_bytes = hash.as_bytes();
 
         // Build complete header with checksum
-        let mut header_bytes = Vec::with_capacity(CircuitHeaderV3B::SIZE);
+        let mut header_bytes = Vec::with_capacity(CircuitHeader::SIZE);
         header_bytes.push(VERSION);
         header_bytes.push(FormatType::TypeB.to_byte());
         header_bytes.extend_from_slice(checksum_bytes);
@@ -244,7 +247,7 @@ mod tests {
             .open(&path)
             .await?;
 
-        let mut writer = CircuitWriterV3B::new(file, 4).await?; // 4 primary inputs
+        let mut writer = CircuitWriter::new(file, 4).await?; // 4 primary inputs
 
         // Level 1: 2 XOR gates using primary inputs
         let mut level1 = Level::new(1);
@@ -288,7 +291,7 @@ mod tests {
             .open(&path)
             .await?;
 
-        let mut writer = CircuitWriterV3B::new(file, 2).await?; // 2 primary inputs
+        let mut writer = CircuitWriter::new(file, 2).await?; // 2 primary inputs
 
         // Level 1: Gates that only use primary inputs
         let mut level1 = Level::new(1);
@@ -334,7 +337,7 @@ mod tests {
             .open(&path)
             .await?;
 
-        let mut writer = CircuitWriterV3B::new(file, 2).await?;
+        let mut writer = CircuitWriter::new(file, 2).await?;
 
         let empty_level = Level::new(1);
         writer.write_level(&empty_level).await?; // Should succeed and do nothing
