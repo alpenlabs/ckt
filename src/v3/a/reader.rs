@@ -19,7 +19,7 @@ pub struct CircuitReader<R: Read> {
 impl<R: Read> CircuitReader<R> {
     /// Create a new v3a reader
     pub fn new(mut reader: R, total_bytes: usize) -> Result<Self> {
-        // Read header first (18 bytes: 1 version + 1 type + 8 xor + 8 and)
+        // Read header first (58 bytes: 1 version + 1 type + 32 checksum + 8 xor + 8 and + 8 primary)
         let mut header_bytes = [0u8; CircuitHeader::SIZE];
         reader.read_exact(&mut header_bytes)?;
 
@@ -55,6 +55,7 @@ impl<R: Read> CircuitReader<R> {
             checksum,
             xor_gates: u64::from_le_bytes(header_bytes[34..42].try_into().unwrap()),
             and_gates: u64::from_le_bytes(header_bytes[42..50].try_into().unwrap()),
+            primary_inputs: u64::from_le_bytes(header_bytes[50..58].try_into().unwrap()),
         };
 
         // Use 64MB buffer for better throughput
@@ -91,6 +92,11 @@ impl<R: Read> CircuitReader<R> {
     /// Get number of AND gates
     pub fn and_gates(&self) -> u64 {
         self.header.and_gates
+    }
+
+    /// Get number of primary inputs
+    pub fn primary_inputs(&self) -> u64 {
+        self.header.primary_inputs
     }
 
     /// Get total gates read so far
@@ -303,6 +309,7 @@ pub fn read_header<R: Read>(reader: &mut R) -> Result<CircuitHeader> {
         checksum,
         xor_gates: u64::from_le_bytes(header_bytes[34..42].try_into().unwrap()),
         and_gates: u64::from_le_bytes(header_bytes[42..50].try_into().unwrap()),
+        primary_inputs: u64::from_le_bytes(header_bytes[50..58].try_into().unwrap()),
     })
 }
 
@@ -364,7 +371,7 @@ pub fn verify_checksum<R: std::io::Read>(mut reader: R) -> Result<[u8; 32]> {
         hasher.update(&buffer[..bytes_read]);
     }
 
-    // Then hash the header fields after checksum
+    // Then hash the header fields after checksum (xor, and, primary_inputs)
     hasher.update(&header_bytes[34..]);
 
     // Compare checksums

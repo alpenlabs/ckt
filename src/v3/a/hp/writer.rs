@@ -18,15 +18,16 @@ pub struct CircuitWriter {
     total_gates_written: usize,
     xor_gates: u64,
     and_gates: u64,
+    primary_inputs: u64,
     batches_waiting_for_flush: usize,
     bytes_written: u64,
     hasher: Hasher,
 }
 
 impl CircuitWriter {
-    /// Create a new v3a writer
-    pub async fn new(file: File) -> Result<Self> {
-        // Write placeholder header (50 bytes)
+    /// Create a new v3a writer with specified primary inputs
+    pub async fn new(file: File, primary_inputs: u64) -> Result<Self> {
+        // Write placeholder header (58 bytes)
         let placeholder = vec![0u8; CircuitHeader::SIZE];
         let (res, _) = file.write_all_at(placeholder, 0).await;
         res?;
@@ -39,6 +40,7 @@ impl CircuitWriter {
             total_gates_written: 0,
             xor_gates: 0,
             and_gates: 0,
+            primary_inputs,
             batches_waiting_for_flush: 0,
             bytes_written: CircuitHeader::SIZE as u64,
             hasher: Hasher::new(),
@@ -141,6 +143,7 @@ impl CircuitWriter {
         // Add the header fields after checksum to the hash
         self.hasher.update(&self.xor_gates.to_le_bytes());
         self.hasher.update(&self.and_gates.to_le_bytes());
+        self.hasher.update(&self.primary_inputs.to_le_bytes());
 
         // Compute final checksum
         let hash = self.hasher.finalize();
@@ -157,6 +160,7 @@ impl CircuitWriter {
         header_bytes.extend_from_slice(checksum_bytes);
         header_bytes.extend_from_slice(&self.xor_gates.to_le_bytes());
         header_bytes.extend_from_slice(&self.and_gates.to_le_bytes());
+        header_bytes.extend_from_slice(&self.primary_inputs.to_le_bytes());
 
         // Update header at the beginning of the file
         let (res, _) = self.file.write_all_at(header_bytes, 0).await;
@@ -169,8 +173,8 @@ impl CircuitWriter {
             total_gates: self.xor_gates + self.and_gates,
             xor_gates: self.xor_gates,
             and_gates: self.and_gates,
-            primary_inputs: 0, // v3a doesn't track primary inputs
-            total_levels: 0,   // v3a doesn't have levels
+            primary_inputs: self.primary_inputs,
+            total_levels: 0, // v3a doesn't have levels
             bytes_written: self.bytes_written,
             checksum,
         };
@@ -200,7 +204,7 @@ mod tests {
                 .open(&path)
                 .await?;
 
-            let mut writer = CircuitWriter::new(file).await?;
+            let mut writer = CircuitWriter::new(file, 0).await?;
 
             // Write some test gates
             for i in 0..100u64 {
@@ -273,7 +277,7 @@ mod tests {
             .open(&path)
             .await?;
 
-        let mut writer = CircuitWriter::new(file).await?;
+        let mut writer = CircuitWriter::new(file, 0).await?;
 
         // Write 1M gates to test performance and correctness
         const TOTAL_GATES: u64 = 1_000_000;

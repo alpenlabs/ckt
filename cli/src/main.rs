@@ -55,6 +55,15 @@ enum Commands {
         /// Output format version (v1 or v3a)
         #[arg(short, long, default_value = "v3a", value_name = "VERSION")]
         version: String,
+
+        /// Number of primary inputs (required for v3a format)
+        #[arg(
+            short = 'p',
+            long,
+            value_name = "COUNT",
+            required_if_eq("version", "v3a")
+        )]
+        primary_inputs: Option<u64>,
     },
 
     /// Convert CKT v1 format to CKT v3a format
@@ -66,6 +75,10 @@ enum Commands {
         /// Output CKT v3a format file (defaults to input.v3a.ckt)
         #[arg(short, long, value_name = "OUTPUT")]
         output: Option<PathBuf>,
+
+        /// Number of primary inputs (required)
+        #[arg(short = 'p', long, value_name = "COUNT")]
+        primary_inputs: u64,
     },
 
     /// Verify and analyze a circuit file
@@ -158,6 +171,7 @@ async fn async_main(cli: Cli) -> Result<()> {
             input,
             output,
             version,
+            primary_inputs,
         } => {
             let output = output.unwrap_or_else(|| {
                 let mut path = input.clone();
@@ -167,7 +181,11 @@ async fn async_main(cli: Cli) -> Result<()> {
 
             match version.as_str() {
                 "v1" => convert_bristol_to_ckt_v1(&input, &output).await?,
-                "v3a" => convert_bristol_to_ckt_v3a(&input, &output).await?,
+                "v3a" => {
+                    let primary_inputs =
+                        primary_inputs.ok_or("Primary inputs count is required for v3a format")?;
+                    convert_bristol_to_ckt_v3a(&input, &output, primary_inputs).await?
+                }
                 _ => {
                     return Err(
                         format!("Unsupported version: {}. Use 'v1' or 'v3a'", version).into(),
@@ -176,7 +194,11 @@ async fn async_main(cli: Cli) -> Result<()> {
             }
         }
 
-        Commands::CktConvert { input, output } => {
+        Commands::CktConvert {
+            input,
+            output,
+            primary_inputs,
+        } => {
             let output = output.unwrap_or_else(|| {
                 let mut path = input.clone();
                 let stem = path
@@ -187,7 +209,7 @@ async fn async_main(cli: Cli) -> Result<()> {
                 path
             });
 
-            convert_ckt_v1_to_v3a(&input, &output).await?;
+            convert_ckt_v1_to_v3a(&input, &output, primary_inputs).await?;
         }
 
         Commands::Verify {
@@ -474,7 +496,11 @@ async fn convert_bristol_to_ckt_v1(bristol_path: &Path, ckt_path: &Path) -> Resu
 }
 
 /// Convert Bristol format to CKT v3a format with parallel parsing
-async fn convert_bristol_to_ckt_v3a(bristol_path: &Path, ckt_path: &Path) -> Result<()> {
+async fn convert_bristol_to_ckt_v3a(
+    bristol_path: &Path,
+    ckt_path: &Path,
+    primary_inputs: u64,
+) -> Result<()> {
     println!(
         "Converting {} -> {} (v3a format)",
         bristol_path.display(),
@@ -537,7 +563,7 @@ async fn convert_bristol_to_ckt_v3a(bristol_path: &Path, ckt_path: &Path) -> Res
         .await
         .map_err(|e| format!("Failed to create file: {}", e))?;
 
-    let mut writer = CircuitWriterV3a::new(output_file)
+    let mut writer = CircuitWriterV3a::new(output_file, primary_inputs)
         .await
         .map_err(|e| format!("Failed to create v3a writer: {}", e))?;
 
@@ -616,13 +642,18 @@ async fn convert_bristol_to_ckt_v3a(bristol_path: &Path, ckt_path: &Path) -> Res
 
     stats.print_summary();
 
+    println!("Primary inputs:  {}", primary_inputs);
     println!("BLAKE3 checksum: {}", checksum_hex);
 
     Ok(())
 }
 
 /// Convert CKT v1 format to CKT v3a format
-async fn convert_ckt_v1_to_v3a(input_path: &Path, output_path: &Path) -> Result<()> {
+async fn convert_ckt_v1_to_v3a(
+    input_path: &Path,
+    output_path: &Path,
+    primary_inputs: u64,
+) -> Result<()> {
     println!(
         "Converting CKT v1 {} -> CKT v3a {}",
         input_path.display(),
@@ -642,7 +673,7 @@ async fn convert_ckt_v1_to_v3a(input_path: &Path, output_path: &Path) -> Result<
         .await
         .map_err(|e| format!("Failed to create output file: {}", e))?;
 
-    let mut v3a_writer = CircuitWriterV3a::new(output_file)
+    let mut v3a_writer = CircuitWriterV3a::new(output_file, primary_inputs)
         .await
         .map_err(|e| format!("Failed to create v3a writer: {}", e))?;
 
@@ -717,6 +748,10 @@ async fn convert_ckt_v1_to_v3a(input_path: &Path, output_path: &Path) -> Result<
     println!(
         "  Total gates:     {}",
         format_number(stats.total_gates as usize)
+    );
+    println!(
+        "  Primary inputs:  {}",
+        format_number(stats.primary_inputs as usize)
     );
     println!(
         "  XOR gates:       {}",
@@ -956,8 +991,39 @@ fn print_file_info(path: &Path, version: Option<String>) -> Result<()> {
                 }
             }
             "v3a" => {
-                println!("Format: CKT v3a (compressed binary with checksums)");
-                println!("Use 'ckt verify -v 3a' for detailed information");
+                // Try to read the v3a header to get more info
+                use ckt::v3::a::reader::read_header_seekable;
+
+                let file = File::open(path)?;
+                match read_header_seekable(&mut std::io::BufReader::new(file)) {
+                    Ok(header) => {
+                        let total_gates = header.xor_gates + header.and_gates;
+                        println!("Format: CKT v3a (compressed binary with checksums)");
+                        println!("Gates: {}", format_number(total_gates as usize));
+                        println!(
+                            "Primary inputs: {}",
+                            format_number(header.primary_inputs as usize)
+                        );
+                        println!(
+                            "XOR gates: {} ({:.1}%)",
+                            format_number(header.xor_gates as usize),
+                            (header.xor_gates as f64 / total_gates as f64) * 100.0
+                        );
+                        println!(
+                            "AND gates: {} ({:.1}%)",
+                            format_number(header.and_gates as usize),
+                            (header.and_gates as f64 / total_gates as f64) * 100.0
+                        );
+                        println!(
+                            "Bytes per gate: {:.2}",
+                            file_size as f64 / total_gates as f64
+                        );
+                    }
+                    Err(_) => {
+                        println!("Format: CKT v3a (compressed binary with checksums)");
+                        println!("Use 'ckt verify -v 3a' for detailed information");
+                    }
+                }
             }
             _ => {
                 println!("Format: CKT (version unknown)");

@@ -6,7 +6,10 @@ use std::alloc::{GlobalAlloc, Layout};
 use std::cell::Cell;
 use std::time::{Duration, Instant};
 
+mod cli;
 mod new;
+
+use cli::Cli;
 use new::Leveller;
 
 // Memory tracking wrapper around mimalloc
@@ -67,26 +70,35 @@ fn get_memory_usage_mb() -> f64 {
     ALLOCATED_BYTES.with(|bytes| bytes.get() as f64) / (1024.0 * 1024.0)
 }
 
-const PRIMARY_INPUTS: u64 = 1706;
-const TARGET_PENDING: usize = 10_000_000; // Target 100M pending gates in memory
-const CHECK_INTERVAL: usize = 10_000; // Check and refill every 100k gates processed
-const STUCK_BATCH_SIZE: usize = 1_000_000;
+// Constants removed - now provided via CLI arguments
 
 #[monoio::main(timer_enabled = true)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Parse command line arguments
+    let args = Cli::parse_args();
+
     println!("Circuit Level Organizer - Sliding Window Algorithm");
     println!("===================================================");
+    println!("Input:  {}", args.input.display());
+    println!("Output: {}", args.output.display());
 
-    // First pass: get total gates count
-    let total_gates = {
-        let file = File::open("dv.ckt").await?;
+    // First pass: get total gates count and primary inputs
+    let (total_gates, primary_inputs) = {
+        let file = File::open(&args.input).await?;
         let reader = CircuitReader::new(file, 10_000_000).await?;
-        reader.total_gates()
+        let total = reader.total_gates();
+        let primary_inputs = reader.primary_inputs();
+        (total, primary_inputs)
     };
 
     println!("Total gates in circuit: {}", total_gates);
-    println!("Target pending gates in memory: {}", TARGET_PENDING);
-    println!("Refill check interval: {} gates", CHECK_INTERVAL);
+    println!("Primary inputs: {}", primary_inputs);
+
+    if args.verbose {
+        println!("Target pending gates in memory: {}", args.target_pending);
+        println!("Refill check interval: {} gates", args.check_interval);
+        println!("Stuck batch size: {} gates", args.stuck_batch_size);
+    }
 
     // Setup dual progress bars
     let multi_pb = MultiProgress::new();
@@ -126,7 +138,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     pb_level.enable_steady_tick(Duration::from_millis(100));
     pb_load.enable_steady_tick(Duration::from_millis(100));
 
-    let mut leveller = Leveller::new(PRIMARY_INPUTS);
+    let mut leveller = Leveller::new(primary_inputs);
 
     // Counters
     let mut total_gates_added = 0usize; // Gates added to leveller
@@ -138,7 +150,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let overall_start = Instant::now();
 
     // Open file for reading
-    let file = File::open("dv.ckt").await?;
+    let file = File::open(&args.input).await?;
     let mut reader = CircuitReader::new(file, 10_000_000).await?;
     let mut reader_exhausted = false;
 
@@ -156,7 +168,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 pb_load.inc(num_gates as u64);
 
                 // Check if we've loaded enough after processing the entire batch
-                if total_gates_added >= TARGET_PENDING {
+                if total_gates_added >= args.target_pending {
                     break;
                 }
             }
@@ -175,10 +187,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let file = OpenOptions::new()
         .write(true)
         .create(true)
-        .open("output.ckt")
+        .open(&args.output)
         .await
         .unwrap();
-    let mut writer = CircuitWriter::new(file, PRIMARY_INPUTS).await.unwrap();
+    let mut writer = CircuitWriter::new(file, primary_inputs).await.unwrap();
 
     // Main processing loop
     loop {
@@ -219,13 +231,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
 
             // Check if we should load more gates
-            if gates_since_check >= CHECK_INTERVAL {
+            if gates_since_check >= args.check_interval {
                 gates_since_check = 0;
                 let pending = total_gates_added - total_gates_in_levels;
 
                 // If pending is below target and we haven't exhausted the file, load more
-                if pending < TARGET_PENDING && !reader_exhausted {
-                    let to_load = TARGET_PENDING - pending;
+                if pending < args.target_pending && !reader_exhausted {
+                    let to_load = args.target_pending - pending;
                     let mut loaded = 0;
 
                     // Don't update message during refill to reduce flicker
@@ -265,7 +277,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             if pending > 0 && !reader_exhausted {
                 // Don't update message to reduce flicker
 
-                let to_load = STUCK_BATCH_SIZE; // Load a big batch when stuck
+                let to_load = args.stuck_batch_size; // Load a big batch when stuck
                 let mut loaded = 0;
 
                 while loaded < to_load && !reader_exhausted {

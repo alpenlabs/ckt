@@ -567,6 +567,7 @@ dependencies = [
  "ahash",
  "bitvec",
  "ckt",
+ "clap",
  "cynosure",
  "indicatif 0.17.11",
  "mimalloc",

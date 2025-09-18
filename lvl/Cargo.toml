@@ -16,6 +16,7 @@ indicatif = "0.17"
 ahash = "0.8.12"
 cynosure = "0.2.2"
 mimalloc = { version = "0.1.48", features = ["v3"] }
+clap = { version = "4.5", features = ["derive"] }
 
 [[bin]]
 name = "lvl"

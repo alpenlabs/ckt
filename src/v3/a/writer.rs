@@ -21,14 +21,15 @@ pub struct CircuitWriter<W: Write + Seek> {
     total_gates_written: usize,
     xor_gates: u64,
     and_gates: u64,
+    primary_inputs: u64,
     batches_waiting_for_flush: usize,
     hasher: Hasher,
     bytes_written: u64,
 }
 
 impl<W: Write + Seek> CircuitWriter<W> {
-    pub fn new(mut writer: W) -> Result<Self> {
-        // Write placeholder header (50 bytes)
+    pub fn new(mut writer: W, primary_inputs: u64) -> Result<Self> {
+        // Write placeholder header (58 bytes)
         writer.write_all(&[0u8; CircuitHeader::SIZE])?;
 
         Ok(Self {
@@ -38,6 +39,7 @@ impl<W: Write + Seek> CircuitWriter<W> {
             total_gates_written: 0,
             xor_gates: 0,
             and_gates: 0,
+            primary_inputs,
             batches_waiting_for_flush: 0,
             hasher: Hasher::new(),
             bytes_written: CircuitHeader::SIZE as u64,
@@ -121,6 +123,7 @@ impl<W: Write + Seek> CircuitWriter<W> {
         // Add the header fields after checksum to the hash
         self.hasher.update(&self.xor_gates.to_le_bytes());
         self.hasher.update(&self.and_gates.to_le_bytes());
+        self.hasher.update(&self.primary_inputs.to_le_bytes());
 
         // Compute final checksum
         let hash = self.hasher.finalize();
@@ -137,6 +140,7 @@ impl<W: Write + Seek> CircuitWriter<W> {
         self.writer.write_all(checksum_bytes)?;
         self.writer.write_all(&self.xor_gates.to_le_bytes())?;
         self.writer.write_all(&self.and_gates.to_le_bytes())?;
+        self.writer.write_all(&self.primary_inputs.to_le_bytes())?;
 
         // Seek to end for any subsequent operations
         self.writer.seek(SeekFrom::End(0))?;
@@ -146,8 +150,8 @@ impl<W: Write + Seek> CircuitWriter<W> {
             total_gates: self.xor_gates + self.and_gates,
             xor_gates: self.xor_gates,
             and_gates: self.and_gates,
-            primary_inputs: 0, // v3a doesn't track primary inputs
-            total_levels: 0,   // v3a doesn't have levels
+            primary_inputs: self.primary_inputs,
+            total_levels: 0, // v3a doesn't have levels
             bytes_written: self.bytes_written,
             checksum,
         };
@@ -165,7 +169,7 @@ mod tests {
     #[test]
     fn test_writer_reader_roundtrip() -> Result<()> {
         let buffer = Cursor::new(Vec::new());
-        let mut writer = CircuitWriter::new(buffer)?;
+        let mut writer = CircuitWriter::new(buffer, 0)?;
 
         // Write some test gates
         for i in 0..100u64 {
@@ -224,7 +228,7 @@ mod tests {
     #[test]
     fn test_write_gates_batch() -> Result<()> {
         let buffer = Cursor::new(Vec::new());
-        let mut writer = CircuitWriter::new(buffer)?;
+        let mut writer = CircuitWriter::new(buffer, 0)?;
 
         let gates = vec![
             (Gate::new(0, 1, 2), GateType::XOR),

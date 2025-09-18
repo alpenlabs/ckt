@@ -17,25 +17,27 @@ use crate::{
 /// Circuit header for v3a format
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct CircuitHeader {
-    pub version: u8,        // Always 3
-    pub format_type: u8,    // Always 0 (TypeA)
-    pub checksum: [u8; 32], // BLAKE3 hash of all data after checksum
-    pub xor_gates: u64,     // Total XOR gates
-    pub and_gates: u64,     // Total AND gates
+    pub version: u8,         // Always 3
+    pub format_type: u8,     // Always 0 (TypeA)
+    pub checksum: [u8; 32],  // BLAKE3 hash of all data after checksum
+    pub xor_gates: u64,      // Total XOR gates
+    pub and_gates: u64,      // Total AND gates
+    pub primary_inputs: u64, // Number of primary input wires
 }
 
 impl CircuitHeader {
-    /// Header size in bytes: 1 + 1 + 32 + 8 + 8 = 50 bytes
-    pub const SIZE: usize = 50;
+    /// Header size in bytes: 1 + 1 + 32 + 8 + 8 + 8 = 58 bytes
+    pub const SIZE: usize = 58;
 
     /// Create a new v3a header (checksum will be computed during write)
-    pub fn new(xor_gates: u64, and_gates: u64) -> Self {
+    pub fn new(xor_gates: u64, and_gates: u64, primary_inputs: u64) -> Self {
         Self {
             version: VERSION,
             format_type: FormatType::TypeA.to_byte(),
             checksum: [0; 32], // Placeholder, will be filled when writing
             xor_gates,
             and_gates,
+            primary_inputs,
         }
     }
 

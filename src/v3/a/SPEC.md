@@ -16,22 +16,23 @@ Version 3a (v3a) is an intermediate storage format designed for unoptimized Bool
 ### File Layout
 
 ```
-[Header (50 bytes)]
+[Header (58 bytes)]
 [GateBatch 0 (103 bytes)]
 [GateBatch 1 (103 bytes)]
 ...
 [GateBatch N (103 bytes)]
 ```
 
-### Header Structure (Fixed Size: 50 bytes)
+### Header Structure (Fixed Size: 58 bytes)
 
 ```rust
 struct HeaderV3A {
-    version: u8,        // 1 byte: Always 0x03 for v3
-    format_type: u8,    // 1 byte: Always 0x00 for TypeA
-    checksum: [u8; 32], // 32 bytes: BLAKE3 hash of all data after checksum
-    xor_gates: u64,     // 8 bytes: Total XOR gates (little-endian)
-    and_gates: u64,     // 8 bytes: Total AND gates (little-endian)
+    version: u8,         // 1 byte: Always 0x03 for v3
+    format_type: u8,     // 1 byte: Always 0x00 for TypeA
+    checksum: [u8; 32],  // 32 bytes: BLAKE3 hash of all data after checksum
+    xor_gates: u64,      // 8 bytes: Total XOR gates (little-endian)
+    and_gates: u64,      // 8 bytes: Total AND gates (little-endian)
+    primary_inputs: u64, // 8 bytes: Number of primary input wires (little-endian)
 }
 ```
 
@@ -42,6 +43,7 @@ struct HeaderV3A {
 - **checksum**: BLAKE3 hash of all bytes from position 34 to end of file (everything after the checksum field)
 - **xor_gates**: Total number of XOR gates in the circuit
 - **and_gates**: Total number of AND gates in the circuit
+- **primary_inputs**: Number of primary input wires in the circuit (wires 0 to primary_inputs-1)
 
 ## Gate Batch Structure
 
@@ -190,7 +192,7 @@ v3a serves as the intermediate format in the circuit processing pipeline:
 
 ### Key Differences from v1
 
-1. **Header size**: 50 bytes (v3a) vs 8 bytes (v1)
+1. **Header size**: 58 bytes (v3a) vs 8 bytes (v1)
 2. **Version detection**: Explicit version/type bytes
 3. **Integrity verification**: BLAKE3 checksum for data integrity
 4. **Wire ID range**: 34-bit vs 32-bit
@@ -247,10 +249,10 @@ Readers MUST validate:
 1. Version byte equals `3`
 2. Format type byte equals `0`
 3. BLAKE3 checksum matches computed hash of data after checksum
-4. File size matches expected batch count:
+3. File size matches expected batch count:
    ```
    expected_batches = ceil(total_gates / 8)
-   expected_size = 50 + (expected_batches * 103)
+   expected_size = 58 + (expected_batches * 103)
    ```
 
 ### Wire ID Validation
@@ -278,11 +280,12 @@ XOR(1, 3) -> 4
 ### Encoded Format (Hex)
 
 ```
-Header (50 bytes):
+Header (58 bytes):
 03 00                    # version=3, type=0
 [32 bytes checksum]      # BLAKE3 hash of remaining data
 02 00 00 00 00 00 00 00  # xor_gates=2
 01 00 00 00 00 00 00 00  # and_gates=1
+02 00 00 00 00 00 00 00  # primary_inputs=2
 
 Batch 0 (103 bytes):
 [102 bytes of bit-packed gate data]
@@ -309,7 +312,7 @@ Writers compute the checksum as follows:
 5. Flush to disk
 
 Readers verify the checksum by:
-1. Read the 50-byte header
+1. Read the 58-byte header
 2. Extract the checksum field
 3. Read remaining file data
 4. Compute BLAKE3 hash of data (excluding header first 34 bytes)

@@ -29,7 +29,7 @@ impl CircuitReader {
     pub async fn new(file: File, max_buffer_size: usize) -> Result<Self> {
         let len = file.metadata().await?.len();
 
-        // Read header (50 bytes)
+        // Read header (58 bytes)
         let (res, header_bytes) = file
             .read_exact_at(Vec::with_capacity(CircuitHeader::SIZE), 0)
             .await;
@@ -64,6 +64,7 @@ impl CircuitReader {
         // Parse remaining header fields
         let xor_gates = u64::from_le_bytes(header_bytes[34..42].try_into().unwrap());
         let and_gates = u64::from_le_bytes(header_bytes[42..50].try_into().unwrap());
+        let primary_inputs = u64::from_le_bytes(header_bytes[50..58].try_into().unwrap());
 
         let header = CircuitHeader {
             version: header_bytes[0],
@@ -71,6 +72,7 @@ impl CircuitReader {
             checksum,
             xor_gates,
             and_gates,
+            primary_inputs,
         };
 
         Ok(Self {
@@ -103,6 +105,11 @@ impl CircuitReader {
     /// Get number of AND gates
     pub fn and_gates(&self) -> u64 {
         self.header.and_gates
+    }
+
+    /// Get number of primary inputs
+    pub fn primary_inputs(&self) -> u64 {
+        self.header.primary_inputs
     }
 
     /// Get total gates read so far
@@ -302,7 +309,7 @@ pub async fn verify_checksum_async(file: File) -> Result<[u8; 32]> {
         offset += bytes_read as u64;
     }
 
-    // Then hash the header fields after checksum
+    // Then hash the header fields after checksum (xor, and, primary_inputs)
     hasher.update(&header_bytes[34..]);
 
     // Compare checksums
