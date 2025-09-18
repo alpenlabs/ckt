@@ -39,7 +39,7 @@ impl StandardVarInt {
 
         if likely(value < (1u64 << 6)) {
             // 1 byte: 0xxxxxxx
-            if unlikely(buffer.len() < 1) {
+            if unlikely(buffer.is_empty()) {
                 return Err(Error::new(ErrorKind::WriteZero, "Buffer too small"));
             }
             buffer[0] = value as u8;
@@ -102,8 +102,8 @@ impl StandardVarInt {
 
         let mut value = (first & mask) as u64;
 
-        for i in 1..length {
-            value = (value << 8) | (buffer[i] as u64);
+        for byte in buffer.iter().take(length).skip(1) {
+            value = (value << 8) | (*byte as u64);
         }
 
         Ok((StandardVarInt(value), length))
@@ -235,7 +235,7 @@ impl FlaggedVarInt {
 
         if likely(value < (1u64 << 5)) {
             // 1 byte: 00rxxxxx
-            if unlikely(buffer.len() < 1) {
+            if unlikely(buffer.is_empty()) {
                 return Err(Error::new(ErrorKind::WriteZero, "Buffer too small"));
             }
             buffer[0] = (flag_bit << 5) | (value as u8);
@@ -297,8 +297,8 @@ impl FlaggedVarInt {
         let flag = flag_bit == 1;
         let mut value = (first & mask) as u64;
 
-        for i in 1..length {
-            value = (value << 8) | (buffer[i] as u64);
+        for byte in buffer.iter().take(length).skip(1) {
+            value = (value << 8) | (*byte as u64);
         }
 
         Ok((FlaggedVarInt { value, flag }, length))

@@ -224,7 +224,7 @@ impl CircuitWriter {
             xor_gates: self.xor_gates_written,
             and_gates: self.and_gates_written,
             primary_inputs: self.primary_inputs,
-            total_levels: (self.current_level - 1) as u32, // Subtract 1 since we start at level 1
+            total_levels: (self.current_level - 1), // Subtract 1 since we start at level 1
             bytes_written: self.bytes_written,
             checksum,
         };

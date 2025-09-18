@@ -128,11 +128,10 @@ impl CircuitReader {
         }
 
         // Ensure we have enough data
-        if unlikely(self.buffer_offset == self.max_valid_bytes) {
-            if unlikely(!self.fill_buffer().await?) {
+        if unlikely(self.buffer_offset == self.max_valid_bytes)
+            && unlikely(!self.fill_buffer().await?) {
                 return Ok(None);
             }
-        }
 
         // Check if we have a full batch
         if unlikely(self.max_valid_bytes - self.buffer_offset < GateBatch34::SIZE) {

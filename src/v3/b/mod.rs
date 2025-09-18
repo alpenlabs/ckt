@@ -85,7 +85,7 @@ impl WireLocation {
 /// Compact wire location for memory efficiency
 /// Compatible with lvl crate's CompactWireLocation
 #[derive(Clone, Copy)]
-#[repr(packed)]
+#[repr(C, packed)]
 pub struct CompactWireLocation {
     pub bytes: [u8; 7],
 }

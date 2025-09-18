@@ -28,8 +28,6 @@ pub struct CircuitReader<R: Read> {
     gates_read: u64,
     /// Whether we've reached EOF
     eof_reached: bool,
-    /// Track level sizes for wire decoding
-    level_sizes: Vec<usize>,
 }
 
 impl<R: Read> CircuitReader<R> {
@@ -77,10 +75,6 @@ impl<R: Read> CircuitReader<R> {
             primary_inputs,
         };
 
-        // Initialize level sizes with level 0 (primary inputs)
-        let mut level_sizes = Vec::new();
-        level_sizes.push(primary_inputs as usize);
-
         Ok(Self {
             reader,
             buffer: vec![0; buffer_size],
@@ -92,7 +86,6 @@ impl<R: Read> CircuitReader<R> {
             levels_read: 0,
             gates_read: 0,
             eof_reached: false,
-            level_sizes,
         })
     }
 
@@ -161,10 +154,6 @@ impl<R: Read> CircuitReader<R> {
             self.gates_read += 1;
         }
 
-        // Track level size
-        let level_size = (num_xor + num_and) as usize;
-        self.level_sizes.push(level_size);
-
         self.levels_read += 1;
         self.current_level += 1;
 
@@ -225,10 +214,6 @@ impl<R: Read> CircuitReader<R> {
             self.wire_counter += 1;
             self.gates_read += 1;
         }
-
-        // Track level size
-        let level_size = (num_xor + num_and) as usize;
-        self.level_sizes.push(level_size);
 
         self.levels_read += 1;
         self.current_level += 1;

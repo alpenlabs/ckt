@@ -29,8 +29,6 @@ pub struct CircuitReader {
     levels_read: usize,
     /// Total gates read so far
     gates_read: u64,
-    /// Track level sizes for wire decoding
-    level_sizes: Vec<usize>,
 }
 
 impl CircuitReader {
@@ -84,10 +82,6 @@ impl CircuitReader {
             primary_inputs,
         };
 
-        // Initialize level sizes with level 0 (primary inputs)
-        let mut level_sizes = Vec::new();
-        level_sizes.push(primary_inputs as usize);
-
         Ok(Self {
             file,
             buffer: vec![0; max_buffer_size],
@@ -99,7 +93,6 @@ impl CircuitReader {
             bytes_read: CircuitHeader::SIZE as u64,
             levels_read: 0,
             gates_read: 0,
-            level_sizes,
         })
     }
 
@@ -130,10 +123,8 @@ impl CircuitReader {
         }
 
         // Ensure we have data available
-        if unlikely(self.buffer_offset >= self.max_valid_bytes) {
-            if !self.fill_buffer().await? {
-                return Ok(None);
-            }
+        if unlikely(self.buffer_offset >= self.max_valid_bytes) && !self.fill_buffer().await? {
+            return Ok(None);
         }
 
         // Read level header
@@ -168,10 +159,6 @@ impl CircuitReader {
             self.gates_read += 1;
         }
 
-        // Track level size
-        let level_size = (num_xor + num_and) as usize;
-        self.level_sizes.push(level_size);
-
         self.levels_read += 1;
         self.current_level += 1;
 
@@ -194,10 +181,8 @@ impl CircuitReader {
         }
 
         // Ensure we have data available
-        if unlikely(self.buffer_offset >= self.max_valid_bytes) {
-            if !self.fill_buffer().await? {
-                return Ok(None);
-            }
+        if unlikely(self.buffer_offset >= self.max_valid_bytes) && !self.fill_buffer().await? {
+            return Ok(None);
         }
 
         // Read level header
@@ -246,10 +231,6 @@ impl CircuitReader {
             and_gates.count += 1;
             self.gates_read += 1;
         }
-
-        // Track level size
-        let level_size = (num_xor + num_and) as usize;
-        self.level_sizes.push(level_size);
 
         self.levels_read += 1;
         self.current_level += 1;

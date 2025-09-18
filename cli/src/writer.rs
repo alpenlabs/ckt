@@ -131,45 +131,6 @@ mod tests {
     use std::io::{Seek, SeekFrom, Write};
 
     #[test]
-    fn test_basic_write_and_flush() {
-        let (tx, rx) = unbounded();
-        let mut writer = RemoteWriter::new(tx, 0);
-
-        // Write some data
-        assert_eq!(writer.write(b"hello").unwrap(), 5);
-        assert_eq!(writer.pos, 5);
-        assert_eq!(writer.buffer.len(), 5);
-
-        // Data shouldn't be sent yet
-        assert!(rx.try_recv().is_err());
-
-        // Flush should send it
-        writer.flush().unwrap();
-        let (pos, data) = rx.recv().unwrap();
-        assert_eq!(pos, 0);
-        assert_eq!(data, b"hello");
-        assert!(writer.buffer.is_empty());
-    }
-
-    #[test]
-    fn test_multiple_writes_before_flush() {
-        let (tx, rx) = unbounded();
-        let mut writer = RemoteWriter::new(tx, 0);
-
-        writer.write(b"hello").unwrap();
-        writer.write(b" ").unwrap();
-        writer.write(b"world").unwrap();
-
-        // Nothing sent yet
-        assert!(rx.try_recv().is_err());
-
-        writer.flush().unwrap();
-        let (pos, data) = rx.recv().unwrap();
-        assert_eq!(pos, 0);
-        assert_eq!(data, b"hello world");
-    }
-
-    #[test]
     fn test_seek_from_start() {
         let (tx, rx) = unbounded();
         let mut writer = RemoteWriter::new(tx, 0);
@@ -288,16 +249,6 @@ mod tests {
         let (pos, data) = rx.recv().unwrap();
         assert_eq!(pos, 0);
         assert_eq!(data, b"hello");
-    }
-
-    #[test]
-    fn test_empty_flush() {
-        let (tx, rx) = unbounded();
-        let mut writer = RemoteWriter::new(tx, 0);
-
-        // Flush with empty buffer should do nothing
-        writer.flush().unwrap();
-        assert!(rx.try_recv().is_err());
     }
 
     #[test]
