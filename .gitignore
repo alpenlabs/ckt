@@ -2,3 +2,5 @@
 Cargo.lock
 *.ckt
 *.bristol
+*.csv
+*.ptx

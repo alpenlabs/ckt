@@ -1,0 +1,22 @@
+[package]
+name = "lvl"
+version = "0.1.0"
+edition = "2021"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = 3
+
+[dependencies]
+ckt = { path = "..", version = "0.1.0" }
+monoio = { version = "0.2.4", features = ["sync"] }
+bitvec = "1.0"
+indicatif = "0.17"
+ahash = "0.8.12"
+cynosure = "0.2.2"
+mimalloc = { version = "0.1.48", features = ["v3"] }
+
+[[bin]]
+name = "lvl"
+path = "src/main.rs"

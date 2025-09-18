@@ -1,6 +1,6 @@
 use std::io::{Result, Seek, Write};
 
-use crate::{CompactGate, GateBatch, GateType};
+use super::{CompactGate, GateBatch, GateType};
 
 const BATCHES_UNTIL_FLUSH: usize = 1000;
 

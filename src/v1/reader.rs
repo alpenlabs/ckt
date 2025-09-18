@@ -1,4 +1,4 @@
-use crate::{CircuitHeader, GateBatch};
+use super::{CircuitHeader, GateBatch};
 use std::io::{Read, Result, Seek};
 
 /// Reader for compressed circuit format with batch API

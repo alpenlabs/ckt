@@ -1,6 +1,6 @@
 use monoio::fs::File;
 
-use crate::{CircuitHeader, GateBatch};
+use crate::v1::{CircuitHeader, GateBatch};
 use cynosure::hints::{likely, prefetch_read_data, unlikely};
 use std::io::{Read, Result, Seek};
 

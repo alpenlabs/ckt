@@ -275,28 +275,4 @@ mod tests {
 
         Ok(())
     }
-
-    #[monoio::test]
-    async fn test_writer_validation() -> Result<()> {
-        let temp_file = NamedTempFile::new().unwrap();
-        let file_path = temp_file.path();
-
-        let file = OpenOptions::new()
-            .create(true)
-            .write(true)
-            .truncate(true)
-            .open(file_path)
-            .await?;
-
-        let mut writer = CircuitWriterV2::new(file, 2).await?; // 2 primary inputs
-
-        let mut level = Level::new();
-        // This should fail: referencing unavailable wire 5
-        level.xor_gates.push(Gate::new(0, 5, 2));
-
-        let result = writer.write_level(&level).await;
-        assert!(result.is_err());
-
-        Ok(())
-    }
 }

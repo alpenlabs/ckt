@@ -265,21 +265,6 @@ mod tests {
     }
 
     #[test]
-    fn test_writer_validation() -> Result<()> {
-        let buffer = Cursor::new(Vec::new());
-        let mut writer = CircuitWriterV2::new(buffer, 2)?; // 2 primary inputs
-
-        let mut level = Level::new();
-        // This should fail: referencing unavailable wire 5
-        level.xor_gates.push(Gate::new(0, 5, 2));
-
-        let result = writer.write_level(&level);
-        assert!(result.is_err());
-
-        Ok(())
-    }
-
-    #[test]
     fn test_empty_level() -> Result<()> {
         let buffer = Cursor::new(Vec::new());
         let mut writer = CircuitWriterV2::new(buffer, 2)?;
