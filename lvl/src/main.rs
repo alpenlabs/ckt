@@ -1,7 +1,7 @@
 use ckt::v3::a::hp::reader::CircuitReader;
 use ckt::v3::b::hp::writer::CircuitWriter;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use monoio::fs::File;
+use monoio::fs::{File, OpenOptions};
 use std::alloc::{GlobalAlloc, Layout};
 use std::cell::Cell;
 use std::time::{Duration, Instant};
@@ -172,7 +172,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         total_gates_added
     ));
 
-    let file = File::open("output.ckt").await.unwrap();
+    let file = OpenOptions::new()
+        .write(true)
+        .create(true)
+        .open("output.ckt")
+        .await
+        .unwrap();
     let mut writer = CircuitWriter::new(file, PRIMARY_INPUTS).await.unwrap();
 
     // Main processing loop
