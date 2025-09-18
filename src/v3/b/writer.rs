@@ -3,7 +3,7 @@ use cynosure::hints::{likely, unlikely};
 use std::io::{Result, Seek, SeekFrom, Write};
 
 use super::{
-    Gate, Level, WireLocation,
+    Gate, Level,
     varints::{FlaggedVarInt, StandardVarInt},
 };
 use crate::{
@@ -229,20 +229,10 @@ impl<W: Write + Seek> CircuitWriter<W> {
     }
 }
 
-/// Helper to convert from old Gate format to v3b Gate with WireLocation
-pub fn convert_gate_to_v3b(
-    old_gate: crate::v2::Gate,
-    wire_to_location: &std::collections::HashMap<u64, WireLocation>,
-) -> Option<Gate> {
-    let input1 = wire_to_location.get(&old_gate.input1)?;
-    let input2 = wire_to_location.get(&old_gate.input2)?;
-    Some(Gate::new(*input1, *input2))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v3::b::reader::CircuitReader;
+    use crate::v3::b::{WireLocation, reader::CircuitReader};
     use std::io::Cursor;
 
     #[test]

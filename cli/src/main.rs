@@ -1,9 +1,10 @@
 mod stream;
 mod writer;
 
-use ckt::reader::CircuitReader;
-use ckt::writer::CircuitWriter;
-use ckt::{CompactGate, GateType, hp};
+use ckt::GateType;
+use ckt::v1::reader::CircuitReader;
+use ckt::v1::writer::CircuitWriter;
+use ckt::v1::{CompactGate, hp};
 use clap::{Parser, Subcommand};
 use indicatif::{ProgressBar, ProgressStyle};
 use kanal::unbounded_async;
@@ -664,7 +665,7 @@ fn extract_ckt_to_bristol(ckt_path: &Path, bristol_path: &Path) -> Result<()> {
 
 /// Search for gates with specific inputs or outputs in a CKT file
 async fn search_ckt_file(file: &Path, inputs: &[u32], outputs: &[u32]) -> Result<()> {
-    use ckt::hp::reader::CircuitReader;
+    use ckt::v1::hp::reader::CircuitReader;
     use monoio::fs::File;
 
     if inputs.is_empty() && outputs.is_empty() {

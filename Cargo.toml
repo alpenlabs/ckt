@@ -16,8 +16,11 @@ monoio = { version = "0.2.4", features = ["sync"] }
 tempfile = "3.0"
 
 [features]
-default = ["high-performance"]
+default = ["high-performance", "v3"]
 high-performance = ["dep:monoio", "dep:cynosure"]
+v1 = []
+v2 = []
+v3 = []
 
 [workspace]
 members = ["cli", "lvl"]
