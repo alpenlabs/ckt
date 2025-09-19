@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 
 mod cli;
 mod leveller;
+mod slab;
 #[allow(dead_code)]
 mod thinvec;
 
