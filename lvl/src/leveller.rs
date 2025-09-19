@@ -1,5 +1,6 @@
 use std::{collections::BTreeSet, mem};
 
+use crate::thinvec::{ThinVec, ThinVecInternal};
 use ahash::{HashMap, HashMapExt};
 use ckt::{
     v3::{
@@ -108,9 +109,9 @@ impl Eq for Dependency {}
 // Union for storing CompactWireLocation, inline CompactDependency, or pointer to Vec
 #[repr(packed)]
 union SlotData {
-    location: [u8; 9],       // CompactWireLocation (7 bytes) padded to 9
-    waiting_inline: [u8; 9], // Single CompactDependency (9 bytes)
-    waiting_ptr: *mut Vec<CompactDependency>, // Multiple dependencies
+    location: [u8; 9],                 // CompactWireLocation (7 bytes) padded to 9
+    waiting_inline: [u8; 9],           // Single CompactDependency (9 bytes)
+    waiting_ptr: *mut ThinVecInternal, // Multiple dependencies using ThinVec
 }
 
 // Slotted value for HashMap: handles collisions from u64→u32 key compression
@@ -144,13 +145,20 @@ impl SlottedValue {
                 Some(WireAvailability::Available(compact_loc.to_wire_location()))
             }
             2 => {
-                // Waiting - clone from pointer
+                // Waiting - clone from ThinVec
                 let ptr = unsafe { self.slots[slot_idx].waiting_ptr };
                 if ptr.is_null() {
                     None
                 } else {
-                    let vec_ref = unsafe { &*ptr };
-                    let deps = vec_ref.iter().map(|d| d.to_dependency()).collect();
+                    let thinvec = unsafe { ThinVec::<CompactDependency>::from_raw(ptr) };
+                    let mut deps = Vec::new();
+                    for i in 0..thinvec.len() {
+                        if let Some(compact_dep) = thinvec.get(i) {
+                            deps.push(compact_dep.to_dependency());
+                        }
+                    }
+                    // Convert back to raw pointer without dropping
+                    let _ = unsafe { thinvec.into_raw() };
                     Some(WireAvailability::Waiting(deps))
                 }
             }
@@ -192,13 +200,13 @@ impl SlottedValue {
                 };
             }
             WireAvailability::Waiting(deps) => {
-                // Multiple dependencies - use heap allocation
+                // Multiple dependencies - use ThinVec
                 self.mask |= 2 << (slot_idx * 2);
-                let compact_deps: Vec<CompactDependency> = deps
-                    .into_iter()
-                    .map(|d| CompactDependency::new(d.other_in, d.out, d.gate_type))
-                    .collect();
-                let ptr = Box::into_raw(Box::new(compact_deps));
+                let mut thinvec = ThinVec::<CompactDependency>::with_capacity(deps.len());
+                for dep in deps {
+                    thinvec.push(CompactDependency::new(dep.other_in, dep.out, dep.gate_type));
+                }
+                let ptr = unsafe { thinvec.into_raw() };
                 self.slots[slot_idx] = SlotData { waiting_ptr: ptr };
             }
         };
@@ -224,18 +232,24 @@ impl SlottedValue {
                 Some(WireAvailability::Available(compact_loc.to_wire_location()))
             }
             2 => {
-                // Waiting - take ownership of Vec
+                // Waiting - take ownership of ThinVec
                 let ptr = unsafe { self.slots[slot_idx].waiting_ptr };
                 if ptr.is_null() {
                     None
                 } else {
-                    let vec = unsafe { *Box::from_raw(ptr) };
-                    let deps = vec.iter().map(|d| d.to_dependency()).collect();
+                    let thinvec = unsafe { ThinVec::<CompactDependency>::from_raw(ptr) };
+                    let mut deps = Vec::new();
+                    for i in 0..thinvec.len() {
+                        if let Some(compact_dep) = thinvec.get(i) {
+                            deps.push(compact_dep.to_dependency());
+                        }
+                    }
                     // Clear mask bits and slot
                     self.mask &= !(0x3 << (slot_idx * 2));
                     self.slots[slot_idx] = SlotData {
                         waiting_ptr: std::ptr::null_mut(),
                     };
+                    // ThinVec will be dropped here, freeing its memory
                     Some(WireAvailability::Waiting(deps))
                 }
             }
@@ -257,10 +271,10 @@ impl SlottedValue {
     fn clear_slot_internal(&mut self, slot_idx: usize) {
         let mask_bits = (self.mask >> (slot_idx * 2)) & 0x3;
         if mask_bits == 2 {
-            // Free the waiting list (Vec)
+            // Free the waiting list (ThinVec)
             let ptr = unsafe { self.slots[slot_idx].waiting_ptr };
             if !ptr.is_null() {
-                unsafe { drop(Box::from_raw(ptr)) };
+                unsafe { drop(ThinVec::<CompactDependency>::from_raw(ptr)) };
             }
         }
         // mask_bits == 3 (inline) doesn't need cleanup
@@ -291,13 +305,15 @@ impl Clone for SlottedValue {
                     };
                 }
                 2 => {
-                    // Clone waiting list
+                    // Clone waiting list using ThinVec
                     new.mask |= 2 << (i * 2);
                     let ptr = unsafe { self.slots[i].waiting_ptr };
                     if !ptr.is_null() {
-                        let vec_ref = unsafe { &*ptr };
-                        let new_vec = vec_ref.clone();
-                        let new_ptr = Box::into_raw(Box::new(new_vec));
+                        let thinvec = unsafe { ThinVec::<CompactDependency>::from_raw(ptr) };
+                        let cloned_thinvec = thinvec.clone();
+                        // Convert back to raw pointer without dropping the original
+                        let _ = unsafe { thinvec.into_raw() };
+                        let new_ptr = unsafe { cloned_thinvec.into_raw() };
                         new.slots[i] = SlotData {
                             waiting_ptr: new_ptr,
                         };

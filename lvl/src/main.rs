@@ -7,10 +7,12 @@ use std::cell::Cell;
 use std::time::{Duration, Instant};
 
 mod cli;
-mod new;
+mod leveller;
+#[allow(dead_code)]
+mod thinvec;
 
 use cli::Cli;
-use new::Leveller;
+use leveller::Leveller;
 
 // Memory tracking wrapper around mimalloc
 struct TrackingAllocator {
@@ -114,19 +116,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .progress_chars("#>-"),
     );
 
-    let update_pb_load = |total_gates_loaded: usize| {
-        let bytes_per_gate = if total_gates_loaded > 0 {
-            ALLOCATED_BYTES.with(|bytes| bytes.get()) / total_gates_loaded
-        } else {
-            0
-        };
-        pb_load.set_message(format!(
-            "Mem: {:.1}MB ({} B/gate)",
-            get_memory_usage_mb(),
-            bytes_per_gate
-        ));
-    };
-
     // Progress bar for gates processed into levels
     let pb_level = multi_pb.add(ProgressBar::new(total_gates as u64));
     pb_level.set_style(
@@ -146,6 +135,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut total_levels = 0u32;
     let mut gates_since_check = 0usize;
     let mut last_message_update = Instant::now();
+
+    let update_pb_load = |pending: usize| {
+        let bytes_per_gate = if pending > 0 {
+            ALLOCATED_BYTES.with(|bytes| bytes.get()) / pending
+        } else {
+            0
+        };
+        pb_load.set_message(format!(
+            "Mem: {:.1}MB ({} B/gate)",
+            get_memory_usage_mb(),
+            bytes_per_gate
+        ));
+    };
 
     let overall_start = Instant::now();
 
@@ -225,7 +227,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     0
                 };
                 // Update load bar message
-                update_pb_load(total_gates_added);
+                update_pb_load(total_gates_added - total_gates_in_levels);
                 pb_level.set_message(format!("avg {} gates/level", avg_gates_per_level));
                 last_message_update = Instant::now();
             }
@@ -254,7 +256,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                                 pb_load.inc(num_gates as u64);
                                 if loaded % 10000 == 0 {
-                                    update_pb_load(total_gates_added);
+                                    update_pb_load(total_gates_added - total_gates_in_levels);
                                 }
                                 // Check if we've loaded enough after processing the entire batch
                                 if loaded >= to_load {
