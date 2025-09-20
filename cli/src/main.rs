@@ -5,11 +5,11 @@ use ckt::GateType;
 use ckt::v1::reader::CircuitReader as CircuitReaderV1;
 use ckt::v1::writer::CircuitWriter as CircuitWriterV1;
 use ckt::v1::{CompactGate, hp as hp_v1};
-use ckt::v3::a::Gate as GateV3a;
-use ckt::v3::a::hp::reader::CircuitReader as CircuitReaderV3a;
-use ckt::v3::a::hp::reader::verify_checksum_async as verify_checksum_v3a;
-use ckt::v3::a::hp::writer::CircuitWriter as CircuitWriterV3a;
-use ckt::v3::b::hp::reader::verify_checksum_async as verify_checksum_v3b;
+use ckt::v4::a::Gate as Gatev4a;
+use ckt::v4::a::hp::reader::CircuitReader as CircuitReaderv4a;
+use ckt::v4::a::hp::reader::verify_checksum_async as verify_checksum_v4a;
+use ckt::v4::a::hp::writer::CircuitWriter as CircuitWriterv4a;
+use ckt::v4::b::hp::reader::verify_checksum_async as verify_checksum_v4b;
 use clap::{Parser, Subcommand};
 use indicatif::{ProgressBar, ProgressStyle};
 use kanal::unbounded_async;
@@ -52,33 +52,18 @@ enum Commands {
         #[arg(short, long, value_name = "OUTPUT")]
         output: Option<PathBuf>,
 
-        /// Output format version (v1 or v3a)
-        #[arg(short, long, default_value = "v3a", value_name = "VERSION")]
+        /// Output format version (v1 or v4a)
+        #[arg(short, long, default_value = "v4a", value_name = "VERSION")]
         version: String,
 
-        /// Number of primary inputs (required for v3a format)
+        /// Number of primary inputs (required for v4a format)
         #[arg(
             short = 'p',
             long,
             value_name = "COUNT",
-            required_if_eq("version", "v3a")
+            required_if_eq("version", "v4a")
         )]
         primary_inputs: Option<u64>,
-    },
-
-    /// Convert CKT v1 format to CKT v3a format
-    CktConvert {
-        /// Input CKT v1 format file
-        #[arg(value_name = "INPUT")]
-        input: PathBuf,
-
-        /// Output CKT v3a format file (defaults to input.v3a.ckt)
-        #[arg(short, long, value_name = "OUTPUT")]
-        output: Option<PathBuf>,
-
-        /// Number of primary inputs (required)
-        #[arg(short = 'p', long, value_name = "COUNT")]
-        primary_inputs: u64,
     },
 
     /// Verify and analyze a circuit file
@@ -102,7 +87,7 @@ enum Commands {
         #[arg(value_name = "FILE")]
         file: PathBuf,
 
-        /// Version of CKT format (v1 or v3a, for CKT files)
+        /// Version of CKT format (v1 or v4a, for CKT files)
         #[arg(short, long, value_name = "VERSION")]
         version: Option<String>,
     },
@@ -128,7 +113,7 @@ enum Commands {
         #[arg(short, long, value_name = "OUTPUT")]
         output: Option<PathBuf>,
 
-        /// Version of CKT format (v1 or v3a)
+        /// Version of CKT format (v1 or v4a)
         #[arg(short, long, default_value = "v1", value_name = "VERSION")]
         version: String,
     },
@@ -147,7 +132,7 @@ enum Commands {
         #[arg(short, long, value_name = "OUTPUT", num_args = 1..)]
         outputs: Vec<u32>,
 
-        /// Version of CKT format (v1 or v3a)
+        /// Version of CKT format (v1 or v4a)
         #[arg(short, long, default_value = "v1", value_name = "VERSION")]
         version: String,
     },
@@ -181,35 +166,13 @@ async fn async_main(cli: Cli) -> Result<()> {
 
             match version.as_str() {
                 "v1" => convert_bristol_to_ckt_v1(&input, &output).await?,
-                "v3a" => {
-                    let primary_inputs =
-                        primary_inputs.ok_or("Primary inputs count is required for v3a format")?;
-                    convert_bristol_to_ckt_v3a(&input, &output, primary_inputs).await?
-                }
+
                 _ => {
                     return Err(
-                        format!("Unsupported version: {}. Use 'v1' or 'v3a'", version).into(),
+                        format!("Unsupported version: {}. Use 'v1' or 'v4a'", version).into(),
                     );
                 }
             }
-        }
-
-        Commands::CktConvert {
-            input,
-            output,
-            primary_inputs,
-        } => {
-            let output = output.unwrap_or_else(|| {
-                let mut path = input.clone();
-                let stem = path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("output");
-                path.set_file_name(format!("{}.v3a.ckt", stem));
-                path
-            });
-
-            convert_ckt_v1_to_v3a(&input, &output, primary_inputs).await?;
         }
 
         Commands::Verify {
@@ -220,15 +183,15 @@ async fn async_main(cli: Cli) -> Result<()> {
             if file.extension().and_then(|s| s.to_str()) == Some("ckt") {
                 let version = version.ok_or("Version is required for CKT files")?;
                 match version.as_str() {
-                    "3a" | "v3a" => {
-                        verify_ckt_file_v3(&file, "3a").await?;
+                    "4a" | "v4a" => {
+                        verify_ckt_file_v4(&file, "4a").await?;
                     }
-                    "3b" | "v3b" => {
-                        verify_ckt_file_v3(&file, "3b").await?;
+                    "4b" | "v4b" => {
+                        verify_ckt_file_v4(&file, "4b").await?;
                     }
                     _ => {
                         return Err(
-                            format!("Unsupported version: {}. Use '3a' or '3b'", version).into(),
+                            format!("Unsupported version: {}. Use '4a' or '4b'", version).into(),
                         );
                     }
                 }
@@ -263,10 +226,10 @@ async fn async_main(cli: Cli) -> Result<()> {
 
             match version.as_str() {
                 "v1" => extract_ckt_to_bristol_v1(&input, &output)?,
-                "v3a" => extract_ckt_to_bristol_v3a(&input, &output).await?,
+
                 _ => {
                     return Err(
-                        format!("Unsupported version: {}. Use 'v1' or 'v3a'", version).into(),
+                        format!("Unsupported version: {}. Use 'v1' or 'v4a'", version).into(),
                     );
                 }
             }
@@ -279,9 +242,9 @@ async fn async_main(cli: Cli) -> Result<()> {
             version,
         } => match version.as_str() {
             "v1" => search_ckt_file_v1(&file, &inputs, &outputs).await?,
-            "v3a" => search_ckt_file_v3a(&file, &inputs, &outputs).await?,
+
             _ => {
-                return Err(format!("Unsupported version: {}. Use 'v1' or 'v3a'", version).into());
+                return Err(format!("Unsupported version: {}. Use 'v1' or 'v4a'", version).into());
             }
         },
     }
@@ -495,296 +458,8 @@ async fn convert_bristol_to_ckt_v1(bristol_path: &Path, ckt_path: &Path) -> Resu
     Ok(())
 }
 
-/// Convert Bristol format to CKT v3a format with parallel parsing
-async fn convert_bristol_to_ckt_v3a(
-    bristol_path: &Path,
-    ckt_path: &Path,
-    primary_inputs: u64,
-) -> Result<()> {
-    println!(
-        "Converting {} -> {} (v3a format)",
-        bristol_path.display(),
-        ckt_path.display()
-    );
-
-    let (bristol_tx, bristol_rx) = unbounded_async();
-
-    let bristol_path_clone = bristol_path.to_owned();
-    let reader_task = monoio::spawn(async move {
-        const CHUNK_SIZE: usize = 1_000_000; // Lines per chunk
-        let bristol_file = monoio::fs::File::open(bristol_path_clone)
-            .await
-            .map_err(|e| format!("Failed to open file: {}", e))?;
-        let mut bristol_stream = BufferedLineStream::new(bristol_file);
-        let mut chunk = Vec::with_capacity(CHUNK_SIZE);
-
-        while let Some(line_result) = bristol_stream.next_line().await {
-            let line = line_result.map_err(|e| format!("Failed to read line: {}", e))?;
-            if !line.trim().is_empty() {
-                chunk.push(line.to_string());
-            }
-
-            if chunk.len() >= CHUNK_SIZE {
-                // Parse chunk in parallel
-                let parsed_gates: Vec<_> = chunk
-                    .par_iter()
-                    .map(|line| parse_bristol_gate_line(line).unwrap())
-                    .collect();
-
-                bristol_tx
-                    .send(parsed_gates)
-                    .await
-                    .map_err(|e| format!("Channel send error: {}", e))?;
-                chunk.clear();
-            }
-        }
-
-        // Send remaining gates
-        if !chunk.is_empty() {
-            let parsed_gates: Vec<_> = chunk
-                .par_iter()
-                .map(|line| parse_bristol_gate_line(line).unwrap())
-                .collect();
-
-            bristol_tx
-                .send(parsed_gates)
-                .await
-                .map_err(|e| format!("Channel send error: {}", e))?;
-        }
-
-        Ok::<(), String>(())
-    });
-
-    let bristol_path_clone = bristol_path.to_owned();
-    let ckt_path_clone = ckt_path.to_owned();
-
-    // Write using v3a format
-    let output_file = monoio::fs::File::create(ckt_path_clone.clone())
-        .await
-        .map_err(|e| format!("Failed to create file: {}", e))?;
-
-    let mut writer = CircuitWriterV3a::new(output_file, primary_inputs)
-        .await
-        .map_err(|e| format!("Failed to create v3a writer: {}", e))?;
-
-    let mut stats = ConversionStats::new();
-    let start_time = Instant::now();
-    let pb = ProgressBar::new_spinner();
-    pb.set_style(
-        ProgressStyle::default_spinner()
-            .template("{spinner:.green} [{elapsed_precise}] {msg}")
-            .unwrap(),
-    );
-    pb.set_message("Converting Bristol to CKT v3a format...");
-
-    for gates in bristol_rx.to_sync() {
-        for (gate_type, gate) in gates {
-            // Convert v1 gate to v3a gate (extend wire IDs to u64)
-            let v3a_gate = GateV3a::new(gate.input1 as u64, gate.input2 as u64, gate.output as u64);
-
-            writer
-                .write_gate(v3a_gate, gate_type)
-                .await
-                .map_err(|e| format!("Write gate error: {}", e))?;
-
-            match gate_type {
-                GateType::AND => stats.and_gates += 1,
-                GateType::XOR => stats.xor_gates += 1,
-            }
-            stats.total_gates += 1;
-
-            if stats.total_gates % 1_000_000 == 0 {
-                let elapsed = start_time.elapsed().as_secs_f64();
-                let rate = if elapsed > 0.0 {
-                    format!(
-                        "{}/s",
-                        format_number((stats.total_gates as f64 / elapsed) as usize)
-                    )
-                } else {
-                    "calculating...".to_string()
-                };
-                pb.set_message(format!(
-                    "Converted {} gates ({} XOR, {} AND) [{}]",
-                    format_number(stats.total_gates),
-                    format_number(stats.xor_gates),
-                    format_number(stats.and_gates),
-                    rate
-                ));
-            }
-        }
-    }
-
-    let (_file, circuit_stats) = writer
-        .finish()
-        .await
-        .map_err(|e| format!("Failed to finish writing: {}", e))?;
-
-    let elapsed = start_time.elapsed();
-    pb.finish_with_message(format!(
-        "✓ Converted {} gates in {:.2?}",
-        format_number(circuit_stats.total_gates as usize),
-        elapsed
-    ));
-
-    // Display checksum
-    let checksum_hex = circuit_stats
-        .checksum
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect::<String>();
-
-    reader_task.await?;
-
-    // Calculate file sizes
-    stats.bristol_file_size = std::fs::metadata(bristol_path_clone).unwrap().len();
-    stats.binary_file_size = std::fs::metadata(ckt_path_clone).unwrap().len();
-    stats.compression_ratio = stats.bristol_file_size as f64 / stats.binary_file_size as f64;
-
-    stats.print_summary();
-
-    println!("Primary inputs:  {}", primary_inputs);
-    println!("BLAKE3 checksum: {}", checksum_hex);
-
-    Ok(())
-}
-
-/// Convert CKT v1 format to CKT v3a format
-async fn convert_ckt_v1_to_v3a(
-    input_path: &Path,
-    output_path: &Path,
-    primary_inputs: u64,
-) -> Result<()> {
-    println!(
-        "Converting CKT v1 {} -> CKT v3a {}",
-        input_path.display(),
-        output_path.display()
-    );
-
-    let start_time = Instant::now();
-
-    // Open input file for reading v1 format
-    let input_file = monoio::fs::File::open(input_path).await?;
-    let mut v1_reader = hp_v1::reader::CircuitReader::new(input_file, 1_000_000)
-        .await
-        .map_err(|e| format!("Failed to create v1 reader: {}", e))?;
-
-    // Create output file for writing v3a format
-    let output_file = monoio::fs::File::create(output_path)
-        .await
-        .map_err(|e| format!("Failed to create output file: {}", e))?;
-
-    let mut v3a_writer = CircuitWriterV3a::new(output_file, primary_inputs)
-        .await
-        .map_err(|e| format!("Failed to create v3a writer: {}", e))?;
-
-    let total_gates = v1_reader.total_gates();
-
-    let pb = ProgressBar::new(total_gates as u64);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("{bar:40.cyan/blue} {pos:>7}/{len:7} [{elapsed_precise}] {msg} [{per_sec}]")
-            .unwrap(),
-    );
-    pb.set_message("Converting CKT v1 to v3a...");
-
-    let mut gates_converted = 0;
-
-    // Read and convert gates
-    while let Some((batch, count)) = v1_reader
-        .next_batch()
-        .await
-        .map_err(|e| format!("Error reading v1 gate batch: {}", e))?
-    {
-        for i in 0..count {
-            let (gate, gate_type) = batch.get_gate(i);
-
-            // Convert v1 gate (32-bit) to v3a gate (34-bit/64-bit storage)
-            let v3a_gate = GateV3a::new(gate.input1 as u64, gate.input2 as u64, gate.output as u64);
-
-            v3a_writer
-                .write_gate(v3a_gate, gate_type)
-                .await
-                .map_err(|e| format!("Error writing v3a gate: {}", e))?;
-
-            gates_converted += 1;
-            if gates_converted % 100_000 == 0 {
-                pb.set_position(gates_converted as u64);
-            }
-        }
-    }
-
-    pb.set_position(gates_converted as u64);
-
-    // Finish writing and get stats
-    let (_file, stats) = v3a_writer
-        .finish()
-        .await
-        .map_err(|e| format!("Failed to finish v3a writing: {}", e))?;
-
-    let elapsed = start_time.elapsed();
-
-    pb.finish_with_message(format!(
-        "✓ Converted {} gates in {:.2?}",
-        format_number(gates_converted),
-        elapsed
-    ));
-
-    // Display checksum
-    let checksum_hex = stats
-        .checksum
-        .iter()
-        .map(|b| format!("{:02x}", b))
-        .collect::<String>();
-
-    // Print conversion summary
-    let input_size = std::fs::metadata(input_path)
-        .map_err(|e| format!("Error getting input file metadata: {}", e))?
-        .len();
-    let output_size = std::fs::metadata(output_path)
-        .map_err(|e| format!("Error getting output file metadata: {}", e))?
-        .len();
-
-    println!("\n📊 Conversion Summary:");
-    println!(
-        "  Total gates:     {}",
-        format_number(stats.total_gates as usize)
-    );
-    println!(
-        "  Primary inputs:  {}",
-        format_number(stats.primary_inputs as usize)
-    );
-    println!(
-        "  XOR gates:       {}",
-        format_number(stats.xor_gates as usize)
-    );
-    println!(
-        "  AND gates:       {}",
-        format_number(stats.and_gates as usize)
-    );
-    println!(
-        "  Input size:      {} bytes",
-        format_number(input_size as usize)
-    );
-    println!(
-        "  Output size:     {} bytes",
-        format_number(output_size as usize)
-    );
-    println!(
-        "  Size ratio:      {:.2}x",
-        output_size as f64 / input_size as f64
-    );
-    println!("  Processing time: {:.2?}", elapsed);
-    println!(
-        "  Throughput:      {}/s",
-        format_number((stats.total_gates as f64 / elapsed.as_secs_f64()) as usize)
-    );
-    println!("  BLAKE3 checksum: {}", checksum_hex);
-
-    Ok(())
-}
-
 /// Verify a CKT format file
-async fn verify_ckt_file_v3(path: &Path, version: &str) -> Result<()> {
+async fn verify_ckt_file_v4(path: &Path, version: &str) -> Result<()> {
     println!("Verifying CKT v{} file: {}", version, path.display());
 
     let start_time = Instant::now();
@@ -799,12 +474,12 @@ async fn verify_ckt_file_v3(path: &Path, version: &str) -> Result<()> {
     pb.set_message(format!("Verifying checksum for v{} format...", version));
 
     let checksum_result = match version {
-        "3a" => verify_checksum_v3a(file)
+        "4a" => verify_checksum_v4a(file)
             .await
-            .map_err(|e| format!("Failed to verify v3a checksum: {}", e)),
-        "3b" => verify_checksum_v3b(file)
+            .map_err(|e| format!("Failed to verify v4a checksum: {}", e)),
+        "4b" => verify_checksum_v4b(file)
             .await
-            .map_err(|e| format!("Failed to verify v3b checksum: {}", e)),
+            .map_err(|e| format!("Failed to verify v4b checksum: {}", e)),
         _ => return Err(format!("Unsupported version: {}", version).into()),
     };
 
@@ -990,41 +665,7 @@ fn print_file_info(path: &Path, version: Option<String>) -> Result<()> {
                     }
                 }
             }
-            "v3a" => {
-                // Try to read the v3a header to get more info
-                use ckt::v3::a::reader::read_header_seekable;
 
-                let file = File::open(path)?;
-                match read_header_seekable(&mut std::io::BufReader::new(file)) {
-                    Ok(header) => {
-                        let total_gates = header.xor_gates + header.and_gates;
-                        println!("Format: CKT v3a (compressed binary with checksums)");
-                        println!("Gates: {}", format_number(total_gates as usize));
-                        println!(
-                            "Primary inputs: {}",
-                            format_number(header.primary_inputs as usize)
-                        );
-                        println!(
-                            "XOR gates: {} ({:.1}%)",
-                            format_number(header.xor_gates as usize),
-                            (header.xor_gates as f64 / total_gates as f64) * 100.0
-                        );
-                        println!(
-                            "AND gates: {} ({:.1}%)",
-                            format_number(header.and_gates as usize),
-                            (header.and_gates as f64 / total_gates as f64) * 100.0
-                        );
-                        println!(
-                            "Bytes per gate: {:.2}",
-                            file_size as f64 / total_gates as f64
-                        );
-                    }
-                    Err(_) => {
-                        println!("Format: CKT v3a (compressed binary with checksums)");
-                        println!("Use 'ckt verify -v 3a' for detailed information");
-                    }
-                }
-            }
             _ => {
                 println!("Format: CKT (version unknown)");
                 println!("Specify version with -v flag");
@@ -1041,7 +682,7 @@ fn print_file_info(path: &Path, version: Option<String>) -> Result<()> {
 /// Compare two circuit files
 async fn compare_circuits(path1: &Path, path2: &Path) -> Result<()> {
     println!("Comparing circuits...\n");
-    println!("Note: Assuming v1 format for CKT files. Use verify command for v3 formats.\n");
+    println!("Note: Assuming v1 format for CKT files. Use verify command for v4 formats.\n");
 
     let stats1 = if path1.extension().and_then(|s| s.to_str()) == Some("ckt") {
         verify_ckt_file_v1(path1).await?
@@ -1164,173 +805,6 @@ fn extract_ckt_to_bristol_v1(ckt_path: &Path, bristol_path: &Path) -> Result<()>
         format_number(count),
         start_time.elapsed()
     ));
-
-    Ok(())
-}
-
-/// Extract CKT v3a format back to Bristol format
-async fn extract_ckt_to_bristol_v3a(ckt_path: &Path, bristol_path: &Path) -> Result<()> {
-    println!(
-        "Extracting {} -> {}",
-        ckt_path.display(),
-        bristol_path.display()
-    );
-
-    let input_file = monoio::fs::File::open(ckt_path).await?;
-    let mut reader = CircuitReaderV3a::new(input_file, 1_000_000)
-        .await
-        .map_err(|e| format!("Failed to create v3a reader: {}", e))?;
-
-    // Get gate count from reader
-    let gate_count = reader.total_gates();
-
-    let output_file = File::create(bristol_path)?;
-    let mut writer = BufWriter::new(output_file);
-
-    let pb = ProgressBar::new(gate_count as u64);
-    pb.set_style(
-        ProgressStyle::default_bar().template(
-            "{bar:40.cyan/blue} {pos:>7}/{len:7} [{elapsed_precise}] {msg} [{per_sec}]",
-        )?,
-    );
-    pb.set_message("Extracting to Bristol format...");
-
-    let start_time = Instant::now();
-    let mut count = 0;
-
-    while let Some((batch, num_gates)) = reader.next_batch().await? {
-        for i in 0..num_gates {
-            let (gate, gate_type) = batch.get_gate(i);
-            let gate_str = match gate_type {
-                GateType::XOR => "XOR",
-                GateType::AND => "AND",
-            };
-
-            writeln!(
-                writer,
-                "2 1 {} {} {} {}",
-                gate.in1, gate.in2, gate.out, gate_str
-            )?;
-
-            count += 1;
-            if count % 1_000_000 == 0 {
-                pb.set_position(count as u64);
-            }
-        }
-    }
-
-    writer.flush()?;
-    pb.finish_with_message(format!(
-        "✓ Extracted {} gates in {:.2?}",
-        format_number(count),
-        start_time.elapsed()
-    ));
-
-    Ok(())
-}
-
-/// Search for gates with specific inputs or outputs in a CKT v3a file
-async fn search_ckt_file_v3a(file: &Path, inputs: &[u32], outputs: &[u32]) -> Result<()> {
-    if inputs.is_empty() && outputs.is_empty() {
-        eprintln!("Error: Must specify at least one input (-i) or output (-o) to search for");
-        std::process::exit(1);
-    }
-
-    println!("🔍 Searching CKT v3a file: {}", file.display());
-    println!("   Looking for:");
-    if !inputs.is_empty() {
-        println!("   - Inputs: {:?}", inputs);
-    }
-    if !outputs.is_empty() {
-        println!("   - Outputs: {:?}", outputs);
-    }
-    println!();
-
-    let file = monoio::fs::File::open(file).await?;
-    let mut reader = CircuitReaderV3a::new(file, 1_000_000).await?;
-
-    let total_gates = reader.total_gates();
-    let pb = ProgressBar::new(total_gates);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("{bar:40.cyan/blue} {pos:>7}/{len:7} [{elapsed_precise}] {msg}")
-            .unwrap(),
-    );
-    pb.set_message("Searching...");
-
-    let mut matches = Vec::new();
-    let mut gate_idx = 0u64;
-
-    while let Some((batch, count)) = reader.next_batch().await? {
-        for i in 0..count {
-            let (gate, gate_type) = batch.get_gate(i);
-
-            let mut matched = false;
-
-            // Check input matches (convert u32 inputs to u64 for comparison)
-            if !inputs.is_empty() {
-                if inputs
-                    .iter()
-                    .any(|&inp| inp as u64 == gate.in1 || inp as u64 == gate.in2)
-                {
-                    matched = true;
-                }
-            }
-
-            // Check output matches
-            if !outputs.is_empty() {
-                if outputs.iter().any(|&out| out as u64 == gate.out) {
-                    matched = true;
-                }
-            }
-
-            if matched {
-                matches.push((gate_idx, gate, gate_type));
-
-                if matches.len() <= 10 {
-                    // Show first 10 matches immediately
-                    let gate_str = match gate_type {
-                        GateType::XOR => "XOR",
-                        GateType::AND => "AND",
-                    };
-                    println!(
-                        "   Gate #{}: 2 1 {} {} {} {}",
-                        gate_idx, gate.in1, gate.in2, gate.out, gate_str
-                    );
-                }
-            }
-
-            gate_idx += 1;
-            if gate_idx % 1_000_000 == 0 {
-                pb.set_position(gate_idx);
-            }
-        }
-    }
-
-    pb.finish_and_clear();
-
-    if matches.is_empty() {
-        println!("\n❌ No matching gates found");
-    } else {
-        println!("\n✅ Found {} matching gates", format_number(matches.len()));
-
-        if matches.len() > 10 {
-            println!(
-                "\nShowing first 10 matches (of {}):",
-                format_number(matches.len())
-            );
-            for (idx, gate, gate_type) in &matches[..10.min(matches.len())] {
-                let gate_str = match gate_type {
-                    GateType::XOR => "XOR",
-                    GateType::AND => "AND",
-                };
-                println!(
-                    "   Gate #{}: 2 1 {} {} {} {}",
-                    idx, gate.in1, gate.in2, gate.out, gate_str
-                );
-            }
-        }
-    }
 
     Ok(())
 }

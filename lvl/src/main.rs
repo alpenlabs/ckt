@@ -1,9 +1,14 @@
-use ckt::v3::a::hp::reader::CircuitReader;
-use ckt::v3::b::hp::writer::CircuitWriter;
+use ahash::{HashMap, HashMapExt};
+use ckt::v4;
+use ckt::v4::a::hp::reader::CircuitReader;
+use ckt::v4::b::hp::writer::CircuitWriter;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use lvl::slab::FakeSlabAllocator;
+use lvl::types::{CompactWireId, Credits, IntermediateGate};
 use monoio::fs::{File, OpenOptions};
 use std::alloc::{GlobalAlloc, Layout};
 use std::cell::Cell;
+use std::collections::hash_map::Entry;
 use std::time::{Duration, Instant};
 
 mod cli;
@@ -158,15 +163,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initial load - fill up to target
     pb_load.set_message("Filling leveller...");
     while !reader_exhausted {
-        match reader.next_batch().await {
-            Ok(Some((batch, num_gates))) => {
+        match reader.next_gate().await {
+            Ok(Some((gate, gate_type))) => {
                 // Always process the entire batch to avoid missing gates
-                for i in 0..num_gates {
-                    let (gate, gate_type) = batch.get_gate(i);
-                    leveller.add_gate(gate, gate_type);
-                    total_gates_added += 1;
-                }
-                pb_load.inc(num_gates as u64);
+
+                let gate = IntermediateGate {
+                    in1: CompactWireId::from_u64(gate.in1),
+                    in2: CompactWireId::from_u64(gate.in2),
+                    out: CompactWireId::from_u64(gate.out),
+                    credits: Credits(gate.credits as u16),
+                };
+
+                leveller.add_gate(gate, gate_type);
+                total_gates_added += 1;
+
+                pb_load.inc(1);
 
                 // Check if we've loaded enough after processing the entire batch
                 if total_gates_added >= args.target_pending {
@@ -191,7 +202,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .open(&args.output)
         .await
         .unwrap();
-    let mut writer = CircuitWriter::new(file, primary_inputs).await.unwrap();
+    let mut writer = CircuitWriter::new(
+        file,
+        primary_inputs,
+        reader.outputs().iter().copied().collect(),
+    )
+    .await
+    .unwrap();
+
+    let mut slab = FakeSlabAllocator::new();
+    let mut wire_map = HashMap::new();
+    slab.allocate(); // false wire
+    slab.allocate(); // true wire
+    for _ in 0..primary_inputs {
+        slab.allocate(); // primary input wires
+    }
+    let mut max_slab_entries = primary_inputs as usize;
 
     // Main processing loop
     loop {
@@ -203,7 +229,39 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             total_gates_in_levels += level_gates;
             gates_since_check += level_gates;
             total_levels += 1;
-            writer.write_level(&level).await.unwrap();
+
+            let mut new_level = v4::b::Level {
+                id: level.id,
+                and_gates: Vec::new(),
+                xor_gates: Vec::new(),
+            };
+
+            let mut to_free = Vec::new();
+
+            let mut slab_idx =
+                |input: CompactWireId, wire_map: &mut HashMap<CompactWireId, (usize, Credits)>| {
+                    if input.to_u64() < 2 + primary_inputs {
+                        // input is primary input or constant, so will always be available
+                        input.to_u64() as usize
+                    } else {
+                        let Entry::Occupied(mut entry) = wire_map.entry(input) else {
+                            panic!("Input not found");
+                        };
+                        // remove the wire from "memory" aka slab allocator if it's ran out of credits
+                        let value: &mut (usize, Credits) = entry.get_mut();
+                        let slab_idx = value.0;
+                        if value.1 .0 > 1 {
+                            value.1 .0 -= 1;
+                        } else {
+                            // defer free until end of level
+                            to_free.push(slab_idx);
+
+                            // remove from mapping table
+                            entry.remove_entry();
+                        }
+                        slab_idx
+                    }
+                };
 
             // Log level creation
             let _ = multi_pb.println(format!(
@@ -214,6 +272,54 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 level.xor_gates.len(),
                 level_time
             ));
+
+            for gate in level.xor_gates {
+                let in1_slab_idx = slab_idx(gate.in1, &mut wire_map);
+                let in2_slab_idx = slab_idx(gate.in2, &mut wire_map);
+
+                // map [level_idx][wire_idx] from leveller to v4b "memory address"
+                let slab_idx = slab.allocate();
+                wire_map.insert(gate.out, (slab_idx, gate.credits));
+
+                // update max_slab_entries if necessary
+                if max_slab_entries < slab_idx {
+                    max_slab_entries = slab_idx;
+                }
+
+                new_level.xor_gates.push(v4::b::Gate {
+                    in1: in1_slab_idx as u64,
+                    in2: in2_slab_idx as u64,
+                    out: slab_idx as u64,
+                });
+            }
+
+            for gate in level.and_gates {
+                let in1_slab_idx = slab_idx(gate.in1, &mut wire_map);
+                let in2_slab_idx = slab_idx(gate.in2, &mut wire_map);
+
+                // map [level_idx][wire_idx] from leveller to v4b "memory address"
+                let slab_idx = slab.allocate();
+                wire_map.insert(gate.out, (slab_idx, gate.credits));
+
+                // update max_slab_entries if necessary
+                if max_slab_entries < slab_idx {
+                    max_slab_entries = slab_idx;
+                }
+
+                new_level.and_gates.push(v4::b::Gate {
+                    in1: in1_slab_idx as u64,
+                    in2: in2_slab_idx as u64,
+                    out: slab_idx as u64,
+                });
+            }
+
+            // freeing outputs AFTER a level completes ensures memory safety
+            // and allows all gates in the level to be executed simultaneously
+            for idx in to_free.iter() {
+                slab.deallocate(*idx);
+            }
+            to_free.clear();
+            writer.write_level(&new_level).await.unwrap();
 
             // Update level progress bar
             pb_level.set_position(total_gates_in_levels as u64);
@@ -244,16 +350,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // Don't update message during refill to reduce flicker
 
                     while loaded < to_load && !reader_exhausted {
-                        match reader.next_batch().await {
-                            Ok(Some((batch, num_gates))) => {
-                                // Always process the entire batch
-                                for i in 0..num_gates {
-                                    let (gate, gate_type) = batch.get_gate(i);
-                                    leveller.add_gate(gate, gate_type);
-                                    total_gates_added += 1;
-                                    loaded += 1;
-                                }
-                                pb_load.inc(num_gates as u64);
+                        match reader.next_gate().await {
+                            Ok(Some((gate, gate_type))) => {
+                                let gate = IntermediateGate {
+                                    in1: CompactWireId::from_u64(gate.in1),
+                                    in2: CompactWireId::from_u64(gate.in2),
+                                    out: CompactWireId::from_u64(gate.out),
+                                    credits: Credits(gate.credits as u16),
+                                };
+
+                                leveller.add_gate(gate, gate_type);
+                                total_gates_added += 1;
+                                loaded += 1;
+                                pb_load.inc(1 as u64);
                                 if loaded % 10000 == 0 {
                                     update_pb_load(total_gates_added - total_gates_in_levels);
                                 }
@@ -282,16 +391,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut loaded = 0;
 
                 while loaded < to_load && !reader_exhausted {
-                    match reader.next_batch().await {
-                        Ok(Some((batch, num_gates))) => {
+                    match reader.next_gate().await {
+                        Ok(Some((gate, gate_type))) => {
+                            let gate = IntermediateGate {
+                                in1: CompactWireId::from_u64(gate.in1),
+                                in2: CompactWireId::from_u64(gate.in2),
+                                out: CompactWireId::from_u64(gate.out),
+                                credits: Credits(gate.credits as u16),
+                            };
                             // Always process the entire batch
-                            for i in 0..num_gates {
-                                let (gate, gate_type) = batch.get_gate(i);
-                                leveller.add_gate(gate, gate_type);
-                                total_gates_added += 1;
-                                loaded += 1;
-                            }
-                            pb_load.inc(num_gates as u64);
+                            leveller.add_gate(gate, gate_type);
+                            total_gates_added += 1;
+                            loaded += 1;
+                            pb_load.inc(1);
                             // Check if we've loaded enough after processing the entire batch
                             if loaded >= to_load {
                                 break;
@@ -316,7 +428,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     pb_level.set_message("Finalizing...");
-    writer.finish().await.unwrap();
+    writer
+        .finish(slab.max_allocated_concurrently() as u64)
+        .await
+        .unwrap();
     pb_load.finish_with_message("Complete!");
     pb_level.finish_with_message("Complete!");
 

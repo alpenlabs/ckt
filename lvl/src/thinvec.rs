@@ -6,12 +6,11 @@ use std::ptr::{self, NonNull};
 
 #[repr(C)]
 pub struct ThinVecInternal {
-    len: u8,      // 1 byte for length (max 255)
-    capacity: u8, // 1 byte for capacity (max 255)
+    len: usize,      // length
+    capacity: usize, // capacity
 }
 
 /// A Vec with its length and capacity on the heap with the elements.
-/// Max capacity is 255 elements.
 pub struct ThinVec<T> {
     ptr: NonNull<ThinVecInternal>,
     _marker: PhantomData<T>,
@@ -133,13 +132,10 @@ impl<T> ThinVec<T> {
         Self::with_capacity(0)
     }
 
-    /// Creates a new ThinVec with specified capacity (max 255)
+    /// Creates a new ThinVec with specified capacity
     pub fn with_capacity(capacity: usize) -> Self {
-        assert!(capacity <= 255, "ThinVec capacity cannot exceed 255");
-
-        let capacity = capacity as u8;
         let header_layout = Layout::new::<ThinVecInternal>();
-        let elem_layout = Layout::array::<T>(capacity as usize).expect("Layout calculation failed");
+        let elem_layout = Layout::array::<T>(capacity).expect("Layout calculation failed");
 
         let (layout, _) = header_layout
             .extend(elem_layout)
@@ -199,7 +195,7 @@ impl<T> ThinVec<T> {
     /// Returns the number of elements
     #[inline]
     pub fn len(&self) -> usize {
-        unsafe { (*self.ptr.as_ptr()).len as usize }
+        unsafe { (*self.ptr.as_ptr()).len }
     }
 
     /// Returns true if the vector contains no elements
@@ -211,7 +207,7 @@ impl<T> ThinVec<T> {
     /// Returns the capacity
     #[inline]
     pub fn capacity(&self) -> usize {
-        unsafe { (*self.ptr.as_ptr()).capacity as usize }
+        unsafe { (*self.ptr.as_ptr()).capacity }
     }
 
     /// Returns a pointer to the data area
@@ -267,24 +263,18 @@ impl<T> ThinVec<T> {
     }
 
     /// Pushes a new element to the vector
-    ///
-    /// # Panics
-    /// Panics if the vector is at maximum capacity (255 elements)
     pub fn push(&mut self, value: T) {
         let len = self.len();
         let capacity = self.capacity();
 
         if len == capacity {
-            if capacity == 255 {
-                panic!("ThinVec cannot exceed 255 elements");
-            }
             self.grow();
         }
 
         unsafe {
             let data = self.data_ptr();
             ptr::write(data.add(len), value);
-            (*self.ptr.as_ptr()).len = (len + 1) as u8;
+            (*self.ptr.as_ptr()).len = len + 1;
         }
     }
 
@@ -313,7 +303,7 @@ impl<T> ThinVec<T> {
             None
         } else {
             unsafe {
-                (*self.ptr.as_ptr()).len = (len - 1) as u8;
+                (*self.ptr.as_ptr()).len = len - 1;
                 Some(ptr::read(self.data_ptr().add(len - 1)))
             }
         }
@@ -337,13 +327,8 @@ impl<T> ThinVec<T> {
         let new_capacity = if old_capacity == 0 {
             4
         } else {
-            // Double capacity, but cap at 255
-            std::cmp::min(255, old_capacity * 2)
+            old_capacity * 2
         };
-
-        if new_capacity == old_capacity {
-            panic!("Cannot grow ThinVec beyond 255 capacity");
-        }
 
         let header_layout = Layout::new::<ThinVecInternal>();
         let old_elem_layout = if old_capacity == 0 {
@@ -373,7 +358,7 @@ impl<T> ThinVec<T> {
             }
 
             self.ptr = NonNull::new_unchecked(new_ptr);
-            (*self.ptr.as_ptr()).capacity = new_capacity as u8;
+            (*self.ptr.as_ptr()).capacity = new_capacity;
         }
     }
 }
@@ -556,12 +541,6 @@ mod tests {
             assert_eq!(vec2.len(), 2);
             assert_eq!(vec2.get(0).map(|s| s.as_str()), Some("hello"));
         }
-    }
-
-    #[test]
-    #[should_panic(expected = "cannot exceed 255")]
-    fn test_capacity_limit() {
-        let _vec: ThinVec<u8> = ThinVec::with_capacity(256);
     }
 
     #[test]

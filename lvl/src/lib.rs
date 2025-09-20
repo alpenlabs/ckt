@@ -1,5 +1,6 @@
 use std::mem;
 
+pub mod slab;
 pub mod thinvec;
 pub mod types;
 
