@@ -1,7 +1,7 @@
 use std::mem;
 
-mod thinvec;
-mod types;
+pub mod thinvec;
+pub mod types;
 
 use crate::{
     thinvec::{ThinVec, ThinVecInternal},
