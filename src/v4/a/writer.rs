@@ -2,7 +2,7 @@ use blake3::Hasher;
 use std::io::{Result, Seek, SeekFrom, Write};
 
 use super::varints::{FlaggedVarInt, StandardVarInt};
-use super::{CircuitHeader, Gate, GateBatch, OutputWire};
+use super::{CircuitHeader, Gate, GateBatch};
 use crate::{
     GateType,
     v4::{CircuitStats, FormatType, VERSION},

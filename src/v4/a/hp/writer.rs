@@ -311,20 +311,22 @@ mod tests {
             assert_eq!(reader.outputs().len(), 2);
 
             let mut gate_count = 0;
-            while let Some((gate, gate_type)) = reader.next_gate().await? {
-                let expected_i = gate_count as u64;
-                assert_eq!(gate.in1, expected_i + 2);
-                assert_eq!(gate.in2, expected_i + 3);
-                assert_eq!(gate.out, expected_i + 100);
-                assert_eq!(gate.credits, (expected_i % 5) as u32 + 1);
+            while let Some(batch) = reader.next_batch().await? {
+                for (gate, gate_type) in batch {
+                    let expected_i = gate_count as u64;
+                    assert_eq!(gate.in1, expected_i + 2);
+                    assert_eq!(gate.in2, expected_i + 3);
+                    assert_eq!(gate.out, expected_i + 100);
+                    assert_eq!(gate.credits, (expected_i % 5) as u32 + 1);
 
-                if expected_i % 2 == 0 {
-                    assert_eq!(gate_type, GateType::XOR);
-                } else {
-                    assert_eq!(gate_type, GateType::AND);
+                    if expected_i % 2 == 0 {
+                        assert_eq!(gate_type, GateType::XOR);
+                    } else {
+                        assert_eq!(gate_type, GateType::AND);
+                    }
+
+                    gate_count += 1;
                 }
-
-                gate_count += 1;
             }
 
             assert_eq!(gate_count, 100);

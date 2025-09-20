@@ -163,21 +163,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initial load - fill up to target
     pb_load.set_message("Filling leveller...");
     while !reader_exhausted {
-        match reader.next_gate().await {
-            Ok(Some((gate, gate_type))) => {
+        match reader.next_batch().await {
+            Ok(Some(gates)) => {
+                pb_load.inc(gates.len() as u64);
                 // Always process the entire batch to avoid missing gates
+                for (gate, gate_type) in gates {
+                    let gate = IntermediateGate {
+                        in1: CompactWireId::from_u64(gate.in1),
+                        in2: CompactWireId::from_u64(gate.in2),
+                        out: CompactWireId::from_u64(gate.out),
+                        credits: Credits(gate.credits as u16),
+                    };
 
-                let gate = IntermediateGate {
-                    in1: CompactWireId::from_u64(gate.in1),
-                    in2: CompactWireId::from_u64(gate.in2),
-                    out: CompactWireId::from_u64(gate.out),
-                    credits: Credits(gate.credits as u16),
-                };
-
-                leveller.add_gate(gate, gate_type);
-                total_gates_added += 1;
-
-                pb_load.inc(1);
+                    leveller.add_gate(gate, gate_type);
+                    total_gates_added += 1;
+                }
 
                 // Check if we've loaded enough after processing the entire batch
                 if total_gates_added >= args.target_pending {
@@ -350,19 +350,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // Don't update message during refill to reduce flicker
 
                     while loaded < to_load && !reader_exhausted {
-                        match reader.next_gate().await {
-                            Ok(Some((gate, gate_type))) => {
-                                let gate = IntermediateGate {
-                                    in1: CompactWireId::from_u64(gate.in1),
-                                    in2: CompactWireId::from_u64(gate.in2),
-                                    out: CompactWireId::from_u64(gate.out),
-                                    credits: Credits(gate.credits as u16),
-                                };
+                        match reader.next_batch().await {
+                            Ok(Some(gates)) => {
+                                for (gate, gate_type) in gates {
+                                    let gate = IntermediateGate {
+                                        in1: CompactWireId::from_u64(gate.in1),
+                                        in2: CompactWireId::from_u64(gate.in2),
+                                        out: CompactWireId::from_u64(gate.out),
+                                        credits: Credits(gate.credits as u16),
+                                    };
 
-                                leveller.add_gate(gate, gate_type);
-                                total_gates_added += 1;
-                                loaded += 1;
-                                pb_load.inc(1 as u64);
+                                    leveller.add_gate(gate, gate_type);
+                                    total_gates_added += 1;
+                                    loaded += 1;
+                                    pb_load.inc(1 as u64);
+                                }
                                 if loaded % 10000 == 0 {
                                     update_pb_load(total_gates_added - total_gates_in_levels);
                                 }
@@ -391,19 +393,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut loaded = 0;
 
                 while loaded < to_load && !reader_exhausted {
-                    match reader.next_gate().await {
-                        Ok(Some((gate, gate_type))) => {
-                            let gate = IntermediateGate {
-                                in1: CompactWireId::from_u64(gate.in1),
-                                in2: CompactWireId::from_u64(gate.in2),
-                                out: CompactWireId::from_u64(gate.out),
-                                credits: Credits(gate.credits as u16),
-                            };
-                            // Always process the entire batch
-                            leveller.add_gate(gate, gate_type);
-                            total_gates_added += 1;
-                            loaded += 1;
-                            pb_load.inc(1);
+                    match reader.next_batch().await {
+                        Ok(Some(gates)) => {
+                            for (gate, gate_type) in gates {
+                                let gate = IntermediateGate {
+                                    in1: CompactWireId::from_u64(gate.in1),
+                                    in2: CompactWireId::from_u64(gate.in2),
+                                    out: CompactWireId::from_u64(gate.out),
+                                    credits: Credits(gate.credits as u16),
+                                };
+                                // Always process the entire batch
+                                leveller.add_gate(gate, gate_type);
+                                total_gates_added += 1;
+                                loaded += 1;
+                                pb_load.inc(1);
+                            }
                             // Check if we've loaded enough after processing the entire batch
                             if loaded >= to_load {
                                 break;

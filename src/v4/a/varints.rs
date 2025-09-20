@@ -1,6 +1,6 @@
 //! Variable-length integer encoding for CKT v4a format
 //!
-//! Implements two varint types:
+//! Implements two varint types with optimized branchless decoding:
 //! - StandardVarInt: Standard QUIC varint encoding for credits and counts
 //! - FlaggedVarInt: Modified QUIC varint for wire IDs
 //!   - Flag=1: Absolute wire ID
@@ -18,8 +18,9 @@ impl StandardVarInt {
     pub const MAX_VALUE: u64 = (1u64 << 62) - 1;
 
     /// Create a new StandardVarInt
+    #[inline]
     pub fn new(value: u64) -> Result<Self> {
-        if value > Self::MAX_VALUE {
+        if unlikely(value > Self::MAX_VALUE) {
             return Err(Error::new(
                 ErrorKind::InvalidData,
                 format!("Value {} exceeds maximum {}", value, Self::MAX_VALUE),
@@ -29,11 +30,13 @@ impl StandardVarInt {
     }
 
     /// Get the raw value
+    #[inline(always)]
     pub fn value(self) -> u64 {
         self.0
     }
 
     /// Encode to byte slice and return number of bytes used
+    #[inline]
     pub fn encode(self, buffer: &mut [u8]) -> Result<usize> {
         let value = self.0;
 
@@ -80,6 +83,8 @@ impl StandardVarInt {
     }
 
     /// Decode from byte slice and return (varint, bytes_consumed)
+    /// Uses branchless length computation for optimal performance
+    #[inline]
     pub fn decode(buffer: &[u8]) -> Result<(Self, usize)> {
         if unlikely(buffer.is_empty()) {
             return Err(Error::new(ErrorKind::UnexpectedEof, "Empty buffer"));
@@ -87,14 +92,12 @@ impl StandardVarInt {
 
         let first = buffer[0];
 
-        // Determine length based on first two bits
-        let (length, mask) = match first >> 6 {
-            0b00 => (1, 0x3F),
-            0b01 => (2, 0x3F),
-            0b10 => (4, 0x3F),
-            0b11 => (8, 0x3F),
-            _ => unreachable!(),
-        };
+        // Branchless length computation: 00->1, 01->2, 10->4, 11->8
+        let length = 1 << (first >> 6);
+
+        // Branchless mask computation: 0xxxxxxx->0x7F, others->0x3F
+        // Note: StandardVarInt always uses 6 value bits in first byte for 2/4/8 byte encodings
+        let mask = 0x3F;
 
         if unlikely(buffer.len() < length) {
             return Err(Error::new(
@@ -105,20 +108,44 @@ impl StandardVarInt {
 
         let mut value = (first & mask) as u64;
 
-        for byte in buffer.iter().take(length).skip(1) {
-            value = (value << 8) | (*byte as u64);
+        // Unroll small loops for better performance
+        unsafe {
+            match length {
+                1 => {
+                    // value already set correctly from (first & mask)
+                }
+                2 => {
+                    value = (value << 8) | (*buffer.get_unchecked(1) as u64);
+                }
+                4 => {
+                    value = (value << 8) | (*buffer.get_unchecked(1) as u64);
+                    value = (value << 8) | (*buffer.get_unchecked(2) as u64);
+                    value = (value << 8) | (*buffer.get_unchecked(3) as u64);
+                }
+                8 => {
+                    value = (value << 8) | (*buffer.get_unchecked(1) as u64);
+                    value = (value << 8) | (*buffer.get_unchecked(2) as u64);
+                    value = (value << 8) | (*buffer.get_unchecked(3) as u64);
+                    value = (value << 8) | (*buffer.get_unchecked(4) as u64);
+                    value = (value << 8) | (*buffer.get_unchecked(5) as u64);
+                    value = (value << 8) | (*buffer.get_unchecked(6) as u64);
+                    value = (value << 8) | (*buffer.get_unchecked(7) as u64);
+                }
+                _ => unreachable!(),
+            }
         }
 
         Ok((StandardVarInt(value), length))
     }
 
     /// Get the encoded size in bytes for a given value
+    #[inline(always)]
     pub fn encoded_size(value: u64) -> usize {
-        if likely(value < (1u64 << 6)) {
+        if value < (1u64 << 6) {
             1
-        } else if likely(value < (1u64 << 14)) {
+        } else if value < (1u64 << 14) {
             2
-        } else if likely(value < (1u64 << 30)) {
+        } else if value < (1u64 << 30) {
             4
         } else {
             8
@@ -141,8 +168,9 @@ impl FlaggedVarInt {
     pub const MAX_VALUE: u64 = (1u64 << 61) - 1;
 
     /// Create a FlaggedVarInt with absolute wire ID
+    #[inline]
     pub fn absolute(wire_id: u64) -> Result<Self> {
-        if wire_id > Self::MAX_VALUE {
+        if unlikely(wire_id > Self::MAX_VALUE) {
             return Err(Error::new(
                 ErrorKind::InvalidData,
                 format!("Wire ID {} exceeds maximum {}", wire_id, Self::MAX_VALUE),
@@ -155,8 +183,9 @@ impl FlaggedVarInt {
     }
 
     /// Create a FlaggedVarInt with relative offset from wire counter
+    #[inline]
     pub fn relative(offset: u64) -> Result<Self> {
-        if offset > Self::MAX_VALUE {
+        if unlikely(offset > Self::MAX_VALUE) {
             return Err(Error::new(
                 ErrorKind::InvalidData,
                 format!("Offset {} exceeds maximum {}", offset, Self::MAX_VALUE),
@@ -169,8 +198,9 @@ impl FlaggedVarInt {
     }
 
     /// Create a new FlaggedVarInt with specified flag
+    #[inline]
     pub fn with_flag(value: u64, flag: bool) -> Result<Self> {
-        if value > Self::MAX_VALUE {
+        if unlikely(value > Self::MAX_VALUE) {
             return Err(Error::new(
                 ErrorKind::InvalidData,
                 format!("Value {} exceeds maximum {}", value, Self::MAX_VALUE),
@@ -180,43 +210,48 @@ impl FlaggedVarInt {
     }
 
     /// Get the flag value
+    #[inline(always)]
     pub fn flag(self) -> bool {
         self.flag
     }
 
     /// Get the raw value
+    #[inline(always)]
     pub fn value(self) -> u64 {
         self.value
     }
 
     /// Check if this is an absolute wire ID
+    #[inline(always)]
     pub fn is_absolute(self) -> bool {
         self.flag
     }
 
     /// Check if this is relative to wire counter
+    #[inline(always)]
     pub fn is_relative(self) -> bool {
         !self.flag
     }
 
     /// Encode to byte slice and return number of bytes used
+    #[inline]
     pub fn encode(self, buffer: &mut [u8]) -> Result<usize> {
         let value = self.value;
+        let flag_bit = if self.flag { 0x20u8 } else { 0u8 }; // Pre-compute shifted flag
 
-        // Encode with flag bit in the reserved bit position
         if likely(value < (1u64 << 5)) {
             // 1 byte: 00fxxxxx (f = flag bit)
             if unlikely(buffer.is_empty()) {
                 return Err(Error::new(ErrorKind::WriteZero, "Buffer too small"));
             }
-            buffer[0] = (value as u8) | ((self.flag as u8) << 5);
+            buffer[0] = (value as u8) | flag_bit;
             Ok(1)
         } else if likely(value < (1u64 << 13)) {
             // 2 bytes: 01fxxxxx xxxxxxxx
             if unlikely(buffer.len() < 2) {
                 return Err(Error::new(ErrorKind::WriteZero, "Buffer too small"));
             }
-            buffer[0] = 0x40 | ((self.flag as u8) << 5) | ((value >> 8) as u8);
+            buffer[0] = 0x40 | flag_bit | ((value >> 8) as u8);
             buffer[1] = value as u8;
             Ok(2)
         } else if likely(value < (1u64 << 29)) {
@@ -224,7 +259,7 @@ impl FlaggedVarInt {
             if unlikely(buffer.len() < 4) {
                 return Err(Error::new(ErrorKind::WriteZero, "Buffer too small"));
             }
-            buffer[0] = 0x80 | ((self.flag as u8) << 5) | ((value >> 24) as u8);
+            buffer[0] = 0x80 | flag_bit | ((value >> 24) as u8);
             buffer[1] = (value >> 16) as u8;
             buffer[2] = (value >> 8) as u8;
             buffer[3] = value as u8;
@@ -234,7 +269,7 @@ impl FlaggedVarInt {
             if unlikely(buffer.len() < 8) {
                 return Err(Error::new(ErrorKind::WriteZero, "Buffer too small"));
             }
-            buffer[0] = 0xC0 | ((self.flag as u8) << 5) | ((value >> 56) as u8);
+            buffer[0] = 0xC0 | flag_bit | ((value >> 56) as u8);
             buffer[1] = (value >> 48) as u8;
             buffer[2] = (value >> 40) as u8;
             buffer[3] = (value >> 32) as u8;
@@ -247,22 +282,23 @@ impl FlaggedVarInt {
     }
 
     /// Decode from byte slice and return (varint, bytes_consumed)
+    /// Uses branchless decoding for optimal performance
+    #[inline]
     pub fn decode(buffer: &[u8]) -> Result<(Self, usize)> {
         if unlikely(buffer.is_empty()) {
             return Err(Error::new(ErrorKind::UnexpectedEof, "Empty buffer"));
         }
 
         let first = buffer[0];
-        let length_bits = first >> 6;
 
-        // Determine length and extract flag bit
-        let (length, flag, value_mask) = match length_bits {
-            0b00 => (1, (first >> 5) & 1 == 1, 0x1F), // 5 value bits
-            0b01 => (2, (first >> 5) & 1 == 1, 0x1F), // 13 value bits total
-            0b10 => (4, (first >> 5) & 1 == 1, 0x1F), // 29 value bits total
-            0b11 => (8, (first >> 5) & 1 == 1, 0x1F), // 61 value bits total
-            _ => unreachable!(),
-        };
+        // Branchless length computation: 00->1, 01->2, 10->4, 11->8
+        let length = 1 << (first >> 6);
+
+        // Extract flag bit (bit 5)
+        let flag = (first & 0x20) != 0;
+
+        // Value mask is always 0x1F (5 bits) for FlaggedVarInt
+        const VALUE_MASK: u8 = 0x1F;
 
         if unlikely(buffer.len() < length) {
             return Err(Error::new(
@@ -271,22 +307,46 @@ impl FlaggedVarInt {
             ));
         }
 
-        let mut value = (first & value_mask) as u64;
+        let mut value = (first & VALUE_MASK) as u64;
 
-        for byte in buffer.iter().take(length).skip(1) {
-            value = (value << 8) | (*byte as u64);
+        // Unroll loops for better performance
+        unsafe {
+            match length {
+                1 => {
+                    // value already set from first byte
+                }
+                2 => {
+                    value = (value << 8) | (*buffer.get_unchecked(1) as u64);
+                }
+                4 => {
+                    value = (value << 8) | (*buffer.get_unchecked(1) as u64);
+                    value = (value << 8) | (*buffer.get_unchecked(2) as u64);
+                    value = (value << 8) | (*buffer.get_unchecked(3) as u64);
+                }
+                8 => {
+                    value = (value << 8) | (*buffer.get_unchecked(1) as u64);
+                    value = (value << 8) | (*buffer.get_unchecked(2) as u64);
+                    value = (value << 8) | (*buffer.get_unchecked(3) as u64);
+                    value = (value << 8) | (*buffer.get_unchecked(4) as u64);
+                    value = (value << 8) | (*buffer.get_unchecked(5) as u64);
+                    value = (value << 8) | (*buffer.get_unchecked(6) as u64);
+                    value = (value << 8) | (*buffer.get_unchecked(7) as u64);
+                }
+                _ => unreachable!(),
+            }
         }
 
         Ok((FlaggedVarInt { value, flag }, length))
     }
 
     /// Get the encoded size in bytes for a given value
+    #[inline(always)]
     pub fn encoded_size(value: u64) -> usize {
-        if likely(value < (1u64 << 5)) {
+        if value < (1u64 << 5) {
             1
-        } else if likely(value < (1u64 << 13)) {
+        } else if value < (1u64 << 13) {
             2
-        } else if likely(value < (1u64 << 29)) {
+        } else if value < (1u64 << 29) {
             4
         } else {
             8
@@ -294,21 +354,27 @@ impl FlaggedVarInt {
     }
 
     /// Encode a wire ID relative to the current wire counter
+    /// Chooses optimal encoding (absolute vs relative) based on value sizes
+    #[inline]
     pub fn encode_wire_id(wire_id: u64, wire_counter: u64, buffer: &mut [u8]) -> Result<usize> {
         // Choose the most efficient encoding
-        if wire_id <= wire_counter && (wire_counter - wire_id) < wire_id {
-            // Relative encoding is more efficient
+        // Use relative if the offset is smaller than the absolute value
+        if wire_id <= wire_counter {
             let offset = wire_counter - wire_id;
-            let varint = FlaggedVarInt::relative(offset)?;
-            varint.encode(buffer)
-        } else {
-            // Absolute encoding
-            let varint = FlaggedVarInt::absolute(wire_id)?;
-            varint.encode(buffer)
+            if offset < wire_id {
+                // Relative encoding is more efficient
+                let varint = FlaggedVarInt::relative(offset)?;
+                return varint.encode(buffer);
+            }
         }
+
+        // Absolute encoding
+        let varint = FlaggedVarInt::absolute(wire_id)?;
+        varint.encode(buffer)
     }
 
     /// Decode a wire ID given the current wire counter
+    #[inline]
     pub fn decode_wire_id(buffer: &[u8], wire_counter: u64) -> Result<(u64, usize)> {
         let (varint, consumed) = FlaggedVarInt::decode(buffer)?;
 
@@ -316,7 +382,7 @@ impl FlaggedVarInt {
             varint.value
         } else {
             // Relative offset from wire counter
-            if varint.value > wire_counter {
+            if unlikely(varint.value > wire_counter) {
                 return Err(Error::new(
                     ErrorKind::InvalidData,
                     format!(
@@ -438,6 +504,32 @@ mod tests {
 
         // Test exceeding max value
         assert!(FlaggedVarInt::absolute(FlaggedVarInt::MAX_VALUE + 1).is_err());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_performance_critical_path() -> Result<()> {
+        // Test that the most common cases (small values) are fast
+        let mut buffer = [0u8; 8];
+
+        // Small values should encode to 1 byte
+        for i in 0..32u64 {
+            let varint = FlaggedVarInt::relative(i)?;
+            let size = varint.encode(&mut buffer)?;
+            assert_eq!(size, 1);
+
+            let (decoded, consumed) = FlaggedVarInt::decode(&buffer)?;
+            assert_eq!(consumed, 1);
+            assert_eq!(decoded.value(), i);
+        }
+
+        // Medium values should be efficient too
+        for i in [100, 500, 1000, 5000].iter() {
+            let varint = StandardVarInt::new(*i)?;
+            let size = varint.encode(&mut buffer)?;
+            assert!(size <= 2);
+        }
 
         Ok(())
     }

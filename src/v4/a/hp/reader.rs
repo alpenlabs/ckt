@@ -30,10 +30,6 @@ pub struct CircuitReader {
     bytes_read: u64,
     /// Current wire counter for relative decoding
     wire_counter: u64,
-    /// Current batch of decoded gates
-    current_batch_gates: Vec<(Gate, GateType)>,
-    /// Current index in the batch
-    current_batch_index: usize,
 }
 
 impl CircuitReader {
@@ -141,8 +137,6 @@ impl CircuitReader {
             total_bytes: len,
             bytes_read: offset,
             wire_counter,
-            current_batch_gates: Vec::with_capacity(8),
-            current_batch_index: 0,
         })
     }
 
@@ -181,28 +175,14 @@ impl CircuitReader {
         self.total_gates_read
     }
 
-    /// Read next gate
-    pub async fn next_gate(&mut self) -> Result<Option<(Gate, GateType)>> {
+    /// Read next batch of gates (up to 8)
+    /// Returns the gates and their types
+    pub async fn next_batch(&mut self) -> Result<Option<Vec<(Gate, GateType)>>> {
         // Check if we've read all gates
         let total_gates = self.total_gates() as usize;
         if unlikely(self.total_gates_read >= total_gates) {
             return Ok(None);
         }
-
-        // If we have gates in current batch, return from there
-        if self.current_batch_index < self.current_batch_gates.len() {
-            let gate = self.current_batch_gates[self.current_batch_index];
-            self.current_batch_index += 1;
-            self.total_gates_read += 1;
-
-            // Wire counter already updated in read_batch, no need to update again
-
-            return Ok(Some(gate));
-        }
-
-        // Need to read a new batch
-        self.current_batch_gates.clear();
-        self.current_batch_index = 0;
 
         // Fill buffer if needed
         if self.buffer_offset >= self.max_valid_bytes {
@@ -215,123 +195,122 @@ impl CircuitReader {
             return Ok(None);
         }
 
-        self.current_batch_gates = batch_gates;
-        let gate = self.current_batch_gates[0];
-        self.current_batch_index = 1;
-        self.total_gates_read += 1;
-
-        // Wire counter already updated in read_batch, no need to update again
-
-        Ok(Some(gate))
+        self.total_gates_read += batch_gates.len();
+        Ok(Some(batch_gates))
     }
 
     /// Read a batch of gates from the buffer
+    #[inline]
     fn read_batch(&mut self) -> Result<Vec<(Gate, GateType)>> {
         let mut gates = Vec::with_capacity(8);
-        let mut offset = self.buffer_offset;
 
-        // Read up to 8 gates
-        for _ in 0..8 {
-            // Check if we've read all gates
-            if self.total_gates_read + gates.len() >= self.total_gates() as usize {
-                break;
-            }
+        // Calculate how many gates in this batch are valid
+        let total_gates = self.total_gates() as usize;
+        let gates_remaining = total_gates - self.total_gates_read;
+        let valid_gates_in_batch = gates_remaining.min(8);
 
-            // Check if we have enough bytes for at least one byte
-            if offset >= self.max_valid_bytes {
-                break;
-            }
+        if valid_gates_in_batch == 0 {
+            return Ok(gates);
+        }
 
-            // Helper to read a varint with proper length checking
-            let read_varint = |buffer: &[u8], off: usize| -> Option<usize> {
-                if off >= buffer.len() {
-                    return None;
-                }
-                let first = buffer[off];
-                match first >> 6 {
-                    0b00 => Some(1),
-                    0b01 => Some(2),
-                    0b10 => Some(4),
-                    0b11 => Some(8),
-                    _ => None,
-                }
-            };
+        // We always read 8 gates per batch (unused ones are zeroed)
+        // Ensure we have enough data for worst case (32 bytes per gate + 1 byte types)
+        let min_needed = 8 * 32 + 1;
+        if unlikely(self.max_valid_bytes - self.buffer_offset < min_needed) {
+            // We might not have all the data, but try to read what we can
+        }
 
-            // Read input1
-            let len1 = read_varint(&self.buffer[..self.max_valid_bytes], offset);
-            if len1.is_none() || offset + len1.unwrap() > self.max_valid_bytes {
-                break;
-            }
-            let (in1, consumed1) = FlaggedVarInt::decode_wire_id(
-                &self.buffer[offset..self.max_valid_bytes],
-                self.wire_counter,
-            )?;
-            offset += consumed1;
+        // Always read 8 gates (the writer writes full batches with unused slots zeroed)
+        for i in 0..8 {
+            // For gates beyond valid_gates_in_batch, they should be zero
+            // But we still need to read them to advance past the batch correctly
 
-            // Read input2
-            let len2 = read_varint(&self.buffer[..self.max_valid_bytes], offset);
-            if len2.is_none() || offset + len2.unwrap() > self.max_valid_bytes {
-                break;
-            }
-            let (in2, consumed2) = FlaggedVarInt::decode_wire_id(
-                &self.buffer[offset..self.max_valid_bytes],
-                self.wire_counter,
-            )?;
-            offset += consumed2;
+            // Decode input1
+            let buffer_slice = &self.buffer[self.buffer_offset..self.max_valid_bytes];
+            let (in1, consumed1) =
+                match FlaggedVarInt::decode_wire_id(buffer_slice, self.wire_counter) {
+                    Ok(result) => result,
+                    Err(_) if i < valid_gates_in_batch => {
+                        // Error reading a valid gate - this is a problem
+                        return Err(Error::new(
+                            ErrorKind::UnexpectedEof,
+                            "Failed to read valid gate",
+                        ));
+                    }
+                    Err(_) => {
+                        // Error reading a zeroed gate - might be at end of buffer
+                        break;
+                    }
+                };
+            self.buffer_offset += consumed1;
 
-            // Read output
-            let len3 = read_varint(&self.buffer[..self.max_valid_bytes], offset);
-            if len3.is_none() || offset + len3.unwrap() > self.max_valid_bytes {
-                break;
-            }
-            let (out, consumed3) = FlaggedVarInt::decode_wire_id(
-                &self.buffer[offset..self.max_valid_bytes],
-                self.wire_counter,
-            )?;
-            offset += consumed3;
+            // Decode input2
+            let buffer_slice = &self.buffer[self.buffer_offset..self.max_valid_bytes];
+            let (in2, consumed2) =
+                match FlaggedVarInt::decode_wire_id(buffer_slice, self.wire_counter) {
+                    Ok(result) => result,
+                    Err(_) => {
+                        self.buffer_offset -= consumed1; // Rollback
+                        break;
+                    }
+                };
+            self.buffer_offset += consumed2;
+
+            // Decode output
+            let buffer_slice = &self.buffer[self.buffer_offset..self.max_valid_bytes];
+            let (out, consumed3) =
+                match FlaggedVarInt::decode_wire_id(buffer_slice, self.wire_counter) {
+                    Ok(result) => result,
+                    Err(_) => {
+                        self.buffer_offset -= consumed1 + consumed2; // Rollback
+                        break;
+                    }
+                };
+            self.buffer_offset += consumed3;
 
             // Update wire counter for next gate
             self.wire_counter = out + 1;
 
-            // Read credits
-            let len4 = read_varint(&self.buffer[..self.max_valid_bytes], offset);
-            if len4.is_none() || offset + len4.unwrap() > self.max_valid_bytes {
-                break;
+            // Decode credits
+            let buffer_slice = &self.buffer[self.buffer_offset..self.max_valid_bytes];
+            let (credits_varint, consumed4) = match StandardVarInt::decode(buffer_slice) {
+                Ok(result) => result,
+                Err(_) => {
+                    self.buffer_offset -= consumed1 + consumed2 + consumed3; // Rollback
+                    self.wire_counter = out; // Also rollback wire counter
+                    break;
+                }
+            };
+            self.buffer_offset += consumed4;
+
+            // Only add gates that are within the valid range
+            if i < valid_gates_in_batch {
+                gates.push((
+                    Gate::new(in1, in2, out, credits_varint.value() as u32),
+                    GateType::XOR, // Will be updated after reading gate types
+                ));
             }
-            let (credits_varint, consumed4) =
-                StandardVarInt::decode(&self.buffer[offset..self.max_valid_bytes])?;
-            offset += consumed4;
-
-            gates.push((
-                Gate::new(in1, in2, out, credits_varint.value() as u32),
-                GateType::XOR, // Will be updated after reading gate types
-            ));
-
-            // Update wire counter for next gate in batch
-            self.wire_counter = out + 1;
 
             // Prefetch next gate data if available
-            if likely(offset + 32 < self.max_valid_bytes) {
+            if likely(self.buffer_offset + 32 < self.max_valid_bytes) {
                 unsafe {
-                    prefetch_read_data(self.buffer.as_ptr().add(offset + 32), 0);
+                    prefetch_read_data(self.buffer.as_ptr().add(self.buffer_offset + 32), 0);
                 }
             }
         }
 
-        if gates.is_empty() {
-            self.buffer_offset = offset;
-            return Ok(gates);
+        // Read gate types byte - always present after 8 gates
+        if unlikely(self.buffer_offset >= self.max_valid_bytes) {
+            return Err(Error::new(
+                ErrorKind::UnexpectedEof,
+                "Missing gate types byte after batch",
+            ));
         }
 
-        // Read gate types byte
-        if offset >= self.max_valid_bytes {
-            return Ok(gates); // Incomplete batch, return what we have
-        }
+        let gate_types = self.buffer[self.buffer_offset];
+        self.buffer_offset += 1;
 
-        let gate_types = self.buffer[offset];
-        offset += 1;
-
-        // Update gate types
+        // Update gate types for the valid gates we read
         for (i, (_, gate_type)) in gates.iter_mut().enumerate() {
             *gate_type = if (gate_types >> i) & 1 == 0 {
                 GateType::XOR
@@ -340,7 +319,6 @@ impl CircuitReader {
             };
         }
 
-        self.buffer_offset = offset;
         Ok(gates)
     }
 
