@@ -197,9 +197,9 @@ impl PartialEq for Dependency {
 
 impl Eq for Dependency {}
 
-// Union for storing (CompactWireId, Credits), inline CompactDependency, or pointer to Vec
+// Union for storing Credits, inline CompactDependency, or pointer to Vec
 #[repr(packed)]
-union SlotData {
+union Wire {
     credits: u8,                       // Credits (1 byte)
     waiting_inline: [u8; 10],          // Single CompactDependency (10 bytes)
     waiting_ptr: *mut ThinVecInternal, // Multiple dependencies using ThinVec
@@ -209,14 +209,14 @@ union SlotData {
 #[repr(packed)]
 pub(crate) struct SlottedValue {
     mask: u8, // 2 bits per slot: 00=empty, 01=available, 10=waiting_vec, 11=waiting_inline
-    slots: [SlotData; 4], // 4 slots using union (10 bytes each)
+    slots: [Wire; 4], // 4 slots using union (10 bytes each)
 }
 
 impl SlottedValue {
     pub fn new() -> Self {
         Self {
             mask: 0,
-            slots: std::array::from_fn(|_| SlotData {
+            slots: std::array::from_fn(|_| Wire {
                 waiting_ptr: std::ptr::null_mut(),
             }),
         }
@@ -272,12 +272,12 @@ impl SlottedValue {
             WireAvailability::Available(credits) => {
                 // Set mask bits to 01
                 self.mask |= 1 << (slot_idx * 2);
-                self.slots[slot_idx] = SlotData { credits: credits.0 };
+                self.slots[slot_idx] = Wire { credits: credits.0 };
             }
             WireAvailability::WaitingInline(dep) => {
                 // Single dependency - use inline storage
                 self.mask |= 3 << (slot_idx * 2);
-                self.slots[slot_idx] = SlotData {
+                self.slots[slot_idx] = Wire {
                     waiting_inline: dep.bytes,
                 };
             }
@@ -285,7 +285,7 @@ impl SlottedValue {
                 // Multiple dependencies - use ThinVec
                 self.mask |= 2 << (slot_idx * 2);
                 let ptr = unsafe { deps.into_raw() };
-                self.slots[slot_idx] = SlotData { waiting_ptr: ptr };
+                self.slots[slot_idx] = Wire { waiting_ptr: ptr };
             }
         };
     }
@@ -303,7 +303,7 @@ impl SlottedValue {
                 let credits = Credits(unsafe { self.slots[slot_idx].credits });
                 // Clear mask bits and slot
                 self.mask &= !(0x3 << (slot_idx * 2));
-                self.slots[slot_idx] = SlotData {
+                self.slots[slot_idx] = Wire {
                     waiting_ptr: std::ptr::null_mut(),
                 };
                 Some(WireAvailability::Available(credits))
@@ -317,7 +317,7 @@ impl SlottedValue {
                     let thinvec = unsafe { ThinVec::<CompactDependency>::from_raw(ptr) };
                     // Clear mask bits and slot
                     self.mask &= !(0x3 << (slot_idx * 2));
-                    self.slots[slot_idx] = SlotData {
+                    self.slots[slot_idx] = Wire {
                         waiting_ptr: std::ptr::null_mut(),
                     };
                     Some(WireAvailability::Waiting(thinvec))
@@ -329,7 +329,7 @@ impl SlottedValue {
                 let compact_dep = CompactDependency { bytes };
                 // Clear mask bits and slot
                 self.mask &= !(0x3 << (slot_idx * 2));
-                self.slots[slot_idx] = SlotData {
+                self.slots[slot_idx] = Wire {
                     waiting_ptr: std::ptr::null_mut(),
                 };
                 Some(WireAvailability::WaitingInline(compact_dep))
@@ -373,7 +373,7 @@ impl Clone for SlottedValue {
                 1 => {
                     // Copy CompactWireLocation
                     new.mask |= 1 << (i * 2);
-                    new.slots[i] = SlotData {
+                    new.slots[i] = Wire {
                         credits: unsafe { self.slots[i].credits },
                     };
                 }
@@ -387,7 +387,7 @@ impl Clone for SlottedValue {
                         // Convert back to raw pointer without dropping the original
                         let _ = unsafe { thinvec.into_raw() };
                         let new_ptr = unsafe { cloned_thinvec.into_raw() };
-                        new.slots[i] = SlotData {
+                        new.slots[i] = Wire {
                             waiting_ptr: new_ptr,
                         };
                     }
@@ -395,7 +395,7 @@ impl Clone for SlottedValue {
                 3 => {
                     // Copy inline dependency
                     new.mask |= 3 << (i * 2);
-                    new.slots[i] = SlotData {
+                    new.slots[i] = Wire {
                         waiting_inline: unsafe { self.slots[i].waiting_inline },
                     };
                 }

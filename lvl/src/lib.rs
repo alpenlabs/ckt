@@ -13,7 +13,6 @@ use crate::{
 use ahash::{HashMap, HashMapExt};
 use ckt::GateType;
 use cynosure::hints::{cold_and_empty, likely, unlikely};
-use indexmap::IndexSet;
 
 #[derive(Clone)]
 pub struct Leveller {
@@ -74,7 +73,7 @@ impl Leveller {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Status {
     Waiting,
-    Available,
+    Available { is_primary: bool },
 }
 
 #[inline]
@@ -87,7 +86,7 @@ fn append_if_not_exists<T: PartialEq>(set: &mut ThinVec<T>, item: T) {
 impl Leveller {
     fn check_in1(&mut self, gate: IntermediateGate, gate_type: GateType) -> Status {
         if unlikely(gate.in1 < self.primary_inputs) {
-            return Status::Available;
+            return Status::Available { is_primary: true };
         }
         match self.get_wire(gate.in1) {
             None => {
@@ -123,7 +122,7 @@ impl Leveller {
                 }
                 Status::Waiting
             }
-            Some(WireAvailability::Available(..)) => Status::Available,
+            Some(WireAvailability::Available(..)) => Status::Available { is_primary: false },
         }
     }
 
@@ -134,7 +133,7 @@ impl Leveller {
         in1_status: Status,
     ) -> Status {
         if unlikely(gate.in2 < self.primary_inputs) {
-            return Status::Available;
+            return Status::Available { is_primary: true };
         }
         match in1_status {
             Status::Waiting => match self.get_wire(gate.in2) {
@@ -172,9 +171,9 @@ impl Leveller {
                     Status::Waiting
                 }
 
-                Some(WireAvailability::Available(..)) => Status::Available,
+                Some(WireAvailability::Available(..)) => Status::Available { is_primary: false },
             },
-            Status::Available => match self.get_wire(gate.in2) {
+            Status::Available { .. } => match self.get_wire(gate.in2) {
                 None => {
                     cold_and_empty();
 
@@ -209,7 +208,7 @@ impl Leveller {
                     }
                     Status::Waiting
                 }
-                Some(WireAvailability::Available(..)) => Status::Available,
+                Some(WireAvailability::Available(..)) => Status::Available { is_primary: false },
             },
         }
     }
@@ -221,20 +220,35 @@ impl Leveller {
         newly_available: Option<CompactWireId>, // save a hashmap lookup when we know one has just been made available
     ) {
         let in1_status = match newly_available {
-            Some(wire_id) if gate.in1 == wire_id => Status::Available,
+            Some(wire_id) if gate.in1 == wire_id => Status::Available { is_primary: false },
             _ => self.check_in1(gate, gate_type),
         };
 
         let in2_status = match newly_available {
-            Some(wire_id) if gate.in2 == wire_id => Status::Available,
+            Some(wire_id) if gate.in2 == wire_id => Status::Available { is_primary: false },
             _ => self.check_in2(gate, gate_type, in1_status),
         };
 
-        if likely(in1_status == Status::Available && in2_status == Status::Available) {
+        if let (
+            Status::Available {
+                is_primary: in1_is_primary,
+            },
+            Status::Available {
+                is_primary: in2_is_primary,
+            },
+        ) = (in1_status, in2_status)
+        {
             if self.pending_level.and_gates.contains(&gate)
                 || self.pending_level.xor_gates.contains(&gate)
             {
                 return;
+            }
+
+            if !in1_is_primary {
+                self.wire_used(gate.in1);
+            }
+            if !in2_is_primary {
+                self.wire_used(gate.in2);
             }
 
             // queue the gate in this level
@@ -263,13 +277,11 @@ impl Leveller {
         self.level_id += 1;
 
         let newly_available_wires = {
-            let mut buf = Vec::with_capacity(
-                self.pending_level.and_gates.len() + self.pending_level.xor_gates.len(),
-            );
-            for gate in self.pending_level.and_gates.iter() {
+            let mut buf = Vec::with_capacity(level.and_gates.len() + level.xor_gates.len());
+            for gate in level.and_gates.iter() {
                 buf.push((gate.out, gate.credits));
             }
-            for gate in self.pending_level.xor_gates.iter() {
+            for gate in level.xor_gates.iter() {
                 buf.push((gate.out, gate.credits));
             }
             buf
