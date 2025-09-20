@@ -7,13 +7,11 @@ use std::cell::Cell;
 use std::time::{Duration, Instant};
 
 mod cli;
-mod leveller;
-mod slab;
 #[allow(dead_code)]
 mod thinvec;
 
 use cli::Cli;
-use leveller::Leveller;
+use lvl::Leveller;
 
 // Memory tracking wrapper around mimalloc
 struct TrackingAllocator {

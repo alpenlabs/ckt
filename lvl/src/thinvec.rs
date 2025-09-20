@@ -1,6 +1,7 @@
 use std::alloc::{alloc, dealloc, realloc, Layout};
 use std::marker::PhantomData;
 use std::mem;
+use std::ops::{Index, IndexMut};
 use std::ptr::{self, NonNull};
 
 #[repr(C)]
@@ -9,9 +10,121 @@ pub struct ThinVecInternal {
     capacity: u8, // 1 byte for capacity (max 255)
 }
 
+/// A Vec with its length and capacity on the heap with the elements.
+/// Max capacity is 255 elements.
 pub struct ThinVec<T> {
     ptr: NonNull<ThinVecInternal>,
     _marker: PhantomData<T>,
+}
+
+/// Iterator over ThinVec elements
+pub struct ThinVecIter<'a, T> {
+    data: *const T,
+    len: usize,
+    current: usize,
+    _marker: PhantomData<&'a T>,
+}
+
+impl<'a, T> Iterator for ThinVecIter<'a, T> {
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current < self.len {
+            unsafe {
+                let item = &*self.data.add(self.current);
+                self.current += 1;
+                Some(item)
+            }
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.len - self.current;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<'a, T> ExactSizeIterator for ThinVecIter<'a, T> {
+    fn len(&self) -> usize {
+        self.len - self.current
+    }
+}
+
+/// Mutable iterator over ThinVec elements
+pub struct ThinVecIterMut<'a, T> {
+    data: *mut T,
+    len: usize,
+    current: usize,
+    _marker: PhantomData<&'a mut T>,
+}
+
+impl<'a, T> Iterator for ThinVecIterMut<'a, T> {
+    type Item = &'a mut T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current < self.len {
+            unsafe {
+                let item = &mut *self.data.add(self.current);
+                self.current += 1;
+                Some(item)
+            }
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.len - self.current;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<'a, T> ExactSizeIterator for ThinVecIterMut<'a, T> {
+    fn len(&self) -> usize {
+        self.len - self.current
+    }
+}
+
+/// Owning iterator over ThinVec elements
+pub struct ThinVecIntoIter<T> {
+    vec: ThinVec<T>,
+    current: usize,
+}
+
+impl<T> Iterator for ThinVecIntoIter<T> {
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current < self.vec.len() {
+            unsafe {
+                let item = ptr::read(self.vec.data_ptr().add(self.current));
+                self.current += 1;
+                Some(item)
+            }
+        } else {
+            None
+        }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let remaining = self.vec.len() - self.current;
+        (remaining, Some(remaining))
+    }
+}
+
+impl<T> ExactSizeIterator for ThinVecIntoIter<T> {
+    fn len(&self) -> usize {
+        self.vec.len() - self.current
+    }
+}
+
+impl<T> Drop for ThinVecIntoIter<T> {
+    fn drop(&mut self) {
+        // Drop any remaining elements
+        while self.next().is_some() {}
+    }
 }
 
 impl<T> ThinVec<T> {
@@ -112,6 +225,26 @@ impl<T> ThinVec<T> {
             let align = mem::align_of::<T>();
             let data_offset = (header_size + align - 1) / align * align;
             header_ptr.add(data_offset) as *mut T
+        }
+    }
+
+    /// Returns an iterator over the elements
+    pub fn iter(&self) -> ThinVecIter<T> {
+        ThinVecIter {
+            data: self.data_ptr(),
+            len: self.len(),
+            current: 0,
+            _marker: PhantomData,
+        }
+    }
+
+    /// Returns a mutable iterator over the elements
+    pub fn iter_mut(&mut self) -> ThinVecIterMut<T> {
+        ThinVecIterMut {
+            data: self.data_ptr(),
+            len: self.len(),
+            current: 0,
+            _marker: PhantomData,
         }
     }
 
@@ -245,6 +378,69 @@ impl<T> ThinVec<T> {
     }
 }
 
+// Implement IntoIterator for ThinVec
+impl<T> IntoIterator for ThinVec<T> {
+    type Item = T;
+    type IntoIter = ThinVecIntoIter<T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        ThinVecIntoIter {
+            vec: self,
+            current: 0,
+        }
+    }
+}
+
+// Implement IntoIterator for &ThinVec
+impl<'a, T> IntoIterator for &'a ThinVec<T> {
+    type Item = &'a T;
+    type IntoIter = ThinVecIter<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+// Implement IntoIterator for &mut ThinVec
+impl<'a, T> IntoIterator for &'a mut ThinVec<T> {
+    type Item = &'a mut T;
+    type IntoIter = ThinVecIterMut<'a, T>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
+    }
+}
+
+// Implement Index trait for immutable indexing
+impl<T> Index<usize> for ThinVec<T> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        if index >= self.len() {
+            panic!(
+                "index out of bounds: the len is {} but the index is {}",
+                self.len(),
+                index
+            );
+        }
+        unsafe { &*self.data_ptr().add(index) }
+    }
+}
+
+// Implement IndexMut trait for mutable indexing
+impl<T> IndexMut<usize> for ThinVec<T> {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        let len = self.len();
+        if index >= len {
+            panic!(
+                "index out of bounds: the len is {} but the index is {}",
+                len, index
+            );
+        }
+        unsafe { &mut *self.data_ptr().add(index) }
+    }
+}
+
 // Implement Drop to clean up memory
 impl<T> Drop for ThinVec<T> {
     fn drop(&mut self) {
@@ -283,6 +479,22 @@ impl<T: Clone> Clone for ThinVec<T> {
     }
 }
 
+// Implement Debug where T is Debug
+impl<T: std::fmt::Debug> std::fmt::Debug for ThinVec<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut list = f.debug_list();
+        let len = self.len();
+        let data = self.data_ptr();
+
+        unsafe {
+            for i in 0..len {
+                list.entry(&*data.add(i));
+            }
+        }
+        list.finish()
+    }
+}
+
 // Safe Send/Sync impls
 unsafe impl<T: Send> Send for ThinVec<T> {}
 unsafe impl<T: Sync> Sync for ThinVec<T> {}
@@ -311,6 +523,28 @@ mod tests {
     }
 
     #[test]
+    fn test_indexing() {
+        let mut vec: ThinVec<i32> = ThinVec::new();
+        vec.push(10);
+        vec.push(20);
+        vec.push(30);
+
+        assert_eq!(vec[0], 10);
+        assert_eq!(vec[1], 20);
+        assert_eq!(vec[2], 30);
+
+        vec[1] = 99;
+        assert_eq!(vec[1], 99);
+    }
+
+    #[test]
+    #[should_panic(expected = "index out of bounds")]
+    fn test_indexing_out_of_bounds() {
+        let vec: ThinVec<i32> = ThinVec::new();
+        let _ = vec[0];
+    }
+
+    #[test]
     fn test_raw_pointer_roundtrip() {
         let mut vec: ThinVec<String> = ThinVec::with_capacity(10);
         vec.push("hello".to_string());
@@ -328,5 +562,49 @@ mod tests {
     #[should_panic(expected = "cannot exceed 255")]
     fn test_capacity_limit() {
         let _vec: ThinVec<u8> = ThinVec::with_capacity(256);
+    }
+
+    #[test]
+    fn test_iterator() {
+        let mut vec: ThinVec<i32> = ThinVec::new();
+        vec.push(10);
+        vec.push(20);
+        vec.push(30);
+
+        let collected: Vec<&i32> = vec.iter().collect();
+        assert_eq!(collected, vec![&10, &20, &30]);
+
+        let collected: Vec<i32> = vec.into_iter().collect();
+        assert_eq!(collected, vec![10, 20, 30]);
+    }
+
+    #[test]
+    fn test_mutable_iterator() {
+        let mut vec: ThinVec<i32> = ThinVec::new();
+        vec.push(10);
+        vec.push(20);
+        vec.push(30);
+
+        for item in vec.iter_mut() {
+            *item *= 2;
+        }
+
+        assert_eq!(vec[0], 20);
+        assert_eq!(vec[1], 40);
+        assert_eq!(vec[2], 60);
+    }
+
+    #[test]
+    fn test_for_loop() {
+        let mut vec: ThinVec<i32> = ThinVec::new();
+        vec.push(1);
+        vec.push(2);
+        vec.push(3);
+
+        let mut sum = 0;
+        for &item in &vec {
+            sum += item;
+        }
+        assert_eq!(sum, 6);
     }
 }
