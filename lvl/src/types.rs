@@ -67,7 +67,7 @@ pub(crate) struct PendingLevel {
 }
 
 #[derive(Debug, Clone, Copy, Hash)]
-pub struct Credits(pub u8);
+pub struct Credits(pub u16);
 
 #[derive(Debug, Clone)]
 pub enum WireAvailability {
@@ -76,10 +76,10 @@ pub enum WireAvailability {
     WaitingInline(CompactDependency),
 }
 
-// Compact dependency: 10 bytes (34-bit other_in, 34-bit out, 1-bit gate_type, 3 bit padding, 8 bit credits)
+// Compact dependency: 11 bytes (34-bit other_in, 34-bit out, 1-bit gate_type, 1 bit padding, 16 bit credits)
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub struct CompactDependency {
-    bytes: [u8; 10],
+    bytes: [u8; 11],
 }
 
 impl std::fmt::Debug for CompactDependency {
@@ -107,8 +107,8 @@ impl CompactDependency {
         debug_assert!(other_in_u64 < (1u64 << 34), "other_in exceeds 34 bits");
         debug_assert!(out_u64 < (1u64 << 34), "out exceeds 34 bits");
 
-        let mut bytes = [0u8; 10];
-        // Pack: 34 bits other_in | 34 bits out | 1 bit gate_type | 8 bit credits
+        let mut bytes = [0u8; 11];
+        // Pack: 34 bits other_in | 34 bits out | 1 bit gate_type | 16 bit credits
 
         // other_in: bits 0-33
         bytes[0] = (other_in_u64 & 0xFF) as u8;
@@ -129,8 +129,9 @@ impl CompactDependency {
             bytes[8] |= 0x10; // Set bit 4
         }
 
-        // credits: byte 9 (bits 72-79)
-        bytes[9] = credits.0;
+        // credits: bytes 9-10 (bits 72-87)
+        bytes[9] = (credits.0 & 0xFF) as u8;
+        bytes[10] = ((credits.0 >> 8) & 0xFF) as u8;
 
         Self { bytes }
     }
@@ -158,7 +159,7 @@ impl CompactDependency {
         };
 
         // Unpack credits
-        let credits = Credits(self.bytes[9]);
+        let credits = Credits((self.bytes[9] as u16) | ((self.bytes[10] as u16) << 8));
 
         Dependency {
             other_in: CompactWireId::from_u64(other_in_u64),
@@ -200,8 +201,8 @@ impl Eq for Dependency {}
 // Union for storing Credits, inline CompactDependency, or pointer to Vec
 #[repr(packed)]
 union Wire {
-    credits: u8,                       // Credits (1 byte)
-    waiting_inline: [u8; 10],          // Single CompactDependency (10 bytes)
+    credits: u16,                      // Credits (2 bytes)
+    waiting_inline: [u8; 11],          // Single CompactDependency (11 bytes)
     waiting_ptr: *mut ThinVecInternal, // Multiple dependencies using ThinVec
 }
 
@@ -209,7 +210,7 @@ union Wire {
 #[repr(packed)]
 pub(crate) struct SlottedValue {
     mask: u8, // 2 bits per slot: 00=empty, 01=available, 10=waiting_vec, 11=waiting_inline
-    slots: [Wire; 4], // 4 slots using union (10 bytes each)
+    slots: [Wire; 4], // 4 slots using union (11 bytes each)
 }
 
 impl SlottedValue {
