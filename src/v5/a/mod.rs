@@ -7,10 +7,14 @@
 //! - 256 gates per block
 
 pub mod reader;
-// pub mod writer;  // TODO: Implement v5a writer
+pub mod writer;
+
+#[cfg(test)]
+mod integration_tests;
 
 // Re-export main types
 pub use reader::{CircuitReaderV5a, DecodedBlock, GateV5a, HeaderV5a};
+pub use writer::{CircuitStats, CircuitWriterV5a};
 
 /// Block size constants for v5a
 pub const GATES_PER_BLOCK: usize = 256;
