@@ -15,19 +15,19 @@ use std::sync::Arc;
 use std::thread;
 
 /// Magic bytes for v5 format: "Zk2u"
-const MAGIC: [u8; 4] = [0x5A, 0x6B, 0x32, 0x75];
+pub const MAGIC: [u8; 4] = [0x5A, 0x6B, 0x32, 0x75];
 
 /// Version number for v5
-const VERSION: u8 = 0x05;
+pub const VERSION: u8 = 0x05;
 
 /// Format type for v5a
-const FORMAT_TYPE_A: u8 = 0x00;
+pub const FORMAT_TYPE_A: u8 = 0x00;
 
 /// Gates per block in v5a
-const GATES_PER_BLOCK: usize = 256;
+pub const GATES_PER_BLOCK: usize = 256;
 
 /// Size of a v5a block in bytes
-const BLOCK_SIZE_V5A: usize = 4064;
+pub const BLOCK_SIZE_V5A: usize = 4064;
 
 /// v5a header structure (72 bytes)
 #[repr(C, packed)]
