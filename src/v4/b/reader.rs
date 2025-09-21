@@ -410,7 +410,7 @@ impl<R: Read> CircuitReader<R> {
 /// matches the computed checksum of: hash(levels || header_fields_after_checksum || output_addresses)
 /// Returns the checksum if verification succeeds
 pub fn verify_checksum<R: std::io::Read>(mut reader: R) -> Result<[u8; 32]> {
-    use super::varints::StandardVarInt;
+    
     use blake3::Hasher;
 
     // Read fixed header (74 bytes)

@@ -56,7 +56,7 @@ v5a is an intermediate format that preserves wire IDs and credits for memory man
 ```c
 struct HeaderV5a {
     // Identification (8 bytes)
-    magic: [u8; 4],          // 4 bytes: "CKT5" (0x434B5435)
+    magic: [u8; 4],          // 4 bytes: "Zk2u" (0x5A6B3275)
     version: u8,             // 1 byte: Always 0x05
     format_type: u8,         // 1 byte: Always 0x00 for v5a
     reserved: [u8; 2],       // 2 bytes: Reserved, must be 0x0000
@@ -166,7 +166,7 @@ v5b is the production format output by the leveller, with precomputed memory add
 ```c
 struct HeaderV5b {
     // Identification (8 bytes)
-    magic: [u8; 4],          // 4 bytes: "CKT5" (0x434B5435)
+    magic: [u8; 4],          // 4 bytes: "Zk2u" (0x5A6B3275)
     version: u8,             // 1 byte: Always 0x05
     format_type: u8,         // 1 byte: Always 0x01 for v5b
     reserved: [u8; 2],       // 2 bytes: Reserved, must be 0x0000
@@ -359,7 +359,7 @@ let blocks = unsafe {
 ## Validation Requirements
 
 ### Header Validation
-1. Magic bytes must equal "CKT5" (0x434B5435)
+1. Magic bytes must equal "Zk2u" (0x5A6B3275)
 2. Version must equal 0x05
 3. Format type must be 0x00 (v5a) or 0x01 (v5b)
 4. Reserved fields must be zero

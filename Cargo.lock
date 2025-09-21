@@ -212,6 +212,7 @@ version = "0.1.0"
 dependencies = [
  "blake3",
  "cynosure",
+ "libc",
  "monoio",
  "tempfile",
 ]

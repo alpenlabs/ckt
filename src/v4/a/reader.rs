@@ -22,7 +22,7 @@ pub struct CircuitReader<R: Read> {
 
 impl<R: Read> CircuitReader<R> {
     /// Create a new v4a reader
-    pub fn new(mut reader: R) -> Result<Self> {
+    pub fn new(reader: R) -> Result<Self> {
         Self::with_buffer_size(reader, 64 * 1024 * 1024) // 64MB default buffer
     }
 
