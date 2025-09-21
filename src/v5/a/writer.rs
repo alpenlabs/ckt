@@ -438,6 +438,73 @@ fn pack_24_bits(values: &[u32], output: &mut [u8]) {
     }
 }
 
+/// Verify the checksum of a v5a file
+pub async fn verify_checksum(path: impl AsRef<Path>) -> Result<bool> {
+    // Open file with O_DIRECT for optimal performance
+    let mut opts = OpenOptions::new();
+    opts.read(true);
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.custom_flags(libc::O_DIRECT | libc::O_NOATIME);
+    }
+
+    let file = opts.open(path.as_ref()).await?;
+
+    // Read header
+    let mut header_bytes = vec![0u8; std::mem::size_of::<HeaderV5a>()];
+    let (res, buf) = file.read_exact_at(header_bytes, 0).await;
+    res?;
+    let header = unsafe { std::ptr::read_unaligned(buf.as_ptr() as *const HeaderV5a) };
+
+    // Validate header format
+    header.validate()?;
+
+    // Create hasher
+    let mut hasher = Hasher::new();
+
+    // Step 1: Hash outputs
+    let outputs_offset = std::mem::size_of::<HeaderV5a>() as u64;
+    let outputs_size = header.num_outputs as usize * 5; // 5 bytes per output
+
+    if outputs_size > 0 {
+        let mut outputs_buf = vec![0u8; outputs_size];
+        let (res, buf) = file.read_exact_at(outputs_buf, outputs_offset).await;
+        res?;
+        hasher.update(&buf);
+    }
+
+    // Step 2: Hash all gate blocks
+    let blocks_offset = outputs_offset + outputs_size as u64;
+    let total_gates = header.total_gates();
+    let full_blocks = total_gates / GATES_PER_BLOCK as u64;
+    let remaining_gates = total_gates % GATES_PER_BLOCK as u64;
+    let total_blocks = if remaining_gates > 0 {
+        full_blocks + 1
+    } else {
+        full_blocks
+    };
+
+    let mut current_offset = blocks_offset;
+    for _ in 0..total_blocks {
+        let mut block_buf = vec![0u8; BLOCK_SIZE_V5A];
+        let (res, buf) = file.read_exact_at(block_buf, current_offset).await;
+        res?;
+        hasher.update(&buf);
+        current_offset += BLOCK_SIZE_V5A as u64;
+    }
+
+    // Step 3: Hash header fields after checksum
+    hasher.update(&header.xor_gates.to_le_bytes());
+    hasher.update(&header.and_gates.to_le_bytes());
+    hasher.update(&header.primary_inputs.to_le_bytes());
+    hasher.update(&header.num_outputs.to_le_bytes());
+
+    // Compare checksums
+    let computed = hasher.finalize();
+    Ok(computed.as_bytes() == &header.checksum)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -693,6 +760,60 @@ mod tests {
         assert_eq!(stats.total_gates, 3);
         assert_eq!(stats.xor_gates, 2);
         assert_eq!(stats.and_gates, 1);
+    }
+
+    #[monoio::test]
+    async fn test_verify_checksum() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("test_checksum.v5a");
+
+        // Write a circuit
+        {
+            let mut writer = CircuitWriterV5a::new(&path, 3, vec![100, 101])
+                .await
+                .unwrap();
+
+            let gates = vec![
+                GateV5a {
+                    in1: 2,
+                    in2: 3,
+                    out: 100,
+                    credits: 0,
+                    gate_type: false,
+                },
+                GateV5a {
+                    in1: 3,
+                    in2: 4,
+                    out: 101,
+                    credits: 0,
+                    gate_type: true,
+                },
+            ];
+
+            for gate in gates {
+                writer.write_gate(gate).await.unwrap();
+            }
+
+            writer.finalize().await.unwrap();
+        }
+
+        // Verify checksum
+        assert!(verify_checksum(&path).await.unwrap());
+
+        // Corrupt the file and verify checksum fails
+        {
+            use std::fs::OpenOptions as StdOpenOptions;
+            use std::io::{Seek, SeekFrom, Write};
+
+            let mut file = StdOpenOptions::new().write(true).open(&path).unwrap();
+
+            // Corrupt a byte in the middle of the file
+            file.seek(SeekFrom::Start(100)).unwrap();
+            file.write_all(&[0xFF]).unwrap();
+        }
+
+        // Checksum should now fail
+        assert!(!verify_checksum(&path).await.unwrap());
     }
 
     #[monoio::test]

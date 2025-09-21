@@ -10,7 +10,7 @@
 pub mod triple_buffer;
 
 pub mod a;
-// pub mod b;  // TODO: Implement v5b
+pub mod b;
 
 /// Magic bytes for v5 format: "Zk2u" in ASCII
 pub const MAGIC: [u8; 4] = [0x5A, 0x6B, 0x32, 0x75];
@@ -85,7 +85,8 @@ impl CircuitStats {
 }
 
 // Re-export main types from submodules
-pub use a::{CircuitReaderV5a, GateV5a, HeaderV5a};
+pub use a::{CircuitReaderV5a, CircuitWriterV5a, GateV5a, HeaderV5a};
+pub use b::{CircuitReaderV5b, CircuitWriterV5b, GateV5b, HeaderV5b};
 
 /// Check if CPU supports required AVX-512 features
 #[cfg(target_arch = "x86_64")]

@@ -14,7 +14,7 @@ mod integration_tests;
 
 // Re-export main types
 pub use reader::{CircuitReaderV5a, DecodedBlock, GateV5a, HeaderV5a};
-pub use writer::{CircuitStats, CircuitWriterV5a};
+pub use writer::{CircuitStats, CircuitWriterV5a, verify_checksum};
 
 /// Block size constants for v5a
 pub const GATES_PER_BLOCK: usize = 256;
