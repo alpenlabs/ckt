@@ -416,7 +416,7 @@ fn pack_24_bits(values: &[u32], output: &mut [u8]) {
         } else {
             // Unaligned case: need to split across bytes
             // A 24-bit value with bit_shift will span at most 4 bytes
-            let shifted = (value as u32) << bit_shift;
+            let shifted = value << bit_shift;
 
             // Write the bytes, ORing with existing data
             if byte_offset < output.len() {

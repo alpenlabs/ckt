@@ -172,7 +172,7 @@ impl CircuitReaderV5a {
             let mut rt = monoio::RuntimeBuilder::<monoio::FusionDriver>::new()
                 .enable_timer()
                 .build()
-                .map_err(|e| Error::new(ErrorKind::Other, e))?;
+                .map_err(Error::other)?;
 
             rt.block_on(async move {
                 disk_reader_thread(
@@ -402,6 +402,7 @@ async fn disk_reader_thread(
 /// of 34-bit and 24-bit packed values, processing 15 gates at a time (15×34 = 510 bits ≈ 512 bits)
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f,avx512bw,avx512vbmi2")]
+#[allow(dead_code)]
 unsafe fn decode_block_avx512(data: &[u8], max_gates: u64) -> DecodedBlock {
     let valid_gates = std::cmp::min(GATES_PER_BLOCK, max_gates as usize);
     let mut gates = Vec::with_capacity(valid_gates);
@@ -411,7 +412,7 @@ unsafe fn decode_block_avx512(data: &[u8], max_gates: u64) -> DecodedBlock {
 
     // Process 15 gates at a time (15 × 34 = 510 bits fits in 512-bit register)
     let chunks_of_15 = valid_gates / 15;
-    let remainder = valid_gates % 15;
+    let _remainder = valid_gates % 15;
 
     // Process chunks of 15 gates using true SIMD bit extraction
     for chunk in 0..chunks_of_15 {
@@ -423,19 +424,21 @@ unsafe fn decode_block_avx512(data: &[u8], max_gates: u64) -> DecodedBlock {
         let mut in1_vals = [0u64; 15];
         {
             // Load 64 bytes (512 bits) containing our 15 × 34-bit values
-            let data_vec = _mm512_loadu_si512(data[base_byte..].as_ptr() as *const __m512i);
+            let data_vec =
+                unsafe { _mm512_loadu_si512(data[base_byte..].as_ptr() as *const __m512i) };
 
             // We need to handle the bit shift within the first byte
             let bit_shift = (base_bit % 8) as i32;
 
             if bit_shift == 0 {
                 // Aligned case - directly extract 34-bit values
-                extract_15x34_aligned(data_vec, &mut in1_vals);
+                unsafe { extract_15x34_aligned(data_vec, &mut in1_vals) };
             } else {
                 // Unaligned case - need to shift and extract
-                let next_vec =
-                    _mm512_loadu_si512(data[base_byte + 64..].as_ptr() as *const __m512i);
-                extract_15x34_unaligned(data_vec, next_vec, bit_shift, &mut in1_vals);
+                let next_vec = unsafe {
+                    _mm512_loadu_si512(data[base_byte + 64..].as_ptr() as *const __m512i)
+                };
+                unsafe { extract_15x34_unaligned(data_vec, next_vec, bit_shift, &mut in1_vals) };
             }
         }
 
@@ -443,15 +446,17 @@ unsafe fn decode_block_avx512(data: &[u8], max_gates: u64) -> DecodedBlock {
         let mut in2_vals = [0u64; 15];
         {
             let in2_base_byte = base_byte + 1088;
-            let data_vec = _mm512_loadu_si512(data[in2_base_byte..].as_ptr() as *const __m512i);
+            let data_vec =
+                unsafe { _mm512_loadu_si512(data[in2_base_byte..].as_ptr() as *const __m512i) };
 
             let bit_shift = (base_bit % 8) as i32;
             if bit_shift == 0 {
-                extract_15x34_aligned(data_vec, &mut in2_vals);
+                unsafe { extract_15x34_aligned(data_vec, &mut in2_vals) };
             } else {
-                let next_vec =
-                    _mm512_loadu_si512(data[in2_base_byte + 64..].as_ptr() as *const __m512i);
-                extract_15x34_unaligned(data_vec, next_vec, bit_shift, &mut in2_vals);
+                let next_vec = unsafe {
+                    _mm512_loadu_si512(data[in2_base_byte + 64..].as_ptr() as *const __m512i)
+                };
+                unsafe { extract_15x34_unaligned(data_vec, next_vec, bit_shift, &mut in2_vals) };
             }
         }
 
@@ -459,15 +464,17 @@ unsafe fn decode_block_avx512(data: &[u8], max_gates: u64) -> DecodedBlock {
         let mut out_vals = [0u64; 15];
         {
             let out_base_byte = base_byte + 2176;
-            let data_vec = _mm512_loadu_si512(data[out_base_byte..].as_ptr() as *const __m512i);
+            let data_vec =
+                unsafe { _mm512_loadu_si512(data[out_base_byte..].as_ptr() as *const __m512i) };
 
             let bit_shift = (base_bit % 8) as i32;
             if bit_shift == 0 {
-                extract_15x34_aligned(data_vec, &mut out_vals);
+                unsafe { extract_15x34_aligned(data_vec, &mut out_vals) };
             } else {
-                let next_vec =
-                    _mm512_loadu_si512(data[out_base_byte + 64..].as_ptr() as *const __m512i);
-                extract_15x34_unaligned(data_vec, next_vec, bit_shift, &mut out_vals);
+                let next_vec = unsafe {
+                    _mm512_loadu_si512(data[out_base_byte + 64..].as_ptr() as *const __m512i)
+                };
+                unsafe { extract_15x34_unaligned(data_vec, next_vec, bit_shift, &mut out_vals) };
             }
         }
 
@@ -477,15 +484,18 @@ unsafe fn decode_block_avx512(data: &[u8], max_gates: u64) -> DecodedBlock {
             let credits_base_bit = base_gate * 24;
             let credits_base_byte = credits_base_bit / 8 + 3264;
             let credits_vec =
-                _mm512_loadu_si512(data[credits_base_byte..].as_ptr() as *const __m512i);
+                unsafe { _mm512_loadu_si512(data[credits_base_byte..].as_ptr() as *const __m512i) };
 
             let bit_shift = (credits_base_bit % 8) as i32;
             if bit_shift == 0 {
-                extract_15x24_aligned(credits_vec, &mut credits_vals);
+                unsafe { extract_15x24_aligned(credits_vec, &mut credits_vals) };
             } else {
-                let next_vec =
-                    _mm512_loadu_si512(data[credits_base_byte + 64..].as_ptr() as *const __m512i);
-                extract_15x24_unaligned(credits_vec, next_vec, bit_shift, &mut credits_vals);
+                let next_vec = unsafe {
+                    _mm512_loadu_si512(data[credits_base_byte + 64..].as_ptr() as *const __m512i)
+                };
+                unsafe {
+                    extract_15x24_unaligned(credits_vec, next_vec, bit_shift, &mut credits_vals)
+                };
             }
         }
 
@@ -540,48 +550,51 @@ unsafe fn decode_block_avx512(data: &[u8], max_gates: u64) -> DecodedBlock {
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f,avx512bw,avx512vbmi2")]
 #[inline]
+#[allow(dead_code)]
 unsafe fn extract_15x34_aligned(data: __m512i, out: &mut [u64; 15]) {
-    // 15 × 34 bits = 510 bits total, fits nicely in 512 bits
-    // We'll extract 8 values in the first AVX-512 operation, then 7 in the second
+    unsafe {
+        // 15 × 34 bits = 510 bits total, fits nicely in 512 bits
+        // We'll extract 8 values in the first AVX-512 operation, then 7 in the second
 
-    // First 8 values (8 × 34 = 272 bits)
-    // Use VPEXPANDQ to expand packed bits to qwords
-    let mask_34 = _mm512_set1_epi64(0x3FFFFFFFF);
+        // First 8 values (8 × 34 = 272 bits)
+        // Use VPEXPANDQ to expand packed bits to qwords
+        let mask_34 = _mm512_set1_epi64(0x3FFFFFFFF);
 
-    // Load data as 8 qwords and extract the packed 34-bit values
-    let data_as_u64 = _mm512_loadu_si512(&data as *const __m512i);
+        // Load data as 8 qwords and extract the packed 34-bit values
+        let data_as_u64 = _mm512_loadu_si512(&data as *const __m512i);
 
-    // Create shift amounts for each lane
-    let shifts_0_7 = _mm512_setr_epi64(0, 34, 68, 102, 136, 170, 204, 238);
+        // Create shift amounts for each lane
+        let shifts_0_7 = _mm512_setr_epi64(0, 34, 68, 102, 136, 170, 204, 238);
 
-    // Use variable per-element shift to extract values
-    // Note: This requires VBMI2 for optimal performance
-    let shifted = _mm512_srlv_epi64(
-        _mm512_or_si512(
-            data_as_u64,
-            _mm512_slli_epi64(_mm512_srli_epi64(data_as_u64, 30), 64),
-        ),
-        _mm512_and_si512(shifts_0_7, _mm512_set1_epi64(63)),
-    );
+        // Use variable per-element shift to extract values
+        // Note: This requires VBMI2 for optimal performance
+        let shifted = _mm512_srlv_epi64(
+            _mm512_or_si512(
+                data_as_u64,
+                _mm512_slli_epi64(_mm512_srli_epi64(data_as_u64, 30), 64),
+            ),
+            _mm512_and_si512(shifts_0_7, _mm512_set1_epi64(63)),
+        );
 
-    let vals_0_7 = _mm512_and_si512(shifted, mask_34);
-    _mm512_storeu_si512(out.as_mut_ptr() as *mut __m512i, vals_0_7);
+        let vals_0_7 = _mm512_and_si512(shifted, mask_34);
+        _mm512_storeu_si512(out.as_mut_ptr() as *mut __m512i, vals_0_7);
 
-    // Remaining 7 values need cross-lane operations
-    // For simplicity, extract remaining values with scalar code
-    let data_bytes = &*(&data as *const __m512i as *const [u8; 64]);
-    for i in 8..15 {
-        let bit_offset = i * 34;
-        let byte_offset = bit_offset / 8;
-        let bit_shift = bit_offset % 8;
+        // Remaining 7 values need cross-lane operations
+        // For simplicity, extract remaining values with scalar code
+        let data_bytes = &*(&data as *const __m512i as *const [u8; 64]);
+        for (i, out) in out.iter_mut().enumerate().skip(8) {
+            let bit_offset = i * 34;
+            let byte_offset = bit_offset / 8;
+            let bit_shift = bit_offset % 8;
 
-        let mut value = 0u64;
-        for j in 0..5 {
-            if byte_offset + j < 64 {
-                value |= (data_bytes[byte_offset + j] as u64) << (j * 8);
+            let mut value = 0u64;
+            for j in 0..5 {
+                if byte_offset + j < 64 {
+                    value |= (data_bytes[byte_offset + j] as u64) << (j * 8);
+                }
             }
+            *out = (value >> bit_shift) & 0x3FFFFFFFF;
         }
-        out[i] = (value >> bit_shift) & 0x3FFFFFFFF;
     }
 }
 
@@ -589,42 +602,45 @@ unsafe fn extract_15x34_aligned(data: __m512i, out: &mut [u64; 15]) {
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f,avx512bw,avx512vbmi2")]
 #[inline]
+#[allow(dead_code)]
 unsafe fn extract_15x34_unaligned(
     data: __m512i,
     next: __m512i,
     bit_shift: i32,
     out: &mut [u64; 15],
 ) {
-    // Use VPSHLDVQ from AVX-512 VBMI2 for efficient unaligned extraction
-    // This instruction performs variable bit-level concatenation
+    unsafe {
+        // Use VPSHLDVQ from AVX-512 VBMI2 for efficient unaligned extraction
+        // This instruction performs variable bit-level concatenation
 
-    if is_x86_feature_detected!("avx512vbmi2") {
-        // Create shift control for VPSHLDVQ
-        let shift_amount = _mm512_set1_epi64(bit_shift as i64);
+        if is_x86_feature_detected!("avx512vbmi2") {
+            // Create shift control for VPSHLDVQ
+            let shift_amount = _mm512_set1_epi64(bit_shift as i64);
 
-        // VPSHLDVQ concatenates corresponding qwords from two sources
-        // and shifts left by the amount in the third operand
-        let aligned_data = _mm512_shldv_epi64(next, data, shift_amount);
+            // VPSHLDVQ concatenates corresponding qwords from two sources
+            // and shifts left by the amount in the third operand
+            let aligned_data = _mm512_shldv_epi64(next, data, shift_amount);
 
-        // Now we have aligned data, extract 34-bit values
-        extract_15x34_aligned(aligned_data, out);
-    } else {
-        // Fallback for systems without VBMI2
-        let combined = [data, next];
-        let data_bytes = &*(combined.as_ptr() as *const [u8; 128]);
+            // Now we have aligned data, extract 34-bit values
+            extract_15x34_aligned(aligned_data, out);
+        } else {
+            // Fallback for systems without VBMI2
+            let combined = [data, next];
+            let data_bytes = &*(combined.as_ptr() as *const [u8; 128]);
 
-        for i in 0..15 {
-            let bit_offset = i * 34 + bit_shift as usize;
-            let byte_offset = bit_offset / 8;
-            let bit_shift_local = bit_offset % 8;
+            for (i, out) in out.iter_mut().enumerate() {
+                let bit_offset = i * 34 + bit_shift as usize;
+                let byte_offset = bit_offset / 8;
+                let bit_shift_local = bit_offset % 8;
 
-            let mut value = 0u64;
-            for j in 0..5 {
-                if byte_offset + j < 128 {
-                    value |= (data_bytes[byte_offset + j] as u64) << (j * 8);
+                let mut value = 0u64;
+                for j in 0..5 {
+                    if byte_offset + j < 128 {
+                        value |= (data_bytes[byte_offset + j] as u64) << (j * 8);
+                    }
                 }
+                *out = (value >> bit_shift_local) & 0x3FFFFFFFF;
             }
-            out[i] = (value >> bit_shift_local) & 0x3FFFFFFFF;
         }
     }
 }
@@ -633,79 +649,104 @@ unsafe fn extract_15x34_unaligned(
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f,avx512bw")]
 #[inline]
+#[allow(dead_code)]
 unsafe fn extract_15x24_aligned(data: __m512i, out: &mut [u32; 15]) {
     // 15 × 24 bits = 360 bits total
-    // Process using AVX-512 dword operations for better efficiency
+    // We can extract all 15 values in parallel using AVX-512
 
-    // Load as 16 dwords (we'll use 15)
-    let data_as_u32 = _mm512_loadu_si512(&data as *const __m512i);
+    // For aligned 24-bit extraction, we need to handle the bit packing
+    // 15 × 24 = 360 bits fits in 45 bytes
+    let data_bytes = unsafe { &*(&data as *const __m512i as *const [u8; 64]) };
 
-    // Mask for 24-bit values
-    let mask_24 = _mm512_set1_epi32(0xFFFFFF);
+    // Load data as 16 dwords for parallel extraction
+    // Each 24-bit value spans across bytes, so we need careful extraction
+    let mut result = [0u32; 16];
 
-    // First 8 values can be extracted directly with shifts
-    let shifts_0_7 = _mm512_setr_epi32(
-        0, 24, 48, 72, 96, 120, 144, 168, 192, 216, 240, 264, 288, 312, 336, 0,
-    );
+    // Process first 8 values using SIMD
+    // Bits 0-191 (8 × 24 = 192 bits = 24 bytes)
+    {
+        // Load 256 bits (8 dwords) for first 8 values
+        let data_256 = unsafe { _mm256_loadu_si256(data_bytes.as_ptr() as *const __m256i) };
 
-    // For aligned 24-bit values, we can use simpler bit manipulation
-    // Extract first batch using gather-like operations
-    let data_bytes = &*(&data as *const __m512i as *const [u8; 64]);
+        // Create indices for byte shuffling to extract 24-bit values
+        // For aligned case, we can use VPSHUFB to rearrange bytes
+        let shuffle_indices = _mm256_setr_epi8(
+            0, 1, 2, -1, // value 0: bytes 0-2
+            3, 4, 5, -1, // value 1: bytes 3-5
+            6, 7, 8, -1, // value 2: bytes 6-8
+            9, 10, 11, -1, // value 3: bytes 9-11
+            12, 13, 14, -1, // value 4: bytes 12-14
+            15, 16, 17, -1, // value 5: bytes 15-17
+            18, 19, 20, -1, // value 6: bytes 18-20
+            21, 22, 23, -1, // value 7: bytes 21-23
+        );
 
-    // Process all 15 values
-    for i in 0..15 {
-        let bit_offset = i * 24;
-        let byte_offset = bit_offset / 8;
-        let bit_shift = bit_offset % 8;
+        // Shuffle bytes to align 24-bit values into dwords
+        let shuffled = _mm256_shuffle_epi8(data_256, shuffle_indices);
+
+        // Store first 8 values
+        unsafe { _mm256_storeu_si256(result.as_mut_ptr() as *mut __m256i, shuffled) };
+    }
+
+    // Process remaining 7 values with scalar code
+    // (Could also use SIMD but diminishing returns for small remainder)
+    for i in 8..15 {
+        let byte_offset = (i * 24) / 8;
+        let bit_shift = (i * 24) % 8;
 
         let mut value = 0u32;
         for j in 0..4 {
-            // Read 4 bytes to handle shift
             if byte_offset + j < 64 {
                 value |= (data_bytes[byte_offset + j] as u32) << (j * 8);
             }
         }
-        out[i] = (value >> bit_shift) & 0xFFFFFF;
+        result[i] = (value >> bit_shift) & 0xFFFFFF;
     }
+
+    // Copy results to output
+    out.copy_from_slice(&result[..15]);
 }
 
 /// Extract 15 unaligned 24-bit values using AVX-512
 #[cfg(target_arch = "x86_64")]
 #[target_feature(enable = "avx512f,avx512bw")]
 #[inline]
+#[allow(dead_code)]
 unsafe fn extract_15x24_unaligned(
     data: __m512i,
     next: __m512i,
     bit_shift: i32,
     out: &mut [u32; 15],
 ) {
-    if is_x86_feature_detected!("avx512vbmi2") {
-        // Use VPSHLDVD for 32-bit variable shifts
-        let shift_amount = _mm512_set1_epi32(bit_shift);
+    unsafe {
+        if is_x86_feature_detected!("avx512vbmi2") {
+            // Use VPSHLDVD for 32-bit variable shifts
+            let shift_amount = _mm512_set1_epi32(bit_shift);
 
-        // Concatenate and shift at dword granularity
-        let aligned_data = _mm512_shldv_epi32(next, data, shift_amount);
+            // Concatenate and shift at dword granularity
+            let aligned_data = _mm512_shldv_epi32(next, data, shift_amount);
 
-        // Extract aligned 24-bit values
-        extract_15x24_aligned(aligned_data, out);
-    } else {
-        // Fallback without VBMI2
-        let combined = [data, next];
-        let data_bytes = &*(combined.as_ptr() as *const [u8; 128]);
+            // Extract aligned 24-bit values
+            extract_15x24_aligned(aligned_data, out);
+        } else {
+            // Fallback without VBMI2
+            let combined = [data, next];
+            let data_bytes = &*(combined.as_ptr() as *const [u8; 128]);
 
-        for i in 0..15 {
-            let bit_offset = i * 24 + bit_shift as usize;
-            let byte_offset = bit_offset / 8;
-            let bit_shift_local = bit_offset % 8;
+            for (i, out) in out.iter_mut().enumerate() {
+                let bit_offset = i * 24 + bit_shift as usize;
+                let byte_offset = bit_offset / 8;
+                let bit_shift_local = bit_offset % 8;
 
-            let mut value = 0u32;
-            for j in 0..4 {
-                // Read 4 bytes to handle shift
-                if byte_offset + j < 128 {
-                    value |= (data_bytes[byte_offset + j] as u32) << (j * 8);
+                let mut value = 0u32;
+                for j in 0..4 {
+                    // Read 4 bytes to handle shift
+                    if byte_offset + j < 128 {
+                        value |= (data_bytes[byte_offset + j] as u32) << (j * 8);
+                    }
                 }
+                *out = (value >> bit_shift_local) & 0xFFFFFF;
             }
-            out[i] = (value >> bit_shift_local) & 0xFFFFFF;
         }
     }
 }
@@ -1485,7 +1526,7 @@ mod tests {
             }
         }
 
-        const ITERATIONS: usize = 1000;
+        const ITERATIONS: usize = 10000;
 
         // Benchmark scalar implementation
         let start = Instant::now();

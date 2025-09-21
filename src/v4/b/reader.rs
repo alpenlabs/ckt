@@ -83,7 +83,7 @@ impl<R: Read> CircuitReader<R> {
 
         // Read output memory addresses
         let mut outputs = Vec::with_capacity(num_outputs as usize);
-        let mut output_buffer = vec![0u8; 8]; // Temp buffer for varint reading
+        let mut output_buffer = [0u8; 8]; // Temp buffer for varint reading
 
         for _ in 0..num_outputs {
             // Read enough bytes for a varint
@@ -444,7 +444,7 @@ pub fn verify_checksum<R: std::io::Read>(mut reader: R) -> Result<[u8; 32]> {
 
     // Read output addresses (to skip them in the data stream)
     let mut output_addresses = Vec::new();
-    let mut output_buffer = vec![0u8; 8]; // Temp buffer for varint reading
+    let mut output_buffer = [0u8; 8]; // Temp buffer for varint reading
 
     for _ in 0..num_outputs {
         // Read enough bytes for a varint

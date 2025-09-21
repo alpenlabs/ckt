@@ -164,11 +164,10 @@ impl<R: Read> CircuitReader<R> {
         }
 
         // Make sure we have some data
-        if self.buffer_offset >= self.buffer_valid_len {
-            if !self.refill_buffer()? {
+        if self.buffer_offset >= self.buffer_valid_len
+            && !self.refill_buffer()? {
                 return Ok(None);
             }
-        }
 
         let mut gates = Vec::with_capacity(8);
         let gates_remaining = total_gates - self.total_gates_read;
