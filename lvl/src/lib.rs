@@ -17,7 +17,7 @@ use cynosure::hints::{cold_and_empty, likely, unlikely};
 
 #[derive(Clone)]
 pub struct Leveller {
-    primary_inputs: CompactWireId,
+    permanent_wires: CompactWireId,
     level_id: u32,
     pending_level: PendingLevel,
     state: HashMap<u32, SlottedValue>, // Changed to use u32 key with SlottedValue
@@ -86,7 +86,7 @@ fn append_if_not_exists<T: PartialEq>(set: &mut ThinVec<T>, item: T) {
 
 impl Leveller {
     fn check_in1(&mut self, gate: IntermediateGate, gate_type: GateType) -> Status {
-        if unlikely(gate.in1 < self.primary_inputs) {
+        if unlikely(gate.in1 < self.permanent_wires) {
             return Status::Available { is_primary: true };
         }
         match self.get_wire(gate.in1) {
@@ -133,7 +133,7 @@ impl Leveller {
         gate_type: GateType,
         in1_status: Status,
     ) -> Status {
-        if unlikely(gate.in2 < self.primary_inputs) {
+        if unlikely(gate.in2 < self.permanent_wires) {
             return Status::Available { is_primary: true };
         }
         match in1_status {
@@ -333,7 +333,9 @@ impl Leveller {
 
     pub fn new(primary_inputs: u64) -> Self {
         Self {
-            primary_inputs: CompactWireId::from_u64(primary_inputs),
+            permanent_wires: CompactWireId::from_u64(
+                primary_inputs + 2, /* false, true wires at the start */
+            ),
             level_id: 1,
             pending_level: PendingLevel::default(),
             state: HashMap::new(),

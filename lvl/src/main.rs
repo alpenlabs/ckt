@@ -245,7 +245,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         input.to_u64() as usize
                     } else {
                         let Entry::Occupied(mut entry) = wire_map.entry(input) else {
-                            panic!("Input not found");
+                            panic!(
+                                "Input {:?} not found, primary inputs are 0..{}",
+                                input, primary_inputs
+                            );
                         };
                         // remove the wire from "memory" aka slab allocator if it's ran out of credits
                         let value: &mut (usize, Credits) = entry.get_mut();
