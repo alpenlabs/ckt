@@ -95,6 +95,12 @@ pub struct CircuitReaderV5b {
 
     /// Total gates read
     gates_read: u64,
+
+    /// Total bytes read from disk (for tracking buffer sizes)
+    total_bytes_read: u64,
+
+    /// Total file size after headers/outputs
+    data_size: u64,
 }
 
 impl CircuitReaderV5b {
@@ -119,6 +125,10 @@ impl CircuitReaderV5b {
         // Read outputs
         let outputs = Self::read_outputs_sync(&mut std_file, header.num_outputs as usize)?;
 
+        // Get file size for buffer tracking
+        let file_metadata = std_file.metadata()?;
+        let file_size = file_metadata.len();
+
         // Calculate and verify checksum
         let checksum = Self::calculate_checksum_sync(&mut std_file, &header, &outputs)?;
         if checksum != header.checksum {
@@ -135,6 +145,7 @@ impl CircuitReaderV5b {
         let stop_flag_clone = Arc::clone(&stop_flag);
 
         let initial_offset = HEADER_SIZE as u64 + (header.num_outputs * OUTPUT_ENTRY_SIZE as u64);
+        let data_size = file_size - initial_offset;
 
         // Spawn disk reader thread
         let path_clone = path.as_ref().to_path_buf();
@@ -168,6 +179,8 @@ impl CircuitReaderV5b {
             current_level: None,
             levels_read: 0,
             gates_read: 0,
+            total_bytes_read: 0,
+            data_size,
         })
     }
 
@@ -239,7 +252,9 @@ impl CircuitReaderV5b {
         }
 
         if let Some(buffer) = new_buffer {
-            self.buffer_len = BUFFER_SIZE; // Assume full buffer for now
+            // Calculate actual buffer size based on remaining data
+            let remaining_data = self.data_size.saturating_sub(self.total_bytes_read);
+            self.buffer_len = std::cmp::min(BUFFER_SIZE, remaining_data as usize);
             self.buffer_pos = 0;
             self.current_buffer = Some(buffer);
             Ok(true)
@@ -263,6 +278,7 @@ impl CircuitReaderV5b {
 
         dst[..to_read].copy_from_slice(&buffer[self.buffer_pos..self.buffer_pos + to_read]);
         self.buffer_pos += to_read;
+        self.total_bytes_read += to_read as u64;
 
         Ok(to_read)
     }

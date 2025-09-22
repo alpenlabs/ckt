@@ -124,6 +124,12 @@ pub struct CircuitReaderV5a {
 
     /// Checksum hasher
     hasher: Hasher,
+
+    /// Total bytes read from disk (for tracking buffer sizes)
+    total_bytes_read: u64,
+
+    /// Total data size after headers/outputs
+    data_size: u64,
 }
 
 impl CircuitReaderV5a {
@@ -166,6 +172,14 @@ impl CircuitReaderV5a {
         let outputs_size = header.num_outputs * 5; // 5 bytes per output
         let header_and_outputs = 72 + outputs_size;
 
+        // Get file size for buffer tracking
+        let file_size = {
+            let mut temp_file = opts.open(&path).await?;
+            let metadata = temp_file.metadata().await?;
+            metadata.len()
+        };
+        let data_size = file_size - header_and_outputs;
+
         // Spawn disk reader thread
         let reader_thread = thread::spawn(move || {
             // Create monoio runtime for this thread
@@ -195,6 +209,8 @@ impl CircuitReaderV5a {
             outputs,
             gates_read: 0,
             hasher,
+            total_bytes_read: 0,
+            data_size,
         })
     }
 
@@ -291,6 +307,7 @@ impl CircuitReaderV5a {
         // Update position and counters
         self.buffer_pos += BLOCK_SIZE_V5A;
         self.buffer_available -= BLOCK_SIZE_V5A;
+        self.total_bytes_read += BLOCK_SIZE_V5A as u64;
         self.gates_read += block.valid_gates as u64;
 
         // Update checksum
@@ -316,7 +333,9 @@ impl CircuitReaderV5a {
             // Got a new buffer
             self.current_buffer = Some(buffer);
             self.buffer_pos = 0;
-            self.buffer_available = BUFFER_SIZE;
+            // Calculate actual buffer size based on remaining data
+            let remaining_data = self.data_size.saturating_sub(self.total_bytes_read);
+            self.buffer_available = std::cmp::min(BUFFER_SIZE, remaining_data as usize);
 
             // Check again
             if self.buffer_available >= needed {
