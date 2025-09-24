@@ -396,13 +396,6 @@ impl Default for BlockV5b {
     }
 }
 
-/// Gate type enumeration
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GateType {
-    Xor,
-    And,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

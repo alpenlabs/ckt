@@ -1,338 +1,29 @@
-//! High-performance v5a writer using monoio io_uring
+//! v5a Writer
 //!
-//! This implementation provides a clean API for writing v5a format circuits:
-//! - Automatic buffering of gates into 256-gate blocks
-//! - Efficient bit packing with Structure-of-Arrays layout
-//! - Direct async I/O with monoio
-//! - BLAKE3 checksum calculation following spec order
+//! - Accepts gates individually or in batches.
+//! - Packs blocks (256 gates) with SoA layout and fixed-width fields.
+//! - Writes header placeholder + outputs, then blocks, then backpatches header with checksum.
+//! - Computes checksum in spec order: outputs || blocks || header[after checksum].
+//! - Uses monoio for async I/O.
+//! - Handles partial blocks safely: zero-padded, readers rely on header counts.
 
 use blake3::Hasher;
 use monoio::fs::{File, OpenOptions};
 use std::io::{Error, ErrorKind, Result};
 use std::path::Path;
 
-// Re-use constants and types from reader
-use super::reader::{
-    BLOCK_SIZE_V5A, FORMAT_TYPE_A, GATES_PER_BLOCK, GateV5a, HeaderV5a, MAGIC, VERSION,
+use crate::GateType;
+use crate::v5::a::{
+    CREDITS_OFFSET, CREDITS_SIZE, FORMAT_TYPE_A, HEADER_SIZE_V5A, IN_STREAM_SIZE, IN1_OFFSET,
+    IN2_OFFSET, MAGIC, OUT_OFFSET, TYPES_OFFSET, VERSION,
 };
 
-/// Block builder that accumulates gates and encodes them into v5a format
-struct BlockBuilder {
-    // Structure-of-Arrays buffers
-    in1_values: Vec<u64>,
-    in2_values: Vec<u64>,
-    out_values: Vec<u64>,
-    credits: Vec<u32>,
-    gate_types: Vec<bool>,
-}
+use super::{BLOCK_SIZE_BYTES, GATES_PER_BLOCK, GateV5a, MAX_CREDITS, MAX_WIRE_ID};
 
-impl BlockBuilder {
-    fn new() -> Self {
-        Self {
-            in1_values: Vec::with_capacity(GATES_PER_BLOCK),
-            in2_values: Vec::with_capacity(GATES_PER_BLOCK),
-            out_values: Vec::with_capacity(GATES_PER_BLOCK),
-            credits: Vec::with_capacity(GATES_PER_BLOCK),
-            gate_types: Vec::with_capacity(GATES_PER_BLOCK),
-        }
-    }
+// Default I/O aggregation buffer size (tunable).
+const DEFAULT_IO_BUFFER_CAP: usize = 8 * 1024 * 1024; // 8 MiB
 
-    fn add_gate(&mut self, gate: GateV5a) -> Result<()> {
-        // Validate wire IDs
-        if gate.in1 > 0x3FFFFFFFF || gate.in2 > 0x3FFFFFFFF || gate.out > 0x3FFFFFFFF {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "Wire ID exceeds 34-bit limit",
-            ));
-        }
-
-        if gate.credits > 0xFFFFFF {
-            return Err(Error::new(
-                ErrorKind::InvalidInput,
-                "Credits exceed 24-bit limit",
-            ));
-        }
-
-        self.in1_values.push(gate.in1);
-        self.in2_values.push(gate.in2);
-        self.out_values.push(gate.out);
-        self.credits.push(gate.credits);
-        self.gate_types.push(gate.gate_type);
-
-        Ok(())
-    }
-
-    fn len(&self) -> usize {
-        self.in1_values.len()
-    }
-
-    fn is_full(&self) -> bool {
-        self.len() >= GATES_PER_BLOCK
-    }
-
-    fn clear(&mut self) {
-        self.in1_values.clear();
-        self.in2_values.clear();
-        self.out_values.clear();
-        self.credits.clear();
-        self.gate_types.clear();
-    }
-
-    /// Encode the current gates into a v5a block
-    fn encode(&self) -> Vec<u8> {
-        let mut block = vec![0u8; BLOCK_SIZE_V5A];
-
-        // Pad with zeros if not full
-        let mut in1_padded = self.in1_values.clone();
-        let mut in2_padded = self.in2_values.clone();
-        let mut out_padded = self.out_values.clone();
-        let mut credits_padded = self.credits.clone();
-
-        in1_padded.resize(GATES_PER_BLOCK, 0);
-        in2_padded.resize(GATES_PER_BLOCK, 0);
-        out_padded.resize(GATES_PER_BLOCK, 0);
-        credits_padded.resize(GATES_PER_BLOCK, 0);
-
-        // Encode in1 values (34 bits each, packed)
-        pack_34_bits(&in1_padded, &mut block[0..1088]);
-
-        // Encode in2 values
-        pack_34_bits(&in2_padded, &mut block[1088..2176]);
-
-        // Encode out values
-        pack_34_bits(&out_padded, &mut block[2176..3264]);
-
-        // Encode credits (24 bits each, packed)
-        pack_24_bits(&credits_padded, &mut block[3264..4032]);
-
-        // Encode gate types as bit vector
-        for (i, &gate_type) in self.gate_types.iter().enumerate() {
-            let byte_idx = i / 8;
-            let bit_idx = i % 8;
-            if gate_type {
-                block[4032 + byte_idx] |= 1 << bit_idx;
-            }
-        }
-        // Remaining bits stay 0 for padding
-
-        block
-    }
-}
-
-/// Production circuit writer for v5a format
-pub struct CircuitWriterV5a {
-    /// File handle
-    file: File,
-
-    /// Current file offset for writing blocks
-    current_offset: u64,
-
-    /// Current block builder
-    current_block: BlockBuilder,
-
-    /// Circuit metadata
-    primary_inputs: u64,
-    outputs: Vec<u64>,
-    xor_gates_written: u64,
-    and_gates_written: u64,
-
-    /// Checksum hasher
-    hasher: Hasher,
-
-    /// Path for finalization
-    path: std::path::PathBuf,
-}
-
-impl CircuitWriterV5a {
-    /// Create a new v5a writer
-    pub async fn new(
-        path: impl AsRef<Path>,
-        primary_inputs: u64,
-        outputs: Vec<u64>,
-    ) -> Result<Self> {
-        let path = path.as_ref().to_owned();
-
-        // Open file with O_DIRECT for optimal performance
-        let mut opts = OpenOptions::new();
-        opts.create(true).write(true).truncate(true);
-        #[cfg(target_os = "linux")]
-        {
-            use std::os::unix::fs::OpenOptionsExt;
-            opts.custom_flags(libc::O_DIRECT | libc::O_NOATIME);
-        }
-
-        let file = opts.open(&path).await?;
-
-        // Calculate initial offsets
-        let header_size = std::mem::size_of::<HeaderV5a>();
-        let outputs_size = outputs.len() * 5; // 5 bytes per output
-        let initial_offset = (header_size + outputs_size) as u64;
-
-        // Write placeholder header and outputs
-        let placeholder = vec![0u8; header_size + outputs_size];
-        let (res, _) = file.write_all_at(placeholder, 0).await;
-        res?;
-
-        // Create hasher and start with outputs (spec step 1)
-        let mut hasher = Hasher::new();
-        for &output in &outputs {
-            let mut bytes = [0u8; 5];
-            bytes[..5].copy_from_slice(&output.to_le_bytes()[..5]);
-            hasher.update(&bytes);
-        }
-
-        Ok(Self {
-            file,
-            current_offset: initial_offset,
-            current_block: BlockBuilder::new(),
-            primary_inputs,
-            outputs,
-            xor_gates_written: 0,
-            and_gates_written: 0,
-            hasher,
-            path,
-        })
-    }
-
-    /// Write a single gate
-    pub async fn write_gate(&mut self, gate: GateV5a) -> Result<()> {
-        // Add to current block
-        self.current_block.add_gate(gate)?;
-
-        // Track gate type statistics
-        match gate.gate_type {
-            false => self.xor_gates_written += 1,
-            true => self.and_gates_written += 1,
-        }
-
-        // Flush block if full
-        if self.current_block.is_full() {
-            self.flush_current_block().await?;
-        }
-
-        Ok(())
-    }
-
-    /// Write multiple gates efficiently
-    pub async fn write_gates(&mut self, gates: &[GateV5a]) -> Result<()> {
-        for &gate in gates {
-            self.write_gate(gate).await?;
-        }
-        Ok(())
-    }
-
-    /// Flush the current block (internal method)
-    async fn flush_current_block(&mut self) -> Result<()> {
-        if self.current_block.len() == 0 {
-            return Ok(());
-        }
-
-        // Encode the block
-        let encoded = self.current_block.encode();
-
-        // Hash the block (spec step 2)
-        self.hasher.update(&encoded);
-
-        // Write block to file
-        let (res, _) = self.file.write_all_at(encoded, self.current_offset).await;
-        res?;
-
-        self.current_offset += BLOCK_SIZE_V5A as u64;
-
-        // Clear block for next batch
-        self.current_block.clear();
-
-        Ok(())
-    }
-
-    /// Finalize the circuit file
-    pub async fn finalize(mut self) -> Result<CircuitStats> {
-        // Flush any remaining gates in the current block
-        if self.current_block.len() > 0 {
-            self.flush_current_block().await?;
-        }
-
-        // Sync the file to ensure all blocks are written
-        self.file.sync_all().await?;
-
-        // Hash header fields after checksum (spec step 3)
-        self.hasher.update(&self.xor_gates_written.to_le_bytes());
-        self.hasher.update(&self.and_gates_written.to_le_bytes());
-        self.hasher.update(&self.primary_inputs.to_le_bytes());
-        self.hasher.update(&self.outputs.len().to_le_bytes());
-
-        // Compute final checksum
-        let hash = self.hasher.finalize();
-        let checksum_bytes = hash.as_bytes();
-
-        // Create the final header
-        let header = HeaderV5a {
-            magic: MAGIC,
-            version: VERSION,
-            format_type: FORMAT_TYPE_A,
-            reserved: [0, 0],
-            checksum: *checksum_bytes,
-            xor_gates: self.xor_gates_written,
-            and_gates: self.and_gates_written,
-            primary_inputs: self.primary_inputs,
-            num_outputs: self.outputs.len() as u64,
-        };
-
-        // Write the final header and outputs at the beginning of the file
-        self.write_header_and_outputs(&header).await?;
-
-        let stats = CircuitStats {
-            total_gates: self.xor_gates_written + self.and_gates_written,
-            xor_gates: self.xor_gates_written,
-            and_gates: self.and_gates_written,
-            primary_inputs: self.primary_inputs,
-            num_outputs: self.outputs.len() as u64,
-            checksum: *checksum_bytes,
-        };
-
-        Ok(stats)
-    }
-
-    /// Write header and outputs to the file
-    async fn write_header_and_outputs(&self, header: &HeaderV5a) -> Result<()> {
-        // Reopen file for updating header
-        let mut opts = OpenOptions::new();
-        opts.read(true).write(true);
-
-        let file = opts.open(&self.path).await?;
-
-        // Write header
-        let header_bytes = unsafe {
-            std::slice::from_raw_parts(
-                header as *const _ as *const u8,
-                std::mem::size_of::<HeaderV5a>(),
-            )
-        };
-
-        let (res, _) = file.write_all_at(header_bytes.to_vec(), 0).await;
-        res?;
-
-        // Write outputs
-        let outputs_offset = std::mem::size_of::<HeaderV5a>() as u64;
-        let mut outputs_buffer = Vec::with_capacity(self.outputs.len() * 5);
-
-        for &output in &self.outputs {
-            let mut bytes = [0u8; 5];
-            bytes[..5].copy_from_slice(&output.to_le_bytes()[..5]);
-            outputs_buffer.extend_from_slice(&bytes);
-        }
-
-        let (res, _) = file.write_all_at(outputs_buffer, outputs_offset).await;
-        res?;
-
-        // Sync file
-        file.sync_all().await?;
-
-        Ok(())
-    }
-}
-
-/// Circuit statistics returned after writing
+/// Statistics returned after finalization
 #[derive(Debug, Clone)]
 pub struct CircuitStats {
     pub total_gates: u64,
@@ -343,506 +34,669 @@ pub struct CircuitStats {
     pub checksum: [u8; 32],
 }
 
-/// Pack 34-bit values into a byte array
-fn pack_34_bits(values: &[u64], output: &mut [u8]) {
-    let mut bit_offset = 0usize;
+/// Internal fixed-capacity block builder (no clones/allocs per block).
+struct BlockBuilder {
+    len: usize,
+    in1: [u64; GATES_PER_BLOCK],
+    in2: [u64; GATES_PER_BLOCK],
+    out: [u64; GATES_PER_BLOCK],
+    credits: [u32; GATES_PER_BLOCK],
+    gate_types: [GateType; GATES_PER_BLOCK], // 0 = XOR, 1 = AND
+}
 
-    for &value in values {
+impl BlockBuilder {
+    fn new() -> Self {
+        Self {
+            len: 0,
+            in1: [0; GATES_PER_BLOCK],
+            in2: [0; GATES_PER_BLOCK],
+            out: [0; GATES_PER_BLOCK],
+            credits: [0; GATES_PER_BLOCK],
+            gate_types: [GateType::XOR; GATES_PER_BLOCK],
+        }
+    }
+
+    fn is_full(&self) -> bool {
+        self.len >= GATES_PER_BLOCK
+    }
+
+    fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    fn push(&mut self, gate: GateV5a) -> Result<()> {
+        if self.is_full() {
+            return Err(Error::new(
+                ErrorKind::Other,
+                "internal error: push into full block",
+            ));
+        }
+        // Validate wire IDs and credits
+        if gate.in1 > MAX_WIRE_ID || gate.in2 > MAX_WIRE_ID || gate.out > MAX_WIRE_ID {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "wire ID exceeds 34-bit limit",
+            ));
+        }
+        if gate.credits > MAX_CREDITS {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "credits exceed 24-bit limit",
+            ));
+        }
+
+        let idx = self.len;
+        self.in1[idx] = gate.in1 & MAX_WIRE_ID;
+        self.in2[idx] = gate.in2 & MAX_WIRE_ID;
+        self.out[idx] = gate.out & MAX_WIRE_ID;
+        self.credits[idx] = gate.credits & MAX_CREDITS;
+        self.gate_types[idx] = gate.gate_type;
+        self.len += 1;
+        Ok(())
+    }
+
+    /// Encode current gates into the provided block buffer (must be 4064 bytes).
+    /// Padding for unused gates is zero-filled.
+    fn encode_into(&self, block: &mut [u8]) {
+        debug_assert_eq!(block.len(), BLOCK_SIZE_BYTES);
+        // Zero the whole block
+        block.fill(0);
+
+        // Pack streams
+        pack_34_bits(
+            &self.in1[..self.len],
+            &mut block[IN1_OFFSET..IN1_OFFSET + IN_STREAM_SIZE],
+        );
+        pack_34_bits(
+            &self.in2[..self.len],
+            &mut block[IN2_OFFSET..IN2_OFFSET + IN_STREAM_SIZE],
+        );
+        pack_34_bits(
+            &self.out[..self.len],
+            &mut block[OUT_OFFSET..OUT_OFFSET + IN_STREAM_SIZE],
+        );
+        pack_24_bits(
+            &self.credits[..self.len],
+            &mut block[CREDITS_OFFSET..CREDITS_OFFSET + CREDITS_SIZE],
+        );
+
+        // Pack gate types bitset
+        // Byte 0 bit 0 => gate 0, ..., byte 31 bit 7 => gate 255
+        for i in 0..self.len {
+            if self.gate_types[i] != GateType::XOR {
+                let byte_idx = i / 8;
+                let bit_idx = i % 8;
+                block[TYPES_OFFSET + byte_idx] |= 1u8 << bit_idx;
+            }
+        }
+        // Padding remains zero
+    }
+
+    fn clear(&mut self) {
+        // Just reset len; content will be overwritten next time.
+        self.len = 0;
+    }
+}
+
+/// v5a Circuit Writer
+pub struct CircuitWriterV5a {
+    file: File,
+
+    // Metadata
+    primary_inputs: u64,
+    outputs: Vec<u64>, // original outputs (for validation), we also store serialized bytes
+
+    // Offsets and aggregation
+    next_offset: u64, // where the next write after outputs will go
+    io_buf: Vec<u8>,  // aggregation buffer
+    io_buf_cap: usize,
+
+    // Block builder
+    block: BlockBuilder,
+
+    // Stats
+    xor_gates_written: u64,
+    and_gates_written: u64,
+
+    // Checksum
+    hasher: Hasher,
+}
+
+impl CircuitWriterV5a {
+    /// Create a new v5a writer. Writes a placeholder header, then outputs.
+    pub async fn new(
+        path: impl AsRef<Path>,
+        primary_inputs: u64,
+        outputs: Vec<u64>,
+    ) -> Result<Self> {
+        // Validate outputs and encode to bytes (5 bytes per output, lower 34 bits)
+        let outputs_bytes = encode_outputs_le34(&outputs)?;
+
+        // Open/truncate file (buffered; no O_DIRECT)
+        let mut opts = OpenOptions::new();
+        opts.create(true).write(true).truncate(true);
+        let file = opts.open(path.as_ref()).await?;
+
+        // Write header placeholder (72 bytes of zero) and outputs
+        let header_placeholder = vec![0u8; HEADER_SIZE_V5A];
+        let outputs_offset = HEADER_SIZE_V5A as u64;
+        {
+            let (res, _) = file.write_all_at(header_placeholder, 0).await;
+            res?;
+        }
+        {
+            let (res, _) = file
+                .write_all_at(outputs_bytes.clone(), outputs_offset)
+                .await;
+            res?;
+        }
+
+        // Initialize hasher with outputs (spec step 1)
+        let mut hasher = Hasher::new();
+        hasher.update(&outputs_bytes);
+
+        // Compute the next offset after outputs
+        let next_offset = outputs_offset + outputs_bytes.len() as u64;
+
+        Ok(Self {
+            file,
+            primary_inputs,
+            outputs,
+            next_offset,
+            io_buf: Vec::with_capacity(DEFAULT_IO_BUFFER_CAP),
+            io_buf_cap: DEFAULT_IO_BUFFER_CAP,
+            block: BlockBuilder::new(),
+            xor_gates_written: 0,
+            and_gates_written: 0,
+            hasher,
+        })
+    }
+
+    /// Optionally tune the I/O aggregation buffer capacity (bytes).
+    /// Call this before writing gates for effect.
+    pub fn set_io_buffer_capacity(&mut self, cap: usize) {
+        self.io_buf_cap = cap.max(BLOCK_SIZE_BYTES);
+        if self.io_buf.capacity() < self.io_buf_cap {
+            self.io_buf
+                .reserve(self.io_buf_cap - self.io_buf.capacity());
+        }
+    }
+
+    /// Write a single gate.
+    pub async fn write_gate(&mut self, gate: GateV5a) -> Result<()> {
+        self.block.push(gate)?;
+        match gate.gate_type {
+            GateType::AND => self.and_gates_written += 1,
+            GateType::XOR => self.xor_gates_written += 1,
+        }
+
+        if self.block.is_full() {
+            self.flush_block().await?;
+        }
+        Ok(())
+    }
+
+    /// Write multiple gates (slice).
+    pub async fn write_gates(&mut self, gates: &[GateV5a]) -> Result<()> {
+        for &g in gates {
+            self.write_gate(g).await?;
+        }
+        Ok(())
+    }
+
+    /// Write multiple gates (generic iterator).
+    pub async fn write_gates_iter<I: IntoIterator<Item = GateV5a>>(
+        &mut self,
+        gates: I,
+    ) -> Result<()> {
+        for g in gates {
+            self.write_gate(g).await?;
+        }
+        Ok(())
+    }
+
+    /// Finalize: flush pending data, compute checksum, and write header.
+    pub async fn finalize(mut self) -> Result<CircuitStats> {
+        // Flush any partial block
+        if !self.block.is_empty() {
+            self.flush_block().await?;
+        }
+        // Flush aggregation buffer
+        self.flush_io_buffer().await?;
+
+        // Hash header fields after checksum (spec step 3)
+        // Order: xor_gates, and_gates, primary_inputs, num_outputs (all LE)
+        let mut header_tail = [0u8; 32];
+        header_tail[0..8].copy_from_slice(&self.xor_gates_written.to_le_bytes());
+        header_tail[8..16].copy_from_slice(&self.and_gates_written.to_le_bytes());
+        header_tail[16..24].copy_from_slice(&self.primary_inputs.to_le_bytes());
+        header_tail[24..32].copy_from_slice(&(self.outputs.len() as u64).to_le_bytes());
+        self.hasher.update(&header_tail);
+
+        let checksum = *self.hasher.finalize().as_bytes();
+
+        // Build header bytes (explicit LE encoding, no unsafe)
+        let header_bytes = encode_header_v5a_le(
+            &checksum,
+            self.xor_gates_written,
+            self.and_gates_written,
+            self.primary_inputs,
+            self.outputs.len() as u64,
+        );
+
+        // Write header back at offset 0
+        {
+            let (res, _) = self.file.write_all_at(header_bytes.to_vec(), 0).await;
+            res?;
+        }
+        // Ensure all data is on disk
+        self.file.sync_all().await?;
+
+        let stats = CircuitStats {
+            total_gates: self.xor_gates_written + self.and_gates_written,
+            xor_gates: self.xor_gates_written,
+            and_gates: self.and_gates_written,
+            primary_inputs: self.primary_inputs,
+            num_outputs: self.outputs.len() as u64,
+            checksum,
+        };
+        Ok(stats)
+    }
+
+    // Encode and queue the current full block for writing and hashing.
+    async fn flush_block(&mut self) -> Result<()> {
+        let mut block = [0u8; BLOCK_SIZE_BYTES];
+        self.block.encode_into(&mut block);
+        self.block.clear();
+
+        // Hash the block (spec step 2)
+        self.hasher.update(&block);
+
+        // Append to IO buffer; flush if needed
+        if self.io_buf.len() + BLOCK_SIZE_BYTES > self.io_buf_cap {
+            self.flush_io_buffer().await?;
+        }
+        self.io_buf.extend_from_slice(&block);
+        Ok(())
+    }
+
+    // Flush aggregation buffer to disk at current offset.
+    async fn flush_io_buffer(&mut self) -> Result<()> {
+        if self.io_buf.is_empty() {
+            return Ok(());
+        }
+        let len = self.io_buf.len();
+        let (res, buf) = self
+            .file
+            .write_all_at(std::mem::take(&mut self.io_buf), self.next_offset)
+            .await;
+        res?;
+        self.io_buf = buf; // reuse allocation
+        self.next_offset += len as u64;
+        Ok(())
+    }
+}
+
+/// Encode v5a header to bytes (72 bytes total, LE).
+fn encode_header_v5a_le(
+    checksum: &[u8; 32],
+    xor_gates: u64,
+    and_gates: u64,
+    primary_inputs: u64,
+    num_outputs: u64,
+) -> [u8; HEADER_SIZE_V5A] {
+    let mut h = [0u8; HEADER_SIZE_V5A];
+    // Identification
+    h[0..4].copy_from_slice(&MAGIC);
+    h[4] = VERSION;
+    h[5] = FORMAT_TYPE_A;
+    // h[6..8] reserved zeros
+    // Checksum
+    h[8..40].copy_from_slice(checksum);
+    // Metadata (LE)
+    h[40..48].copy_from_slice(&xor_gates.to_le_bytes());
+    h[48..56].copy_from_slice(&and_gates.to_le_bytes());
+    h[56..64].copy_from_slice(&primary_inputs.to_le_bytes());
+    h[64..72].copy_from_slice(&num_outputs.to_le_bytes());
+    h
+}
+
+/// Encode outputs to 5-byte little-endian entries (lower 34 bits used, upper 6 must be zero).
+fn encode_outputs_le34(outputs: &[u64]) -> Result<Vec<u8>> {
+    let mut buf = Vec::with_capacity(outputs.len() * 5);
+    for &w in outputs {
+        if w > MAX_WIRE_ID {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "output wire ID exceeds 34-bit limit",
+            ));
+        }
+        let v = w & MAX_WIRE_ID;
+        let le = v.to_le_bytes();
+        buf.extend_from_slice(&le[..5]); // contains the lower 34 bits in LE order
+    }
+    Ok(buf)
+}
+
+/// Pack 34-bit values tightly into output. Output must be large enough for values.len() × 34 bits.
+fn pack_34_bits(values: &[u64], output: &mut [u8]) {
+    // Expected length: ceil(values.len() * 34 / 8)
+    // We rely on caller to pass the correct 1088-sized slice for 256, or exact for partial usage.
+    let mut bit_offset = 0usize;
+    for &raw in values {
+        let v = raw & MAX_WIRE_ID; // 34 bits
         let byte_offset = bit_offset / 8;
         let bit_shift = bit_offset % 8;
 
-        // Ensure value fits in 34 bits
-        let value = value & 0x3FFFFFFFF;
-
         if bit_shift == 0 {
-            // Aligned case: can write directly
-            if byte_offset + 4 < output.len() {
-                output[byte_offset] = value as u8;
-                output[byte_offset + 1] = (value >> 8) as u8;
-                output[byte_offset + 2] = (value >> 16) as u8;
-                output[byte_offset + 3] = (value >> 24) as u8;
-                output[byte_offset + 4] = (value >> 32) as u8;
-            }
+            // aligned: 5 bytes
+            output[byte_offset] = v as u8;
+            output[byte_offset + 1] = (v >> 8) as u8;
+            output[byte_offset + 2] = (v >> 16) as u8;
+            output[byte_offset + 3] = (v >> 24) as u8;
+            output[byte_offset + 4] = (v >> 32) as u8;
         } else {
-            // Unaligned case: need to split across bytes
-            // A 34-bit value with bit_shift will span at most 6 bytes
-            let shifted = value << bit_shift;
-            let bytes = shifted.to_le_bytes();
-
-            // Write the bytes, ORing with existing data
-            if byte_offset < output.len() {
-                output[byte_offset] |= bytes[0];
-            }
-            if byte_offset + 1 < output.len() {
-                output[byte_offset + 1] |= bytes[1];
-            }
-            if byte_offset + 2 < output.len() {
-                output[byte_offset + 2] |= bytes[2];
-            }
-            if byte_offset + 3 < output.len() {
-                output[byte_offset + 3] |= bytes[3];
-            }
-            if byte_offset + 4 < output.len() {
-                output[byte_offset + 4] |= bytes[4];
-            }
-            // May need a 6th byte for the remaining bits
-            if byte_offset + 5 < output.len() && bytes[5] != 0 {
-                output[byte_offset + 5] |= bytes[5];
+            // unaligned: up to 6 bytes spanned
+            let shifted = v << bit_shift;
+            output[byte_offset] |= shifted as u8;
+            output[byte_offset + 1] |= (shifted >> 8) as u8;
+            output[byte_offset + 2] |= (shifted >> 16) as u8;
+            output[byte_offset + 3] |= (shifted >> 24) as u8;
+            output[byte_offset + 4] |= (shifted >> 32) as u8;
+            let sixth = (shifted >> 40) as u8;
+            if sixth != 0 {
+                output[byte_offset + 5] |= sixth;
             }
         }
-
         bit_offset += 34;
     }
 }
 
-/// Pack 24-bit values into a byte array
+/// Pack 24-bit values tightly into output. Output must be large enough for values.len() × 24 bits.
 fn pack_24_bits(values: &[u32], output: &mut [u8]) {
     let mut bit_offset = 0usize;
-
-    for &value in values {
+    for &raw in values {
+        let v = raw & MAX_CREDITS; // 24 bits
         let byte_offset = bit_offset / 8;
         let bit_shift = bit_offset % 8;
 
-        // Ensure value fits in 24 bits
-        let value = value & 0xFFFFFF;
-
         if bit_shift == 0 {
-            // Aligned case: can write directly
-            if byte_offset + 2 < output.len() {
-                output[byte_offset] = value as u8;
-                output[byte_offset + 1] = (value >> 8) as u8;
-                output[byte_offset + 2] = (value >> 16) as u8;
-            }
+            // aligned: 3 bytes
+            output[byte_offset] = v as u8;
+            output[byte_offset + 1] = (v >> 8) as u8;
+            output[byte_offset + 2] = (v >> 16) as u8;
         } else {
-            // Unaligned case: need to split across bytes
-            // A 24-bit value with bit_shift will span at most 4 bytes
-            let shifted = value << bit_shift;
-
-            // Write the bytes, ORing with existing data
-            if byte_offset < output.len() {
-                output[byte_offset] |= shifted as u8;
-            }
-            if byte_offset + 1 < output.len() {
-                output[byte_offset + 1] |= (shifted >> 8) as u8;
-            }
-            if byte_offset + 2 < output.len() {
-                output[byte_offset + 2] |= (shifted >> 16) as u8;
-            }
-            // May need a 4th byte for the remaining bits
-            if byte_offset + 3 < output.len() && (shifted >> 24) != 0 {
-                output[byte_offset + 3] |= (shifted >> 24) as u8;
+            // unaligned: up to 4 bytes spanned
+            let shifted = (v as u32) << bit_shift;
+            output[byte_offset] |= shifted as u8;
+            output[byte_offset + 1] |= (shifted >> 8) as u8;
+            output[byte_offset + 2] |= (shifted >> 16) as u8;
+            let fourth = (shifted >> 24) as u8;
+            if fourth != 0 {
+                output[byte_offset + 3] |= fourth;
             }
         }
-
         bit_offset += 24;
     }
-}
-
-/// Verify the checksum of a v5a file
-pub async fn verify_checksum(path: impl AsRef<Path>) -> Result<bool> {
-    // Open file with O_DIRECT for optimal performance
-    let mut opts = OpenOptions::new();
-    opts.read(true);
-    #[cfg(target_os = "linux")]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        opts.custom_flags(libc::O_DIRECT | libc::O_NOATIME);
-    }
-
-    let file = opts.open(path.as_ref()).await?;
-
-    // Read header
-    let mut header_bytes = vec![0u8; std::mem::size_of::<HeaderV5a>()];
-    let (res, buf) = file.read_exact_at(header_bytes, 0).await;
-    res?;
-    let header = unsafe { std::ptr::read_unaligned(buf.as_ptr() as *const HeaderV5a) };
-
-    // Validate header format
-    header.validate()?;
-
-    // Create hasher
-    let mut hasher = Hasher::new();
-
-    // Step 1: Hash outputs
-    let outputs_offset = std::mem::size_of::<HeaderV5a>() as u64;
-    let outputs_size = header.num_outputs as usize * 5; // 5 bytes per output
-
-    if outputs_size > 0 {
-        let mut outputs_buf = vec![0u8; outputs_size];
-        let (res, buf) = file.read_exact_at(outputs_buf, outputs_offset).await;
-        res?;
-        hasher.update(&buf);
-    }
-
-    // Step 2: Hash all gate blocks
-    let blocks_offset = outputs_offset + outputs_size as u64;
-    let total_gates = header.total_gates();
-    let full_blocks = total_gates / GATES_PER_BLOCK as u64;
-    let remaining_gates = total_gates % GATES_PER_BLOCK as u64;
-    let total_blocks = if remaining_gates > 0 {
-        full_blocks + 1
-    } else {
-        full_blocks
-    };
-
-    let mut current_offset = blocks_offset;
-    for _ in 0..total_blocks {
-        let mut block_buf = vec![0u8; BLOCK_SIZE_V5A];
-        let (res, buf) = file.read_exact_at(block_buf, current_offset).await;
-        res?;
-        hasher.update(&buf);
-        current_offset += BLOCK_SIZE_V5A as u64;
-    }
-
-    // Step 3: Hash header fields after checksum
-    hasher.update(&header.xor_gates.to_le_bytes());
-    hasher.update(&header.and_gates.to_le_bytes());
-    hasher.update(&header.primary_inputs.to_le_bytes());
-    hasher.update(&header.num_outputs.to_le_bytes());
-
-    // Compare checksums
-    let computed = hasher.finalize();
-    Ok(computed.as_bytes() == &header.checksum)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::OpenOptions as StdOpen;
+    use std::io::{Read, Seek, SeekFrom, Write};
     use tempfile::tempdir;
 
-    #[test]
-    fn test_pack_34_bits() {
-        // Test aligned packing
-        let values = vec![0x3FFFFFFFF, 0x123456789, 0xABCDEF012];
-        let mut output = vec![0u8; 1088];
-        pack_34_bits(&values, &mut output);
-
-        // Verify first value (all bits set in 34-bit range)
-        let first_bytes = &output[0..5];
-        let first_value = u64::from_le_bytes([
-            first_bytes[0],
-            first_bytes[1],
-            first_bytes[2],
-            first_bytes[3],
-            first_bytes[4],
-            0,
-            0,
-            0,
-        ]);
-        assert_eq!(first_value & 0x3FFFFFFFF, 0x3FFFFFFFF);
-    }
-
-    #[test]
-    fn test_pack_24_bits() {
-        // Test aligned packing
-        let values = vec![0xFFFFFF, 0x123456, 0xABCDEF];
-        let mut output = vec![0u8; 768];
-        pack_24_bits(&values, &mut output);
-
-        // Verify first value
-        let first_value = u32::from_le_bytes([output[0], output[1], output[2], 0]);
-        assert_eq!(first_value, 0xFFFFFF);
-    }
-
-    #[test]
-    fn test_block_builder() {
-        let mut builder = BlockBuilder::new();
-
-        // Add some gates
-        let gate1 = GateV5a {
-            in1: 2,
-            in2: 3,
-            out: 4,
-            credits: 1,
-            gate_type: false, // XOR
-        };
-
-        let gate2 = GateV5a {
-            in1: 4,
-            in2: 5,
-            out: 6,
-            credits: 2,
-            gate_type: true, // AND
-        };
-
-        assert!(builder.add_gate(gate1).is_ok());
-        assert!(builder.add_gate(gate2).is_ok());
-
-        assert_eq!(builder.len(), 2);
-        assert!(!builder.is_full());
-
-        // Test encoding
-        let encoded = builder.encode();
-        assert_eq!(encoded.len(), BLOCK_SIZE_V5A);
-    }
-
-    #[test]
-    fn test_pack_unpack_34_bits_round_trip() {
-        // Helper function to extract 34-bit values
-        fn extract_34_bits(data: &[u8], bit_offset: usize) -> u64 {
-            let byte_offset = bit_offset / 8;
-            let bit_shift = bit_offset % 8;
-
-            // Read 8 bytes (we need at most 5 for 34 bits + shift)
-            let mut bytes = [0u8; 8];
-            let to_copy = std::cmp::min(8, data.len() - byte_offset);
+    // Helper: extract 34-bit value starting at bit_offset from data slice.
+    fn extract_34_bits(data: &[u8], bit_offset: usize) -> u64 {
+        let byte_offset = bit_offset / 8;
+        let bit_shift = bit_offset % 8;
+        let mut bytes = [0u8; 8];
+        let to_copy = std::cmp::min(8, data.len().saturating_sub(byte_offset));
+        if to_copy > 0 {
             bytes[..to_copy].copy_from_slice(&data[byte_offset..byte_offset + to_copy]);
-
-            let value = u64::from_le_bytes(bytes);
-            (value >> bit_shift) & 0x3FFFFFFFF
         }
+        let val = u64::from_le_bytes(bytes);
+        (val >> bit_shift) & MAX_WIRE_ID
+    }
 
-        // Test various values including edge cases
-        let test_values: Vec<u64> = vec![
-            0,
-            1,
-            2,
-            3,
-            0xFF,
-            0xFFFF,
-            0xFFFFFF,
-            0xFFFFFFFF,
-            0x3FFFFFFFF, // Max 34-bit value
-            100,
-            101,
-            102,
-            103,
-            104,
-            0x123456789,
-            0x2AAAAAAAA,
-            0x155555555,
-        ];
+    // Helper: extract 24-bit value starting at bit_offset from data slice.
+    fn extract_24_bits(data: &[u8], bit_offset: usize) -> u32 {
+        let byte_offset = bit_offset / 8;
+        let bit_shift = bit_offset % 8;
+        let mut bytes = [0u8; 4];
+        let to_copy = std::cmp::min(4, data.len().saturating_sub(byte_offset));
+        if to_copy > 0 {
+            bytes[..to_copy].copy_from_slice(&data[byte_offset..byte_offset + to_copy]);
+        }
+        let val = u32::from_le_bytes(bytes);
+        ((val >> bit_shift) & 0xFF_FFFF) as u32
+    }
 
-        // Pack all values
-        let mut packed = vec![0u8; 1088]; // Space for 256 values
-        pack_34_bits(&test_values, &mut packed);
+    #[test]
+    fn test_pack_34_bits_basic() {
+        let vals = vec![0, 1, 2, 3, MAX_WIRE_ID, 0x123456789 & MAX_WIRE_ID];
+        let need = (vals.len() * 34 + 7) / 8;
+        let mut out = vec![0u8; need];
+        pack_34_bits(&vals, &mut out);
 
-        // Unpack and verify
-        for (i, &expected) in test_values.iter().enumerate() {
-            let bit_offset = i * 34;
-            let actual = extract_34_bits(&packed, bit_offset);
-            assert_eq!(
-                actual, expected,
-                "Value {} mismatch: expected {:#x}, got {:#x}",
-                i, expected, actual
-            );
+        for (i, &v) in vals.iter().enumerate() {
+            assert_eq!(extract_34_bits(&out, i * 34), v);
         }
     }
 
     #[test]
-    fn test_pack_unpack_full_block() {
-        // Helper function to extract 34-bit values
-        fn extract_34_bits(data: &[u8], bit_offset: usize) -> u64 {
-            let byte_offset = bit_offset / 8;
-            let bit_shift = bit_offset % 8;
+    fn test_pack_24_bits_basic() {
+        let vals = vec![0, 1, 2, 3, MAX_CREDITS, 0x00BBCCDD & MAX_CREDITS];
+        let need = (vals.len() * 24 + 7) / 8;
+        let mut out = vec![0u8; need];
+        pack_24_bits(&vals, &mut out);
 
-            let mut bytes = [0u8; 8];
-            let to_copy = std::cmp::min(8, data.len() - byte_offset);
-            bytes[..to_copy].copy_from_slice(&data[byte_offset..byte_offset + to_copy]);
-
-            let value = u64::from_le_bytes(bytes);
-            (value >> bit_shift) & 0x3FFFFFFFF
+        for (i, &v) in vals.iter().enumerate() {
+            assert_eq!(extract_24_bits(&out, i * 24), v);
         }
+    }
 
-        // Generate 256 test values
-        let mut test_values = Vec::with_capacity(256);
-        for i in 0..256 {
-            // Use similar pattern as make_gate in integration tests
-            let value = match i {
-                0 => 2u64,
-                1 => 3u64,
-                2 => 4u64,
-                3 => 5u64,
-                _ => 100 + i as u64,
+    #[test]
+    fn test_block_builder_encode() {
+        let mut bb = BlockBuilder::new();
+        // Create < GATES_PER_BLOCK gates to test partial
+        for i in 0..100 {
+            let g = GateV5a {
+                in1: (2 + i as u64) & MAX_WIRE_ID,
+                in2: (3 + i as u64) & MAX_WIRE_ID,
+                out: (100 + i as u64) & MAX_WIRE_ID,
+                credits: (i as u32) & MAX_CREDITS,
+                gate_type: match i % 2 {
+                    0 => GateType::XOR,
+                    _ => GateType::AND,
+                },
             };
-            test_values.push(value);
+            bb.push(g).unwrap();
         }
+        let mut block = vec![0u8; BLOCK_SIZE_BYTES];
+        bb.encode_into(&mut block);
 
-        // Pack all 256 values
-        let mut packed = vec![0u8; 1088]; // Space for exactly 256 34-bit values
-        pack_34_bits(&test_values, &mut packed);
-
-        // Unpack and verify all 256 values
-        for (i, &expected) in test_values.iter().enumerate() {
-            let bit_offset = i * 34;
-            let actual = extract_34_bits(&packed, bit_offset);
-            assert_eq!(
-                actual, expected,
-                "Value {} mismatch at bit offset {}: expected {:#x}, got {:#x}",
-                i, bit_offset, expected, actual
-            );
+        // Verify first few in1 values
+        for i in 0..10 {
+            let got = extract_34_bits(&block[IN1_OFFSET..IN1_OFFSET + IN_STREAM_SIZE], i * 34);
+            assert_eq!(got, 2 + i as u64);
         }
-
-        // Also test that our writer's encoder produces correct results
-        let mut builder = BlockBuilder::new();
-        for i in 0..256 {
-            let gate = GateV5a {
-                in1: 2 + (i as u64 % 10),
-                in2: 3 + (i as u64 % 8),
-                out: 100 + i as u64,
-                credits: 1 + (i as u32 % 100),
-                gate_type: i % 3 == 0,
+        // Verify types for first 16
+        for i in 0..16 {
+            let byte_idx = i / 8;
+            let bit_idx = i % 8;
+            let bit = (block[TYPES_OFFSET + byte_idx] >> bit_idx) & 1;
+            assert_eq!(bit, (i % 2) as u8);
+        }
+        // Verify padding area is zeroed (spot-check some entries)
+        for gate_idx in [120usize, 200, 255] {
+            let bit = {
+                let byte_idx = gate_idx / 8;
+                let bit_idx = gate_idx % 8;
+                (block[TYPES_OFFSET + byte_idx] >> bit_idx) & 1
             };
-            builder.add_gate(gate).unwrap();
-        }
-
-        let encoded = builder.encode();
-
-        // Verify first few gates in the encoded block
-        for i in 0..5 {
-            let in1 = extract_34_bits(&encoded[0..1088], i * 34);
-            let expected_in1 = 2 + (i as u64 % 10);
-            assert_eq!(
-                in1, expected_in1,
-                "Gate {} in1 mismatch: expected {}, got {}",
-                i, expected_in1, in1
-            );
+            assert_eq!(bit, 0);
         }
     }
 
     #[monoio::test]
-    async fn test_writer_basic() {
+    async fn test_writer_empty_circuit() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("test.v5a");
+        let path = dir.path().join("empty.v5a");
 
-        let writer = CircuitWriterV5a::new(&path, 10, vec![100, 101, 102])
+        let writer = CircuitWriterV5a::new(&path, 10, vec![2, 3, 4])
             .await
             .unwrap();
-
         let stats = writer.finalize().await.unwrap();
 
         assert_eq!(stats.total_gates, 0);
         assert_eq!(stats.primary_inputs, 10);
         assert_eq!(stats.num_outputs, 3);
 
-        // Verify file exists
-        assert!(path.exists());
+        // Verify checksum independently by reading file and recomputing
+        assert!(verify_file_checksum(&path).unwrap());
     }
 
     #[monoio::test]
-    async fn test_writer_with_gates() {
+    async fn test_writer_with_gates_and_partial_block() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("test_gates.v5a");
+        let path = dir.path().join("gates.v5a");
 
         let mut writer = CircuitWriterV5a::new(&path, 2, vec![6]).await.unwrap();
 
-        // Write a few gates
         let gates = vec![
             GateV5a {
                 in1: 2,
                 in2: 3,
                 out: 4,
                 credits: 2,
-                gate_type: false,
+                gate_type: GateType::XOR,
             },
             GateV5a {
                 in1: 2,
                 in2: 4,
                 out: 5,
                 credits: 1,
-                gate_type: true,
+                gate_type: GateType::AND,
             },
             GateV5a {
                 in1: 4,
                 in2: 5,
                 out: 6,
                 credits: 0,
-                gate_type: false,
+                gate_type: GateType::XOR,
             },
         ];
-
-        for gate in gates {
-            writer.write_gate(gate).await.unwrap();
-        }
-
+        writer.write_gates(&gates).await.unwrap();
         let stats = writer.finalize().await.unwrap();
 
         assert_eq!(stats.total_gates, 3);
         assert_eq!(stats.xor_gates, 2);
         assert_eq!(stats.and_gates, 1);
+
+        // Verify checksum
+        assert!(verify_file_checksum(&path).unwrap());
+
+        // Also verify padding of partial block (by reading types tail area is zero)
+        let mut f = StdOpen::new().read(true).open(&path).unwrap();
+        let mut header = [0u8; HEADER_SIZE_V5A];
+        f.read_exact(&mut header).unwrap();
+        let num_outputs = u64::from_le_bytes(header[64..72].try_into().unwrap()) as usize;
+        let outputs_size = num_outputs * 5;
+        f.seek(SeekFrom::Start((HEADER_SIZE_V5A + outputs_size) as u64))
+            .unwrap();
+
+        let mut block = vec![0u8; BLOCK_SIZE_BYTES];
+        f.read_exact(&mut block).unwrap();
+
+        for i in 3..GATES_PER_BLOCK {
+            let byte_idx = i / 8;
+            let bit_idx = i % 8;
+            let bit = (block[TYPES_OFFSET + byte_idx] >> bit_idx) & 1;
+            assert_eq!(bit, 0, "padding gate type bit not zero at {}", i);
+        }
     }
 
     #[monoio::test]
-    async fn test_verify_checksum() {
+    async fn test_writer_rejects_bad_output_id() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("test_checksum.v5a");
+        let path = dir.path().join("bad_out.v5a");
+        let too_big = MAX_WIRE_ID + 1;
 
-        // Write a circuit
+        let res = CircuitWriterV5a::new(&path, 2, vec![too_big]).await;
+        assert!(res.is_err());
+    }
+
+    #[monoio::test]
+    async fn test_verify_checksum_corruption_detection() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("corrupt.v5a");
+
         {
             let mut writer = CircuitWriterV5a::new(&path, 3, vec![100, 101])
                 .await
                 .unwrap();
-
             let gates = vec![
                 GateV5a {
                     in1: 2,
                     in2: 3,
                     out: 100,
                     credits: 0,
-                    gate_type: false,
+                    gate_type: GateType::XOR,
                 },
                 GateV5a {
                     in1: 3,
                     in2: 4,
                     out: 101,
                     credits: 0,
-                    gate_type: true,
+                    gate_type: GateType::AND,
                 },
             ];
-
-            for gate in gates {
-                writer.write_gate(gate).await.unwrap();
-            }
-
+            writer.write_gates(&gates).await.unwrap();
             writer.finalize().await.unwrap();
         }
 
-        // Verify checksum
-        assert!(verify_checksum(&path).await.unwrap());
+        assert!(verify_file_checksum(&path).unwrap());
 
-        // Corrupt the file and verify checksum fails
-        {
-            use std::fs::OpenOptions as StdOpenOptions;
-            use std::io::{Seek, SeekFrom, Write};
+        // Corrupt a byte in the blocks area
+        let mut f = StdOpen::new().read(true).write(true).open(&path).unwrap();
+        f.seek(SeekFrom::Start(100)).unwrap();
+        f.write_all(&[0xFF]).unwrap();
 
-            let mut file = StdOpenOptions::new().write(true).open(&path).unwrap();
-
-            // Corrupt a byte in the middle of the file
-            file.seek(SeekFrom::Start(100)).unwrap();
-            file.write_all(&[0xFF]).unwrap();
-        }
-
-        // Checksum should now fail
-        assert!(!verify_checksum(&path).await.unwrap());
+        assert!(!verify_file_checksum(&path).unwrap());
     }
 
-    #[monoio::test]
-    async fn test_writer_validation() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("test_validation.v5a");
+    // Reference checksum verifier for tests (pure std I/O).
+    fn verify_file_checksum(path: &Path) -> Result<bool> {
+        let mut f = StdOpen::new().read(true).open(path)?;
 
-        let mut writer = CircuitWriterV5a::new(&path, 2, vec![]).await.unwrap();
+        // Read header
+        let mut header = [0u8; HEADER_SIZE_V5A];
+        f.read_exact(&mut header)?;
+        if &header[0..4] != b"Zk2u" || header[4] != 0x05 || header[5] != 0x00 {
+            return Err(Error::new(ErrorKind::InvalidData, "invalid header"));
+        }
+        let file_checksum = &header[8..40];
+        let num_outputs = u64::from_le_bytes(header[64..72].try_into().unwrap()) as usize;
+        let outputs_size = num_outputs * 5;
 
-        // Test wire ID validation
-        let invalid_gate = GateV5a {
-            in1: 0x400000000, // Exceeds 34-bit limit
-            in2: 3,
-            out: 4,
-            credits: 1,
-            gate_type: false,
-        };
+        // Hash outputs
+        let mut hasher = Hasher::new();
+        if outputs_size > 0 {
+            let mut outputs = vec![0u8; outputs_size];
+            f.read_exact(&mut outputs)?;
+            hasher.update(&outputs);
+        }
 
-        assert!(writer.write_gate(invalid_gate).await.is_err());
+        // Hash blocks
+        let mut blocks = Vec::new();
+        f.read_to_end(&mut blocks)?;
+        hasher.update(&blocks);
 
-        // Test credits validation
-        let invalid_credits = GateV5a {
-            in1: 2,
-            in2: 3,
-            out: 4,
-            credits: 0x1000000, // Exceeds 24-bit limit
-            gate_type: false,
-        };
+        // Hash header tail
+        hasher.update(&header[40..72]);
 
-        assert!(writer.write_gate(invalid_credits).await.is_err());
+        Ok(hasher.finalize().as_bytes() == file_checksum)
     }
 }

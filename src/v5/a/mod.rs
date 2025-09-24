@@ -6,8 +6,10 @@
 //! - Structure-of-Arrays layout for optimal SIMD processing
 //! - 256 gates per block
 
+use crate::GateType;
+
 // pub mod reader;
-// pub mod writer;
+pub mod writer;
 
 // #[cfg(test)]
 // mod integration_tests;
@@ -27,6 +29,31 @@ pub const MAX_CREDITS: u32 = (1 << 24) - 1; // 16,777,215
 /// Special credit values
 pub const CREDITS_OUTPUT: u32 = 0; // Wire is a circuit output
 pub const CREDITS_CONSTANT: u32 = MAX_CREDITS; // Wire is constant/primary input
+
+// v5a header constants (fixed by spec)
+pub const HEADER_SIZE_V5A: usize = 72;
+pub const MAGIC: [u8; 4] = *b"Zk2u";
+pub const VERSION: u8 = 0x05;
+pub const FORMAT_TYPE_A: u8 = 0x00;
+
+// SoA block segment sizes (fixed by spec)
+pub const IN1_OFFSET: usize = 0;
+pub const IN2_OFFSET: usize = 1088;
+pub const OUT_OFFSET: usize = 2176;
+pub const CREDITS_OFFSET: usize = 3264;
+pub const TYPES_OFFSET: usize = 4032;
+pub const IN_STREAM_SIZE: usize = 1088; // 256 * 34 bits = 1088 bytes
+pub const CREDITS_SIZE: usize = 768; // 256 * 24 bits = 768 bytes
+
+/// Gate record for v5a writer
+#[derive(Debug, Clone, Copy)]
+pub struct GateV5a {
+    pub in1: u64,            // 34-bit
+    pub in2: u64,            // 34-bit
+    pub out: u64,            // 34-bit
+    pub credits: u32,        // 24-bit
+    pub gate_type: GateType, // false = XOR, true = AND
+}
 
 #[cfg(test)]
 mod tests {
