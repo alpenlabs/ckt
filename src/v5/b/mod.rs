@@ -11,7 +11,7 @@
 use std::io::{self, Write};
 
 // pub mod reader;
-// pub mod writer;
+pub mod writer;
 
 // pub use reader::CircuitReaderV5b;
 // pub use writer::{CircuitWriterV5b, Level, verify_checksum};

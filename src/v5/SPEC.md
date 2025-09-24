@@ -33,7 +33,7 @@ Both formats follow the same high-level organization:
 
 ```
 [HEADER]       Fixed-size header with metadata
-[OUTPUTS]      Output wire IDs (v5a) or memory addresses (v5b)  
+[OUTPUTS]      Output wire IDs (v5a) or memory addresses (v5b)
 [GATE BLOCKS]  SoA-formatted gate data in blocks
 ```
 
@@ -60,10 +60,10 @@ struct HeaderV5a {
     version: u8,             // 1 byte: Always 0x05
     format_type: u8,         // 1 byte: Always 0x00 for v5a
     reserved: [u8; 2],       // 2 bytes: Reserved, must be 0x0000
-    
+
     // Checksum (32 bytes)
     checksum: [u8; 32],      // 32 bytes: BLAKE3 hash
-    
+
     // Circuit metadata (32 bytes)
     xor_gates: u64,          // 8 bytes: Total XOR gates (little-endian)
     and_gates: u64,          // 8 bytes: Total AND gates (little-endian)
@@ -89,16 +89,16 @@ Gates are organized in blocks of 256 gates using Structure-of-Arrays layout:
 struct BlockV5a {
     // Input 1 stream: 256 × 34 bits = 8704 bits = 1088 bytes
     in1_packed: [u8; 1088],
-    
+
     // Input 2 stream: 256 × 34 bits = 8704 bits = 1088 bytes
     in2_packed: [u8; 1088],
-    
+
     // Output stream: 256 × 34 bits = 8704 bits = 1088 bytes
     out_packed: [u8; 1088],
-    
+
     // Credits stream: 256 × 24 bits = 6144 bits = 768 bytes
     credits_packed: [u8; 768],
-    
+
     // Gate types: 256 bits = 32 bytes (1 bit per gate: 0=XOR, 1=AND)
     gate_types: [u8; 32],
 }
@@ -170,10 +170,10 @@ struct HeaderV5b {
     version: u8,             // 1 byte: Always 0x05
     format_type: u8,         // 1 byte: Always 0x01 for v5b
     reserved: [u8; 2],       // 2 bytes: Reserved, must be 0x0000
-    
+
     // Checksum (32 bytes)
     checksum: [u8; 32],      // 32 bytes: BLAKE3 hash
-    
+
     // Circuit metadata (40 bytes)
     xor_gates: u64,          // 8 bytes: Total XOR gates (little-endian)
     and_gates: u64,          // 8 bytes: Total AND gates (little-endian)
@@ -198,10 +198,10 @@ Output addresses reference locations in the scratch space where final values wil
 
 v5b organizes gates by level. Each level starts with a header followed by gate blocks:
 
-```c
+```rs
 struct LevelHeader {
-    num_gates: u32,          // 4 bytes: Total gates in this level
-    num_xor_gates: u32,      // 4 bytes: Number of XOR gates (rest are AND)
+    num_xor: u32,          // 4 bytes: Number of XOR gates
+    num_and: u32,      // 4 bytes: Number of AND gates
 }
 ```
 
@@ -213,17 +213,17 @@ Within each level, gates are organized in blocks of 504 gates for optimal bit pa
 struct BlockV5b {
     // Input 1 stream: 504 × 24 bits = 12096 bits = 1512 bytes
     in1_stream: [u8; 1512],
-    
+
     // Input 2 stream: 504 × 24 bits = 12096 bits = 1512 bytes
     in2_stream: [u8; 1512],
-    
+
     // Output stream: 504 × 24 bits = 12096 bits = 1512 bytes
     out_stream: [u8; 1512],
 }
 // Total: 4536 bytes per 504 gates = 9 bytes/gate exactly
 ```
 
-Note: Gate types are determined by position - first `num_xor_gates` are XOR, remainder are AND.
+Note: Gate types are determined by position - first `num_xor` are XOR, remainder are AND.
 
 #### Why 504 Gates?
 
@@ -303,11 +303,11 @@ let file = OpenOptions::new()
 unsafe fn process_gates_avx512(block: &BlockV5b) {
     // Extract 21 gates at once (504 bits = 21 × 24)
     let data = _mm512_loadu_si512(block.in1_stream.as_ptr());
-    
+
     // Use VPMULTISHIFTQB for parallel bit extraction
     let shifts = _mm512_setr_epi64(0, 24, 48, 72, 96, 120, 144, 168);
     let addresses = _mm512_multishift_epi64_epi8(shifts, data);
-    
+
     // Mask to 24 bits
     let mask24 = _mm512_set1_epi32(0xFFFFFF);
     let result = _mm512_and_si512(addresses, mask24);
@@ -443,13 +443,13 @@ Outputs: 1,000
 Levels: ~40 (typical depth)
 ```
 
-**v5a encoding**: 
+**v5a encoding**:
 - 46,875,000 blocks of 256 gates
 - File size: 189 GB
 - Read time: 95 seconds at 2GB/s
 
 **v5b encoding**:
-- 23,809,524 blocks of 504 gates  
+- 23,809,524 blocks of 504 gates
 - File size: 108 GB
 - Read time: 54 seconds at 2GB/s
 
