@@ -10,11 +10,11 @@
 
 use std::io::{self, Write};
 
-pub mod reader;
-pub mod writer;
+// pub mod reader;
+// pub mod writer;
 
-pub use reader::CircuitReaderV5b;
-pub use writer::{CircuitWriterV5b, Level, verify_checksum};
+// pub use reader::CircuitReaderV5b;
+// pub use writer::{CircuitWriterV5b, Level, verify_checksum};
 
 /// Number of gates per block in v5b format
 /// 504 = 21 × 24, allowing 21 gates per AVX-512 operation

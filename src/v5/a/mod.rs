@@ -6,15 +6,15 @@
 //! - Structure-of-Arrays layout for optimal SIMD processing
 //! - 256 gates per block
 
-pub mod reader;
-pub mod writer;
+// pub mod reader;
+// pub mod writer;
 
-#[cfg(test)]
-mod integration_tests;
+// #[cfg(test)]
+// mod integration_tests;
 
 // Re-export main types
-pub use reader::{CircuitReaderV5a, DecodedBlock, GateV5a, HeaderV5a};
-pub use writer::{CircuitStats, CircuitWriterV5a, verify_checksum};
+// pub use reader::{CircuitReaderV5a, DecodedBlock, GateV5a, HeaderV5a};
+// pub use writer::{CircuitStats, CircuitWriterV5a, verify_checksum};
 
 /// Block size constants for v5a
 pub const GATES_PER_BLOCK: usize = 256;

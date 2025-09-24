@@ -7,9 +7,8 @@
 //! Both formats use fixed-width encoding and SoA layout for optimal performance
 //! with AVX-512 SIMD processing and io_uring I/O.
 
-pub mod triple_buffer;
-
 pub mod a;
+mod avx512;
 pub mod b;
 
 /// Magic bytes for v5 format: "Zk2u" in ASCII
@@ -85,8 +84,8 @@ impl CircuitStats {
 }
 
 // Re-export main types from submodules
-pub use a::{CircuitReaderV5a, CircuitWriterV5a, GateV5a, HeaderV5a};
-pub use b::{CircuitReaderV5b, CircuitWriterV5b, GateV5b, HeaderV5b};
+// pub use a::{CircuitReaderV5a, CircuitWriterV5a, GateV5a, HeaderV5a};
+// pub use b::{CircuitReaderV5b, CircuitWriterV5b, GateV5b, HeaderV5b};
 
 /// Check if CPU supports required AVX-512 features
 #[cfg(target_arch = "x86_64")]

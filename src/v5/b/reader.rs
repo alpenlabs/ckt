@@ -4,8 +4,8 @@
 //! - Disk reader thread: Uses io_uring with O_DIRECT for optimal NVMe performance
 //! - Decoder thread: Uses AVX-512 to decode Structure-of-Arrays gate blocks
 
-use crate::v5::triple_buffer::{AlignedBuffer, BUFFER_SIZE, TripleBuffer};
 use blake3::Hasher;
+use cynosure::site_d::triplebuffer::{AlignedBuffer, BUFFER_SIZE, TripleBuffer};
 use monoio::fs::OpenOptions;
 
 use std::fs::File as StdFile;
@@ -240,16 +240,11 @@ impl CircuitReaderV5b {
     }
 
     /// Refill buffer from triple buffer
-    fn refill_buffer(&mut self) -> Result<bool> {
-        // Try to get a buffer, with retries for initial population
-        let mut retries = 0;
-        let mut new_buffer = self.triple_buffer.reader_take(self.current_buffer.take());
-
-        while new_buffer.is_none() && retries < 100 {
-            std::thread::sleep(std::time::Duration::from_millis(10));
-            new_buffer = self.triple_buffer.reader_take(self.current_buffer.take());
-            retries += 1;
-        }
+    async fn refill_buffer(&mut self) -> Result<()> {
+        let buffer = self
+            .triple_buffer
+            .reader_next(self.current_buffer.take())
+            .await;
 
         if let Some(buffer) = new_buffer {
             // Calculate actual buffer size based on remaining data
@@ -495,7 +490,7 @@ async fn disk_reader_thread(
         current_buffer[..to_read].copy_from_slice(&buf);
 
         // Swap buffer with triple buffer
-        current_buffer = triple_buffer.writer_swap(current_buffer);
+        current_buffer = triple_buffer.writer_publish(current_buffer).await;
 
         current_offset += to_read as u64;
     }
