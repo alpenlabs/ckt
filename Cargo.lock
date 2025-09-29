@@ -211,7 +211,8 @@ name = "ckt"
 version = "0.1.0"
 dependencies = [
  "blake3",
- "cynosure",
+ "cynosure 0.3.0",
+ "kanal",
  "libc",
  "monoio",
  "tempfile",
@@ -343,6 +344,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72e545892537ed04ec26b5fbbedcc05d95a0c5a7704fbb93a0b1a22ef344ff70"
 dependencies = [
  "futures",
+]
+
+[[package]]
+name = "cynosure"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e288cc1b43de778225a146644ec52af11aafc1a0490dbe4b4108ef9a46002416"
+dependencies = [
+ "futures",
+ "monoio",
 ]
 
 [[package]]
@@ -677,7 +688,7 @@ dependencies = [
  "bitvec",
  "ckt",
  "clap",
- "cynosure",
+ "cynosure 0.2.3",
  "indexmap",
  "indicatif 0.17.11",
  "mimalloc",

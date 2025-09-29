@@ -1,5 +1,19 @@
 use std::arch::x86_64::*;
 
+// ================= CPU feature detection =================
+
+#[inline]
+pub fn is_x86_avx512f() -> bool {
+    #[cfg(all(target_arch = "x86_64"))]
+    {
+        std::is_x86_feature_detected!("avx512f")
+    }
+    #[cfg(not(all(target_arch = "x86_64")))]
+    {
+        false
+    }
+}
+
 pub struct BlockV5a {
     pub in1_packed: [u8; 1088],
     pub in2_packed: [u8; 1088],

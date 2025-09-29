@@ -8,7 +8,8 @@ repository.workspace = true
 
 [dependencies]
 blake3 = "1.5"
-cynosure = { version = ">=0.2.3", optional = true, default-features = false, features = ["triplebuffer"] }
+cynosure = { version = ">=0.3", optional = true, default-features = false, features = ["triplebuffer", "monoio-0_2"] }
+kanal = { version = "0.1.1", optional = true }
 libc = "0.2"
 monoio = { version = "0.2.4", features = ["sync"], optional = true }
 tempfile = "3.0"
@@ -24,7 +25,7 @@ v1 = []
 v2 = []
 v3 = []
 v4 = []
-v5 = []
+v5 = ["dep:kanal"]
 
 [workspace]
 members = ["cli", "lvl"]
