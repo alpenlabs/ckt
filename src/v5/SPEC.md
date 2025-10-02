@@ -161,7 +161,7 @@ Credits represent how many times a wire will be consumed:
 ### Purpose
 v5b is the production format output by the leveller, with precomputed memory addresses for zero-allocation runtime execution. All gates are organized by level for parallel evaluation.
 
-### Header Structure (80 bytes)
+### Header Structure (88 bytes)
 
 ```c
 struct HeaderV5b {
@@ -174,7 +174,7 @@ struct HeaderV5b {
     // Checksum (32 bytes)
     checksum: [u8; 32],      // 32 bytes: BLAKE3 hash
 
-    // Circuit metadata (40 bytes)
+    // Circuit metadata (48 bytes)
     xor_gates: u64,          // 8 bytes: Total XOR gates (little-endian)
     and_gates: u64,          // 8 bytes: Total AND gates (little-endian)
     primary_inputs: u64,     // 8 bytes: Number of primary inputs

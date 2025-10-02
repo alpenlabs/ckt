@@ -11,10 +11,11 @@
 use std::io::{self, Write};
 
 // pub mod reader;
+pub mod reader;
 pub mod writer;
 
-// pub use reader::CircuitReaderV5b;
-// pub use writer::{CircuitWriterV5b, Level, verify_checksum};
+#[cfg(test)]
+pub mod integration;
 
 /// Number of gates per block in v5b format
 /// 504 = 21 × 24, allowing 21 gates per AVX-512 operation
@@ -184,32 +185,33 @@ impl HeaderV5b {
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct LevelHeader {
-    pub num_gates: u32,     // Total gates in this level
-    pub num_xor_gates: u32, // Number of XOR gates (rest are AND)
+    pub num_xor_gates: u32, // Number of XOR gates in this level
+    pub num_and_gates: u32, // Number of AND gates in this level
 }
 
 impl LevelHeader {
     /// Create a new level header
     pub fn new(num_xor_gates: u32, num_and_gates: u32) -> Self {
         LevelHeader {
-            num_gates: num_xor_gates + num_and_gates,
             num_xor_gates,
+            num_and_gates,
         }
     }
 
-    /// Get number of AND gates
-    pub fn num_and_gates(&self) -> u32 {
-        self.num_gates.saturating_sub(self.num_xor_gates)
+    /// Get total number of gates
+    pub fn num_gates(&self) -> u32 {
+        self.num_xor_gates.saturating_add(self.num_and_gates)
     }
 
     /// Validate the level header
     pub fn validate(&self) -> Result<(), String> {
+        // Check for overflow when adding
         let num_xor_gates = self.num_xor_gates; // Copy from packed struct
-        let num_gates = self.num_gates; // Copy from packed struct
-        if num_xor_gates > num_gates {
+        let num_and_gates = self.num_and_gates; // Copy from packed struct
+        if num_xor_gates.checked_add(num_and_gates).is_none() {
             return Err(format!(
-                "XOR gates {} exceeds total gates {}",
-                num_xor_gates, num_gates
+                "Gate counts overflow: XOR {} + AND {}",
+                num_xor_gates, num_and_gates
             ));
         }
         Ok(())
@@ -218,18 +220,18 @@ impl LevelHeader {
     /// Convert to bytes for writing
     pub fn to_bytes(&self) -> [u8; LEVEL_HEADER_SIZE] {
         let mut bytes = [0u8; LEVEL_HEADER_SIZE];
-        bytes[0..4].copy_from_slice(&self.num_gates.to_le_bytes());
-        bytes[4..8].copy_from_slice(&self.num_xor_gates.to_le_bytes());
+        bytes[0..4].copy_from_slice(&self.num_xor_gates.to_le_bytes());
+        bytes[4..8].copy_from_slice(&self.num_and_gates.to_le_bytes());
         bytes
     }
 
     /// Create from bytes
     pub fn from_bytes(bytes: &[u8; LEVEL_HEADER_SIZE]) -> Self {
-        let num_gates = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-        let num_xor_gates = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+        let num_xor_gates = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+        let num_and_gates = u32::from_le_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
         LevelHeader {
-            num_gates,
             num_xor_gates,
+            num_and_gates,
         }
     }
 }
@@ -496,28 +498,32 @@ mod tests {
     #[test]
     fn test_level_header() {
         let header = LevelHeader::new(100, 50);
-        let num_gates = header.num_gates;
+        let num_gates = header.num_gates();
         assert_eq!(num_gates, 150);
         let num_xor_gates = header.num_xor_gates;
         assert_eq!(num_xor_gates, 100);
-        assert_eq!(header.num_and_gates(), 50);
+        let num_and_gates = header.num_and_gates;
+        assert_eq!(num_and_gates, 50);
 
         // Test serialization
         let bytes = header.to_bytes();
         let header2 = LevelHeader::from_bytes(&bytes);
-        let header_num_gates = header.num_gates;
-        let header2_num_gates = header2.num_gates;
+        let header_num_gates = header.num_gates();
+        let header2_num_gates = header2.num_gates();
         assert_eq!(header_num_gates, header2_num_gates);
         let header_num_xor_gates = header.num_xor_gates;
         let header2_num_xor_gates = header2.num_xor_gates;
         assert_eq!(header_num_xor_gates, header2_num_xor_gates);
+        let header_num_and_gates = header.num_and_gates;
+        let header2_num_and_gates = header2.num_and_gates;
+        assert_eq!(header_num_and_gates, header2_num_and_gates);
 
         // Test validation
         assert!(header.validate().is_ok());
 
         let bad_header = LevelHeader {
-            num_gates: 50,
-            num_xor_gates: 100, // More XOR than total
+            num_xor_gates: u32::MAX,
+            num_and_gates: 100, // This would overflow
         };
         assert!(bad_header.validate().is_err());
     }
