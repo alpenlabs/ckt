@@ -332,6 +332,7 @@ impl CircuitWriterV5a {
             .await;
         res?;
         self.io_buf = buf; // reuse allocation
+        self.io_buf.clear(); // clear the buffer after reuse
         self.next_offset += len as u64;
         Ok(())
     }
