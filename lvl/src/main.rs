@@ -1,7 +1,7 @@
 use ahash::{HashMap, HashMapExt};
-use ckt::v4;
-use ckt::v4::a::hp::reader::CircuitReader;
-use ckt::v4::b::hp::writer::CircuitWriter;
+use ckt::v5;
+use ckt::v5::a::reader::CircuitReaderV5a;
+use ckt::v5::b::writer::CircuitWriterV5b;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use lvl::slab::FakeSlabAllocator;
 use lvl::types::{CompactWireId, Credits, IntermediateGate};
@@ -91,9 +91,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // First pass: get total gates count and primary inputs
     let (total_gates, primary_inputs) = {
         let file = File::open(&args.input).await?;
-        let reader = CircuitReader::new(file, 10_000_000).await?;
-        let total = reader.total_gates();
-        let primary_inputs = reader.primary_inputs();
+        let reader = CircuitReaderV5a::open(args.input)?;
+        let total = reader.header().total_gates();
+        let primary_inputs = reader.header().primary_inputs;
         (total, primary_inputs)
     };
 
@@ -156,26 +156,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let overall_start = Instant::now();
 
     // Open file for reading
-    let file = File::open(&args.input).await?;
-    let mut reader = CircuitReader::new(file, 10_000_000).await?;
+    let mut reader = CircuitReaderV5a::open(args.input)?;
     let mut reader_exhausted = false;
 
     // Initial load - fill up to target
     pb_load.set_message("Filling leveller...");
     while !reader_exhausted {
-        match reader.next_batch().await {
+        match reader.next_block().await {
             Ok(Some(gates)) => {
                 pb_load.inc(gates.len() as u64);
                 // Always process the entire batch to avoid missing gates
-                for (gate, gate_type) in gates {
-                    let gate = IntermediateGate {
+                for gate in gates {
+                    let new_gate = IntermediateGate {
                         in1: CompactWireId::from_u64(gate.in1),
                         in2: CompactWireId::from_u64(gate.in2),
                         out: CompactWireId::from_u64(gate.out),
                         credits: Credits(gate.credits as u16),
                     };
+                    leveller.add_gate(new_gate, gate.gate_type);
 
-                    leveller.add_gate(gate, gate_type);
                     total_gates_added += 1;
                 }
 
@@ -196,14 +195,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         total_gates_added
     ));
 
-    let file = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .open(&args.output)
-        .await
-        .unwrap();
-    let mut writer = CircuitWriter::new(
-        file,
+    let mut writer = CircuitWriterV5b::new(
+        args.output,
         primary_inputs,
         reader.outputs().iter().copied().collect(),
     )

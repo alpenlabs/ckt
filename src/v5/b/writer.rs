@@ -1,14 +1,17 @@
-// src/v5/b/writer.rs
-
-//! v5b Writer (safe, spec-compliant, performant)
+//! v5b Writer (safe, spec-like, performant) with modified checksum order
 //!
-//! - Level API: start_level → add_gate(GateType, GateV5b)* → finish_level
+//! API:
+//! - start_level → add_gate(GateType, GateV5b)* → finish_level
+//!
+//! Behavior:
 //! - You may intersperse XOR and AND gates in any order when adding.
 //!   The writer reorders per-level to XORs-first then ANDs, as required by the format.
 //!   Blocks naturally may contain both XORs and ANDs at the boundary (e.g., if num_xor % 504 != 0).
 //! - Packs gates into 504-gate blocks with SoA layout (24-bit fields).
-//! - Writes header placeholder + outputs, streams levels, then backpatches header with checksum.
-//! - Computes checksum in spec order: outputs || (level_header || blocks...) || header[40..].
+//! - Writes header placeholder + zeroed output placeholders, streams levels,
+//!   later overwrites outputs and backpatches the header with checksum.
+//! - Computes checksum in this order (modified): levels || outputs || header_tail.
+//!   This allows streaming-hash of levels as they’re written without a second pass.
 //! - Uses monoio for async I/O. No O_DIRECT.
 //! - Handles partial blocks safely: zero-padded; readers rely on header fields.
 
@@ -113,20 +116,24 @@ impl LevelBuilder {
     }
 }
 
-/// v5b Circuit Writer
+/// v5b Circuit Writer (checksum order: levels || outputs || header_tail)
 pub struct CircuitWriterV5b {
     file: File,
 
     // Metadata
     primary_inputs: u64,
-    outputs: Vec<u32>,
+    num_outputs: u64,
 
-    // Aggregation & offsets
-    next_offset: u64,
+    // Offsets
+    outputs_offset: u64,      // start of outputs (immediately after header)
+    levels_start_offset: u64, // first byte after outputs (start of streamed levels)
+    next_offset: u64,         // current end-of-file offset for streaming writes
+
+    // Aggregation buffer for writes
     io_buf: Vec<u8>,
     io_buf_cap: usize,
 
-    // Checksum
+    // Checksum (we stream-hash levels as we write them)
     hasher: Hasher,
 
     // Global stats
@@ -143,15 +150,13 @@ pub struct CircuitWriterV5b {
 }
 
 impl CircuitWriterV5b {
-    /// Create a new v5b writer. Writes a placeholder header and outputs.
+    /// Create a new writer. Writes a placeholder header and zeroed outputs.
+    /// Does not hash outputs; checksum begins with levels region as they are written.
     pub async fn new(
         path: impl AsRef<Path>,
         primary_inputs: u64,
-        outputs: Vec<u32>,
+        num_outputs: u64,
     ) -> Result<Self> {
-        // Validate and encode outputs
-        let (outputs_bytes, max_out_addr) = encode_outputs_le24(&outputs)?;
-
         // Open/truncate file (buffered)
         let mut opts = OpenOptions::new();
         opts.create(true).write(true).truncate(true);
@@ -164,32 +169,35 @@ impl CircuitWriterV5b {
             let (res, _) = file.write_all_at(header_placeholder, 0).await;
             res?;
         }
-        // Outputs section
+
+        // Outputs placeholder: num_outputs entries of 3 bytes each, all zeros
+        let outputs_len_bytes = num_outputs
+            .checked_mul(3)
+            .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "num_outputs too large"))?
+            as usize;
+        let outputs_placeholder = vec![0u8; outputs_len_bytes];
         {
-            let (res, _) = file
-                .write_all_at(outputs_bytes.clone(), outputs_offset)
-                .await;
+            let (res, _) = file.write_all_at(outputs_placeholder, outputs_offset).await;
             res?;
         }
 
-        // Initialize checksum with outputs (spec step 1)
-        let mut hasher = Hasher::new();
-        hasher.update(&outputs_bytes);
-
-        let next_offset = outputs_offset + outputs_bytes.len() as u64;
+        let levels_start_offset = outputs_offset + outputs_len_bytes as u64;
+        let next_offset = levels_start_offset;
 
         Ok(Self {
             file,
             primary_inputs,
-            outputs,
+            num_outputs,
+            outputs_offset,
+            levels_start_offset,
             next_offset,
             io_buf: Vec::with_capacity(DEFAULT_IO_BUFFER_CAP),
             io_buf_cap: DEFAULT_IO_BUFFER_CAP,
-            hasher,
+            hasher: Hasher::new(), // Start hashing from empty; levels will be hashed as written
             xor_gates_written: 0,
             and_gates_written: 0,
             num_levels: 0,
-            max_addr_seen: max_out_addr,
+            max_addr_seen: 0, // outputs unknown yet
             in_level: false,
             level: LevelBuilder::new(),
         })
@@ -255,7 +263,7 @@ impl CircuitWriterV5b {
             .ok_or_else(|| Error::new(ErrorKind::Other, "num_levels overflow"))?;
         self.max_addr_seen = self.max_addr_seen.max(self.level.max_addr_seen);
 
-        // Write LevelHeader (num_xor, num_and) as 8 bytes LE
+        // Write LevelHeader (num_xor, num_and) as 8 bytes LE and hash it now
         let level_header = encode_level_header_le(num_xor, num_and);
         self.hasher.update(&level_header);
         self.enqueue_bytes(&level_header).await?;
@@ -284,12 +292,24 @@ impl CircuitWriterV5b {
         Ok(())
     }
 
-    /// Finalize: flush pending data, compute checksum, and write header.
-    pub async fn finalize(mut self, scratch_space: u64) -> Result<CircuitStats> {
+    /// Finalize: overwrite outputs, flush pending data, finish checksum (levels || outputs || header tail), and write header.
+    pub async fn finalize(mut self, scratch_space: u64, outputs: Vec<u32>) -> Result<CircuitStats> {
         if self.in_level {
             // Auto-finish current level to avoid dangling state (allows empty levels)
             self.finish_level().await?;
         }
+
+        // Validate outputs length matches placeholder count
+        if outputs.len() as u64 != self.num_outputs {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "finalize outputs length does not match the initial num_outputs",
+            ));
+        }
+
+        // Validate and encode outputs; track max addr
+        let (outputs_bytes, max_out_addr) = encode_outputs_le24(&outputs)?;
+        self.max_addr_seen = self.max_addr_seen.max(max_out_addr);
 
         if scratch_space > MAX_MEMORY_ADDRESS as u64 {
             return Err(Error::new(
@@ -306,10 +326,22 @@ impl CircuitWriterV5b {
             ));
         }
 
-        // Flush aggregation buffer
+        // Flush aggregation buffer (ensures all level bytes already hashed are on disk too)
         self.flush_io_buffer().await?;
 
-        // Hash header fields after checksum (spec step 3)
+        // Overwrite outputs placeholders with real outputs
+        {
+            let (res, _) = self
+                .file
+                .write_all_at(outputs_bytes.clone(), self.outputs_offset)
+                .await;
+            res?;
+        }
+
+        // Continue checksum: after levels, hash outputs and then header tail
+        self.hasher.update(&outputs_bytes);
+
+        // Build header tail and hash it
         // 40..48: xor_gates (u64 LE)
         // 48..56: and_gates (u64 LE)
         // 56..64: primary_inputs (u64 LE)
@@ -327,7 +359,7 @@ impl CircuitWriterV5b {
         off += 8;
         header_tail[off..off + 8].copy_from_slice(&scratch_space.to_le_bytes());
         off += 8;
-        header_tail[off..off + 8].copy_from_slice(&(self.outputs.len() as u64).to_le_bytes());
+        header_tail[off..off + 8].copy_from_slice(&self.num_outputs.to_le_bytes());
         off += 8;
         header_tail[off..off + 4].copy_from_slice(&self.num_levels.to_le_bytes());
         off += 4;
@@ -343,7 +375,7 @@ impl CircuitWriterV5b {
             self.and_gates_written,
             self.primary_inputs,
             scratch_space,
-            self.outputs.len() as u64,
+            self.num_outputs,
             self.num_levels,
         );
 
@@ -360,7 +392,7 @@ impl CircuitWriterV5b {
             and_gates: self.and_gates_written,
             primary_inputs: self.primary_inputs,
             scratch_space,
-            num_outputs: self.outputs.len() as u64,
+            num_outputs: self.num_outputs,
             num_levels: self.num_levels,
             checksum,
         };
@@ -560,7 +592,7 @@ mod tests {
         }
     }
 
-    // Verify checksum by recomputing from file (outputs || rest || header[40..])
+    // Verify checksum by recomputing from file (levels || outputs || header[40..])
     fn verify_file_checksum(path: &Path) -> Result<bool> {
         let mut f = StdOpen::new().read(true).open(path)?;
         let mut header = vec![0u8; HEADER_SIZE];
@@ -570,22 +602,31 @@ mod tests {
         }
         let file_checksum = &header[8..40];
         let num_outputs = u64::from_le_bytes(header[72..80].try_into().unwrap()) as usize;
-
         let outputs_size = num_outputs * 3;
 
         let mut hasher = Hasher::new();
 
-        // Outputs
+        // File layout: header || outputs || levels
+        // We need to hash: levels || outputs || header tail
+        // Seek to start of levels (after outputs)
         if outputs_size > 0 {
+            f.seek(SeekFrom::Start((HEADER_SIZE + outputs_size) as u64))?;
+        } else {
+            f.seek(SeekFrom::Start(HEADER_SIZE as u64))?;
+        }
+
+        // Read all levels to EOF and hash them
+        let mut levels = Vec::new();
+        f.read_to_end(&mut levels)?;
+        hasher.update(&levels);
+
+        // Go back and read outputs, then hash them
+        if outputs_size > 0 {
+            f.seek(SeekFrom::Start(HEADER_SIZE as u64))?;
             let mut outputs = vec![0u8; outputs_size];
             f.read_exact(&mut outputs)?;
             hasher.update(&outputs);
         }
-
-        // Remainder (levels and blocks)
-        let mut rest = Vec::new();
-        f.read_to_end(&mut rest)?;
-        hasher.update(&rest);
 
         // Header tail
         hasher.update(&header[40..HEADER_SIZE]);
@@ -614,7 +655,8 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("v5b_mixed.v5b");
 
-        let mut w = CircuitWriterV5b::new(&path, 2, vec![2, 3]).await.unwrap();
+        // New API: provide num_outputs at creation
+        let mut w = CircuitWriterV5b::new(&path, 2, 2).await.unwrap();
         w.start_level().unwrap();
 
         // Interspersed adds: create 300 XOR and 300 AND in mixed order
@@ -629,7 +671,8 @@ mod tests {
 
         w.finish_level().await.unwrap();
 
-        let stats = w.finalize(10_000).await.unwrap();
+        // New API: provide outputs at finalize
+        let stats = w.finalize(10_000, vec![2, 3]).await.unwrap();
         assert_eq!(stats.num_levels, 1);
         assert_eq!(stats.total_gates, 600);
         assert_eq!(stats.xor_gates, 300);
@@ -676,21 +719,23 @@ mod tests {
     #[monoio::test]
     async fn test_writer_validates_outputs_and_scratch_space() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("v5b_val.v5b");
 
-        // Invalid output address
-        let res = CircuitWriterV5b::new(&path, 0, vec![MAX_MEMORY_ADDRESS]).await;
+        // Invalid output address must be caught at finalize
+        let path = dir.path().join("v5b_val_invalid_out.v5b");
+        let w = CircuitWriterV5b::new(&path, 0, 1).await.unwrap();
+        let res = w.finalize(1_000, vec![MAX_MEMORY_ADDRESS]).await;
         assert!(res.is_err());
 
         // Valid outputs but too small scratch space at finalize
         let path2 = dir.path().join("v5b_val2.v5b");
-        let mut w = CircuitWriterV5b::new(&path2, 0, vec![10]).await.unwrap();
-        w.start_level().unwrap();
-        w.add_gate(GateType::XOR, GateV5b::new(0, 1, 20).unwrap())
-            .unwrap(); // XOR
-        w.finish_level().await.unwrap();
+        let mut w2 = CircuitWriterV5b::new(&path2, 0, 1).await.unwrap();
+        w2.start_level().unwrap();
+        w2.add_gate(GateType::XOR, GateV5b::new(0, 1, 20).unwrap())
+            .unwrap(); // uses address 20
+        w2.finish_level().await.unwrap();
 
-        let res = w.finalize(10).await; // scratch_space=10 < max addr used (20)
+        // outputs contain 10, but max addr across outputs+gates is 20; scratch_space=10 -> error
+        let res = w2.finalize(10, vec![10]).await;
         assert!(res.is_err());
     }
 }
