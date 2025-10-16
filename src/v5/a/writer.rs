@@ -367,7 +367,11 @@ fn encode_header_v5a_le(
 
 /// Encode outputs to 5-byte little-endian entries (lower 34 bits used, upper 6 must be zero).
 fn encode_outputs_le34(outputs: &[u64]) -> Result<Vec<u8>> {
-    let mut buf = Vec::with_capacity(outputs.len() * 5);
+    let capacity = outputs
+        .len()
+        .checked_mul(5)
+        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "outputs length overflow"))?;
+    let mut buf = Vec::with_capacity(capacity);
     for &w in outputs {
         if w > MAX_WIRE_ID {
             return Err(Error::new(

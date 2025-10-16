@@ -555,50 +555,18 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("empty_level.v5b");
 
-        // Create circuit with empty level in between
+        // Empty levels should be rejected at write time
         let mut writer = CircuitWriterV5b::new(&path, 2, 1).await.unwrap();
 
-        // Level 1: has gates
+        // Try to create an empty level
         writer.start_level().unwrap();
-        writer
-            .add_gate(GateType::XOR, WriterGate::new(2, 3, 4).unwrap())
-            .unwrap();
-        writer.finish_level().await.unwrap();
+        let result = writer.finish_level().await;
 
-        // Level 2: empty (allowed by auto-finish in finalize)
-        writer.start_level().unwrap();
-        writer.finish_level().await.unwrap();
-
-        // Level 3: has gates
-        writer.start_level().unwrap();
-        writer
-            .add_gate(GateType::AND, WriterGate::new(4, 2, 5).unwrap())
-            .unwrap();
-        writer.finish_level().await.unwrap();
-
-        let stats = writer.finalize(10, vec![5]).await.unwrap();
-        assert_eq!(stats.total_gates, 2);
-        assert_eq!(stats.num_levels, 3);
-
-        // Verify checksum
-        assert!(verify_v5b_checksum(&path).await.unwrap());
-
-        // Read back
-        let mut reader = CircuitReaderV5b::open(&path).unwrap();
-
-        // Level 1
-        let mut level1 = reader.next_level().await.unwrap().unwrap();
-        let block1 = level1.next_block().await.unwrap().unwrap();
-        assert_eq!(block1.len(), 1);
-
-        // Level 2 (empty)
-        let mut level2 = reader.next_level().await.unwrap().unwrap();
-        assert!(level2.next_block().await.unwrap().is_none());
-
-        // Level 3
-        let mut level3 = reader.next_level().await.unwrap().unwrap();
-        let block3 = level3.next_block().await.unwrap().unwrap();
-        assert_eq!(block3.len(), 1);
+        // Should fail with error about empty levels
+        assert!(result.is_err());
+        let err = result.unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(err.to_string().contains("empty levels are not allowed"));
     }
 
     #[monoio::test]

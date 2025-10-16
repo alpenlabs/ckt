@@ -252,6 +252,14 @@ impl CircuitWriterV5b {
         let num_and = self.level.num_and();
         let num_gates = num_xor + num_and;
 
+        // Reject empty levels at write time
+        if num_gates == 0 {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "empty levels are not allowed; level must contain at least one gate",
+            ));
+        }
+
         // Update global stats
         self.xor_gates_written += num_xor as u64;
         self.and_gates_written += num_and as u64;
@@ -510,7 +518,11 @@ fn encode_level_header_le(num_xor: u32, num_and: u32) -> [u8; LEVEL_HEADER_SIZE]
 
 /// Encode outputs to 3-byte little-endian entries (lower 24 bits).
 fn encode_outputs_le24(outputs: &[u32]) -> Result<(Vec<u8>, u32)> {
-    let mut buf = Vec::with_capacity(outputs.len() * 3);
+    let capacity = outputs
+        .len()
+        .checked_mul(3)
+        .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "outputs length overflow"))?;
+    let mut buf = Vec::with_capacity(capacity);
     let mut max_addr = 0u32;
     for &addr in outputs {
         validate_addr(addr)?;
