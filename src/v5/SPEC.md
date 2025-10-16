@@ -40,11 +40,16 @@ Both formats follow the same high-level organization:
 ### Checksum Calculation
 
 The BLAKE3 checksum is computed over the concatenation of:
-1. **OUTPUTS** section (entire section as written)
-2. **GATE BLOCKS** section (all blocks in order)
-3. **HEADER** fields after the checksum field
+1. **GATE BLOCKS** section (all level headers and blocks in order, for v5b; all blocks for v5a)
+2. **OUTPUTS** section (entire section as written)
+3. **HEADER** fields after the checksum field (bytes 40 onward: metadata fields)
 
-This order ensures streaming verification is possible.
+**Note**: This order differs from the physical file layout (Header → Outputs → Gate Blocks). The modified order enables streaming hash computation during write operations: levels can be hashed as they're written to disk, then outputs and header metadata are hashed at finalization. This eliminates the need for a second pass over potentially billions of gates.
+
+**Physical file order**: Header → Outputs → Gate Blocks  
+**Checksum order**: Gate Blocks → Outputs → Header tail
+
+This design allows writers to compute checksums in a single streaming pass without seeking.
 
 ## Format v5a - Intermediate Format with Credits
 
@@ -375,20 +380,22 @@ let blocks = unsafe {
 ```rust
 let mut hasher = blake3::Hasher::new();
 
-// 1. Hash outputs section
-hasher.update(&outputs_data);
-
-// 2. Hash all gate blocks
+// 1. Hash all gate blocks (in v5b: including level headers)
 for block in blocks {
     hasher.update(&block.to_bytes());
 }
 
-// 3. Hash header fields after checksum
+// 2. Hash outputs section
+hasher.update(&outputs_data);
+
+// 3. Hash header fields after checksum (bytes 40..88 for v5b, 40..72 for v5a)
 hasher.update(&header_bytes[40..]);  // Skip magic, version, type, reserved, checksum
 
 let computed = hasher.finalize();
 assert_eq!(computed.as_bytes(), &header.checksum);
 ```
+
+**Important**: The checksum order is Gate Blocks → Outputs → Header tail, which differs from the physical file layout (Header → Outputs → Gate Blocks). When verifying, you must seek to read the sections in checksum order, not file order.
 
 ## Error Handling
 
