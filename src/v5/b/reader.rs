@@ -185,21 +185,29 @@ impl CircuitReaderV5b {
     // Level iteration
     // -------------------------------------------------------------------------
     pub async fn next_level<'r>(&'r mut self) -> Result<Option<Level<'r>>> {
-        if self.levels_remaining == 0 {
-            return Ok(None);
-        }
-        // Read next 8-byte LevelHeader
-        let mut hdr_buf = [0u8; LEVEL_HEADER_SIZE];
-        self.read_exact_into(&mut hdr_buf).await?;
-        let lvl = LevelHeader::from_bytes(&hdr_buf);
-        lvl.validate().map_err(io_err)?;
+        loop {
+            if self.levels_remaining == 0 {
+                return Ok(None);
+            }
+            // Read next 8-byte LevelHeader
+            let mut hdr_buf = [0u8; LEVEL_HEADER_SIZE];
+            self.read_exact_into(&mut hdr_buf).await?;
+            let lvl = LevelHeader::from_bytes(&hdr_buf);
+            lvl.validate().map_err(io_err)?;
 
-        self.levels_remaining -= 1;
-        Ok(Some(Level {
-            reader: self,
-            gates_remaining: lvl.num_gates(),
-            xor_remaining: lvl.num_xor_gates,
-        }))
+            self.levels_remaining -= 1;
+
+            // Skip empty levels if encountered during read
+            if lvl.num_gates() == 0 {
+                continue;
+            }
+
+            return Ok(Some(Level {
+                reader: self,
+                gates_remaining: lvl.num_gates(),
+                xor_remaining: lvl.num_xor_gates,
+            }));
+        }
     }
 
     // -------------------------------------------------------------------------
@@ -450,24 +458,24 @@ pub async fn verify_v5b_checksum(path: impl AsRef<std::path::Path>) -> std::io::
     // Read header
     let (res, header_vec) = file.read_exact_at(vec![0u8; HEADER_SIZE], 0).await;
     res?;
-    let header_arr: [u8; HEADER_SIZE] = match header_vec.as_slice().try_into() {
-        Ok(h) => h,
-        Err(_) => {
-            return Ok(false);
-        }
-    };
+    let header_arr: [u8; HEADER_SIZE] = header_vec.as_slice().try_into().map_err(|_| {
+        std::io::Error::new(std::io::ErrorKind::InvalidData, "header size mismatch")
+    })?;
     let hdr = HeaderV5b::from_bytes(&header_arr);
-    if let Err(_) = hdr.validate() {
-        // Invalid header — treat as mismatch, not I/O error.
-        return Ok(false);
-    }
+    hdr.validate().map_err(|e| {
+        std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!("invalid header: {}", e),
+        )
+    })?;
 
     let file_checksum = &header_arr[8..40]; // 32 bytes starting after magic/version/type/reserved
 
-    let outputs_len = match (hdr.num_outputs as usize).checked_mul(OUTPUT_ENTRY_SIZE) {
-        Some(v) => v,
-        None => return Ok(false),
-    };
+    let outputs_len = (hdr.num_outputs as usize)
+        .checked_mul(OUTPUT_ENTRY_SIZE)
+        .ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "outputs length overflow")
+        })?;
 
     let mut hasher = Hasher::new();
 
@@ -489,9 +497,12 @@ pub async fn verify_v5b_checksum(path: impl AsRef<std::path::Path>) -> std::io::
         let lvl_hdr = LevelHeader::from_bytes(&lvl_bytes.as_slice().try_into().map_err(|_| {
             std::io::Error::new(std::io::ErrorKind::InvalidData, "level header size")
         })?);
-        if let Err(_) = lvl_hdr.validate() {
-            return Ok(false);
-        }
+        lvl_hdr.validate().map_err(|e| {
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                format!("invalid level header: {}", e),
+            )
+        })?;
 
         let lvl_gates = lvl_hdr.num_gates() as usize;
         total_level_gates = total_level_gates.saturating_add(lvl_gates as u64);
@@ -531,7 +542,14 @@ pub async fn verify_v5b_checksum(path: impl AsRef<std::path::Path>) -> std::io::
 
     // Validate level gate sum matches header total (structural sanity check)
     if total_level_gates != hdr.total_gates() {
-        return Ok(false);
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            format!(
+                "level gate sum {} does not match header total {}",
+                total_level_gates,
+                hdr.total_gates()
+            ),
+        ));
     }
 
     // 2) Outputs section

@@ -533,7 +533,9 @@ pub async fn verify_v5a_checksum(path: impl AsRef<Path>) -> Result<bool> {
     // 1. Blocks region
     let total_gates = hdr.total_gates();
     let blocks_total = (total_gates + (GATES_PER_BLOCK as u64 - 1)) / (GATES_PER_BLOCK as u64);
-    let blocks_bytes = (blocks_total as usize) * BLOCK_SIZE_BYTES;
+    let blocks_bytes = (blocks_total as usize)
+        .checked_mul(BLOCK_SIZE_BYTES)
+        .ok_or_else(|| Error::new(ErrorKind::InvalidData, "blocks bytes overflow"))?;
 
     if blocks_bytes > 0 {
         let start = (HEADER_SIZE_V5A + outputs_len) as u64;

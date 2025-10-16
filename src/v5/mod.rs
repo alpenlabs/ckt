@@ -84,10 +84,6 @@ impl CircuitStats {
     }
 }
 
-// Re-export main types from submodules
-// pub use a::{CircuitReaderV5a, CircuitWriterV5a, GateV5a, HeaderV5a};
-// pub use b::{CircuitReaderV5b, CircuitWriterV5b, GateV5b, HeaderV5b};
-
 /// Check if CPU supports required AVX-512 features
 #[cfg(target_arch = "x86_64")]
 pub fn check_avx512_support() -> bool {
@@ -107,47 +103,6 @@ pub fn check_avx512_support() -> bool {
 #[cfg(not(target_arch = "x86_64"))]
 pub fn check_avx512_support() -> bool {
     false
-}
-
-/// Initialize the v5 module and check system capabilities
-pub fn init() -> Result<(), String> {
-    if !check_avx512_support() {
-        return Err(
-            "AVX-512 support required for v5 format. Missing features: AVX512F, AVX512BW, or AVX512VBMI"
-                .to_string(),
-        );
-    }
-
-    // Check if we can use O_DIRECT (Linux-specific)
-    #[cfg(target_os = "linux")]
-    {
-        use std::fs::OpenOptions;
-        use std::os::unix::fs::OpenOptionsExt;
-        use tempfile::tempdir;
-
-        let dir = tempdir().map_err(|e| format!("Failed to create temp dir: {}", e))?;
-        let test_path = dir.path().join("o_direct_test");
-
-        match OpenOptions::new()
-            .create(true)
-            .write(true)
-            .custom_flags(libc::O_DIRECT)
-            .open(&test_path)
-        {
-            Ok(_) => {
-                // O_DIRECT is supported
-                let _ = std::fs::remove_file(test_path);
-            }
-            Err(e) => {
-                return Err(format!(
-                    "O_DIRECT not supported on this filesystem. Consider using XFS or ext4: {}",
-                    e
-                ));
-            }
-        }
-    }
-
-    Ok(())
 }
 
 #[cfg(test)]

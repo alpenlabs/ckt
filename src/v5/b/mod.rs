@@ -48,7 +48,13 @@ pub const MAX_MEMORY_ADDRESS: u32 = 16_777_216;
 /// AVX-512 alignment requirement
 pub const ALIGNMENT: usize = 64;
 
-/// Header structure for v5b format (80 bytes)
+/// Header structure for v5b format (88 bytes)
+///
+/// Note: This struct is padded to 88 bytes (divisible by 8) in the actual layout,
+/// so all fields happen to be properly aligned. However, we mark it as `packed` and
+/// use `read_unaligned` for absolute safety, as the `packed` attribute tells the
+/// compiler to treat all field accesses as potentially unaligned. This prevents any
+/// possibility of undefined behavior.
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct HeaderV5b {
@@ -132,7 +138,10 @@ impl HeaderV5b {
             ));
         }
 
-        let reserved2 = self.reserved2; // Copy from packed struct
+        // Safe: read_unaligned for packed struct field access using raw pointer.
+        // Even though this struct is padded to 88 bytes and fields are aligned,
+        // the `packed` attribute requires us to use unaligned reads.
+        let reserved2 = unsafe { std::ptr::read_unaligned(std::ptr::addr_of!(self.reserved2)) };
         if reserved2 != 0 {
             return Err(format!("Reserved2 field must be zero, got {}", reserved2));
         }
@@ -143,7 +152,9 @@ impl HeaderV5b {
         }
 
         // Validate scratch space
-        let scratch_space = self.scratch_space; // Copy from packed struct
+        // Safe: read_unaligned for packed struct field access using raw pointer
+        let scratch_space =
+            unsafe { std::ptr::read_unaligned(std::ptr::addr_of!(self.scratch_space)) };
         if scratch_space > MAX_MEMORY_ADDRESS as u64 {
             return Err(format!(
                 "Scratch space {} exceeds maximum addressable memory {}",
@@ -182,6 +193,11 @@ impl HeaderV5b {
 }
 
 /// Level header structure (8 bytes)
+///
+/// Note: This struct is exactly 8 bytes (divisible by 4), so both u32 fields
+/// are properly aligned. However, we mark it as `packed` and use `read_unaligned`
+/// for absolute safety, ensuring no undefined behavior regardless of how the
+/// compiler chooses to lay out the struct.
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct LevelHeader {
@@ -206,8 +222,13 @@ impl LevelHeader {
     /// Validate the level header
     pub fn validate(&self) -> Result<(), String> {
         // Check for overflow when adding
-        let num_xor_gates = self.num_xor_gates; // Copy from packed struct
-        let num_and_gates = self.num_and_gates; // Copy from packed struct
+        // Safe: read_unaligned for packed struct field access using raw pointers.
+        // Even though this 8-byte struct has naturally aligned fields, the `packed`
+        // attribute requires us to use unaligned reads for absolute safety.
+        let num_xor_gates =
+            unsafe { std::ptr::read_unaligned(std::ptr::addr_of!(self.num_xor_gates)) };
+        let num_and_gates =
+            unsafe { std::ptr::read_unaligned(std::ptr::addr_of!(self.num_and_gates)) };
         if num_xor_gates.checked_add(num_and_gates).is_none() {
             return Err(format!(
                 "Gate counts overflow: XOR {} + AND {}",
