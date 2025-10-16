@@ -528,16 +528,9 @@ pub async fn verify_v5a_checksum(path: impl AsRef<Path>) -> Result<bool> {
 
     let mut hasher = Hasher::new();
 
-    // Outputs
-    if outputs_len > 0 {
-        let (res, outs) = file
-            .read_exact_at(vec![0u8; outputs_len], HEADER_SIZE_V5A as u64)
-            .await;
-        res?;
-        hasher.update(&outs);
-    }
+    // Checksum order: blocks || outputs || header tail
 
-    // Blocks region
+    // 1. Blocks region
     let total_gates = hdr.total_gates();
     let blocks_total = (total_gates + (GATES_PER_BLOCK as u64 - 1)) / (GATES_PER_BLOCK as u64);
     let blocks_bytes = (blocks_total as usize) * BLOCK_SIZE_BYTES;
@@ -557,7 +550,16 @@ pub async fn verify_v5a_checksum(path: impl AsRef<Path>) -> Result<bool> {
         }
     }
 
-    // Header tail
+    // 2. Outputs
+    if outputs_len > 0 {
+        let (res, outs) = file
+            .read_exact_at(vec![0u8; outputs_len], HEADER_SIZE_V5A as u64)
+            .await;
+        res?;
+        hasher.update(&outs);
+    }
+
+    // 3. Header tail
     hasher.update(&header[40..72]);
 
     Ok(hasher.finalize().as_bytes() == file_checksum)

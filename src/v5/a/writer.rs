@@ -3,7 +3,7 @@
 //! - Accepts gates individually or in batches.
 //! - Packs blocks (256 gates) with SoA layout and fixed-width fields.
 //! - Writes header placeholder + outputs, then blocks, then backpatches header with checksum.
-//! - Computes checksum in spec order: outputs || blocks || header[after checksum].
+//! - Computes checksum in modified order: blocks || outputs || header[after checksum].
 //! - Uses monoio for async I/O.
 //! - Handles partial blocks safely: zero-padded, readers rely on header counts.
 
@@ -191,9 +191,8 @@ impl CircuitWriterV5a {
             res?;
         }
 
-        // Initialize hasher with outputs (spec step 1)
-        let mut hasher = Hasher::new();
-        hasher.update(&outputs_bytes);
+        // Initialize hasher (blocks will be hashed as written)
+        let hasher = Hasher::new();
 
         // Compute the next offset after outputs
         let next_offset = outputs_offset + outputs_bytes.len() as u64;
@@ -264,7 +263,11 @@ impl CircuitWriterV5a {
         // Flush aggregation buffer
         self.flush_io_buffer().await?;
 
-        // Hash header fields after checksum (spec step 3)
+        // Hash outputs (after blocks have been hashed)
+        let outputs_bytes = encode_outputs_le34(&self.outputs)?;
+        self.hasher.update(&outputs_bytes);
+
+        // Hash header fields after checksum
         // Order: xor_gates, and_gates, primary_inputs, num_outputs (all LE)
         let mut header_tail = [0u8; 32];
         header_tail[0..8].copy_from_slice(&self.xor_gates_written.to_le_bytes());
@@ -309,7 +312,7 @@ impl CircuitWriterV5a {
         self.block.encode_into(&mut block);
         self.block.clear();
 
-        // Hash the block (spec step 2)
+        // Hash the block as it's written
         self.hasher.update(&block);
 
         // Append to IO buffer; flush if needed
@@ -682,20 +685,25 @@ mod tests {
         let num_outputs = u64::from_le_bytes(header[64..72].try_into().unwrap()) as usize;
         let outputs_size = num_outputs * 5;
 
-        // Hash outputs
         let mut hasher = Hasher::new();
+
+        // Checksum order: blocks || outputs || header tail
+
+        // 1. Hash blocks (seek past outputs to blocks region)
+        f.seek(SeekFrom::Start((HEADER_SIZE_V5A + outputs_size) as u64))?;
+        let mut blocks = Vec::new();
+        f.read_to_end(&mut blocks)?;
+        hasher.update(&blocks);
+
+        // 2. Hash outputs (seek back to after header)
         if outputs_size > 0 {
+            f.seek(SeekFrom::Start(HEADER_SIZE_V5A as u64))?;
             let mut outputs = vec![0u8; outputs_size];
             f.read_exact(&mut outputs)?;
             hasher.update(&outputs);
         }
 
-        // Hash blocks
-        let mut blocks = Vec::new();
-        f.read_to_end(&mut blocks)?;
-        hasher.update(&blocks);
-
-        // Hash header tail
+        // 3. Hash header tail
         hasher.update(&header[40..72]);
 
         Ok(hasher.finalize().as_bytes() == file_checksum)
