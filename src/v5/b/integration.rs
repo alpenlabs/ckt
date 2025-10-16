@@ -19,8 +19,8 @@ mod tests {
         let path = dir.path().join("empty.v5b");
 
         // Write empty circuit
-        let writer = CircuitWriterV5b::new(&path, 0, vec![]).await.unwrap();
-        let stats = writer.finalize(2).await.unwrap();
+        let writer = CircuitWriterV5b::new(&path, 0, 0).await.unwrap();
+        let stats = writer.finalize(2, vec![]).await.unwrap();
         assert_eq!(stats.total_gates, 0);
         assert_eq!(stats.num_levels, 0);
         assert_eq!(stats.num_outputs, 0);
@@ -46,13 +46,13 @@ mod tests {
         let path = dir.path().join("single.v5b");
 
         // Write single XOR gate
-        let mut writer = CircuitWriterV5b::new(&path, 2, vec![4]).await.unwrap();
+        let mut writer = CircuitWriterV5b::new(&path, 2, 1).await.unwrap();
         writer.start_level().unwrap();
         writer
             .add_gate(GateType::XOR, WriterGate::new(2, 3, 4).unwrap())
             .unwrap();
         writer.finish_level().await.unwrap();
-        let stats = writer.finalize(5).await.unwrap();
+        let stats = writer.finalize(5, vec![4]).await.unwrap();
 
         assert_eq!(stats.total_gates, 1);
         assert_eq!(stats.xor_gates, 1);
@@ -99,7 +99,7 @@ mod tests {
         let path = dir.path().join("multilevel.v5b");
 
         // Create a circuit with 3 levels
-        let mut writer = CircuitWriterV5b::new(&path, 2, vec![7]).await.unwrap();
+        let mut writer = CircuitWriterV5b::new(&path, 2, 1).await.unwrap();
 
         // Level 1: 2 gates
         writer.start_level().unwrap();
@@ -125,7 +125,7 @@ mod tests {
             .unwrap();
         writer.finish_level().await.unwrap();
 
-        let stats = writer.finalize(8).await.unwrap();
+        let stats = writer.finalize(8, vec![7]).await.unwrap();
         assert_eq!(stats.total_gates, 4);
         assert_eq!(stats.xor_gates, 2);
         assert_eq!(stats.and_gates, 2);
@@ -198,9 +198,7 @@ mod tests {
         let path = dir.path().join("mixed.v5b");
 
         // Write level with interleaved XOR and AND gates
-        let mut writer = CircuitWriterV5b::new(&path, 2, vec![103, 203])
-            .await
-            .unwrap();
+        let mut writer = CircuitWriterV5b::new(&path, 2, 2).await.unwrap();
         writer.start_level().unwrap();
 
         // Add gates in mixed order
@@ -214,7 +212,7 @@ mod tests {
         }
 
         writer.finish_level().await.unwrap();
-        let stats = writer.finalize(300).await.unwrap();
+        let stats = writer.finalize(300, vec![103, 203]).await.unwrap();
         assert_eq!(stats.total_gates, 100);
         assert_eq!(stats.xor_gates, 50);
         assert_eq!(stats.and_gates, 50);
@@ -248,7 +246,7 @@ mod tests {
         let path = dir.path().join("fullblock.v5b");
 
         // Write exactly GATES_PER_BLOCK gates
-        let mut writer = CircuitWriterV5b::new(&path, 2, vec![1000]).await.unwrap();
+        let mut writer = CircuitWriterV5b::new(&path, 2, 1).await.unwrap();
         writer.start_level().unwrap();
 
         for i in 0..GATES_PER_BLOCK as u32 {
@@ -263,7 +261,7 @@ mod tests {
         }
 
         writer.finish_level().await.unwrap();
-        let stats = writer.finalize(2000).await.unwrap();
+        let stats = writer.finalize(2000, vec![1000]).await.unwrap();
         assert_eq!(stats.total_gates, GATES_PER_BLOCK as u64);
 
         // Verify checksum
@@ -298,7 +296,7 @@ mod tests {
 
         // Write 1.5 blocks worth of gates
         let num_gates = GATES_PER_BLOCK + GATES_PER_BLOCK / 2;
-        let mut writer = CircuitWriterV5b::new(&path, 2, vec![5000]).await.unwrap();
+        let mut writer = CircuitWriterV5b::new(&path, 2, 1).await.unwrap();
         writer.start_level().unwrap();
 
         for i in 0..num_gates as u32 {
@@ -308,7 +306,7 @@ mod tests {
         }
 
         writer.finish_level().await.unwrap();
-        let stats = writer.finalize(6000).await.unwrap();
+        let stats = writer.finalize(6000, vec![5000]).await.unwrap();
         assert_eq!(stats.total_gates, num_gates as u64);
         assert_eq!(stats.xor_gates, num_gates as u64);
 
@@ -353,7 +351,7 @@ mod tests {
         let xor_count = 300;
         let and_count = 300; // Total 600, which spans 2 blocks (504 + 96)
 
-        let mut writer = CircuitWriterV5b::new(&path, 2, vec![2000]).await.unwrap();
+        let mut writer = CircuitWriterV5b::new(&path, 2, 1).await.unwrap();
         writer.start_level().unwrap();
 
         // Add interleaved, but they'll be reordered as XOR-first
@@ -369,7 +367,7 @@ mod tests {
         }
 
         writer.finish_level().await.unwrap();
-        let stats = writer.finalize(3000).await.unwrap();
+        let stats = writer.finalize(3000, vec![2000]).await.unwrap();
         assert_eq!(stats.total_gates, 600);
         assert_eq!(stats.xor_gates, 300);
         assert_eq!(stats.and_gates, 300);
@@ -428,10 +426,8 @@ mod tests {
 
         // Create a multi-level circuit with many gates
         let gates_per_level = 1000;
-        let num_levels = 5;
-        let mut writer = CircuitWriterV5b::new(&path, 100, vec![50000])
-            .await
-            .unwrap();
+        let num_levels = 10;
+        let mut writer = CircuitWriterV5b::new(&path, 100, 1).await.unwrap();
 
         for level in 0..num_levels {
             writer.start_level().unwrap();
@@ -449,7 +445,7 @@ mod tests {
             writer.finish_level().await.unwrap();
         }
 
-        let stats = writer.finalize(60000).await.unwrap();
+        let stats = writer.finalize(110000, vec![50000]).await.unwrap();
         assert_eq!(stats.total_gates, (gates_per_level * num_levels) as u64);
         assert_eq!(stats.num_levels, num_levels);
 
@@ -529,9 +525,7 @@ mod tests {
 
         // Test with maximum valid 24-bit address
         let max_addr = 0xFFFFFF;
-        let mut writer = CircuitWriterV5b::new(&path, 2, vec![max_addr])
-            .await
-            .unwrap();
+        let mut writer = CircuitWriterV5b::new(&path, 2, 1).await.unwrap();
         writer.start_level().unwrap();
         writer
             .add_gate(GateType::XOR, WriterGate::new(2, 3, max_addr).unwrap())
@@ -539,7 +533,10 @@ mod tests {
         writer.finish_level().await.unwrap();
 
         // Should succeed with scratch space > max address
-        let stats = writer.finalize(max_addr as u64 + 1).await.unwrap();
+        let stats = writer
+            .finalize(max_addr as u64 + 1, vec![max_addr])
+            .await
+            .unwrap();
         assert_eq!(stats.total_gates, 1);
 
         // Verify checksum
@@ -559,7 +556,7 @@ mod tests {
         let path = dir.path().join("empty_level.v5b");
 
         // Create circuit with empty level in between
-        let mut writer = CircuitWriterV5b::new(&path, 2, vec![5]).await.unwrap();
+        let mut writer = CircuitWriterV5b::new(&path, 2, 1).await.unwrap();
 
         // Level 1: has gates
         writer.start_level().unwrap();
@@ -579,7 +576,7 @@ mod tests {
             .unwrap();
         writer.finish_level().await.unwrap();
 
-        let stats = writer.finalize(10).await.unwrap();
+        let stats = writer.finalize(10, vec![5]).await.unwrap();
         assert_eq!(stats.total_gates, 2);
         assert_eq!(stats.num_levels, 3);
 
@@ -610,13 +607,13 @@ mod tests {
         let path = dir.path().join("corrupt.v5b");
 
         // Write valid circuit
-        let mut writer = CircuitWriterV5b::new(&path, 2, vec![4]).await.unwrap();
+        let mut writer = CircuitWriterV5b::new(&path, 2, 1).await.unwrap();
         writer.start_level().unwrap();
         writer
             .add_gate(GateType::XOR, WriterGate::new(2, 3, 4).unwrap())
             .unwrap();
         writer.finish_level().await.unwrap();
-        writer.finalize(5).await.unwrap();
+        writer.finalize(5, vec![4]).await.unwrap();
 
         // Verify original is valid
         assert!(verify_v5b_checksum(&path).await.unwrap());
@@ -651,7 +648,7 @@ mod tests {
 
         // Create circuit with multiple outputs
         let outputs = vec![100, 200, 300, 400, 500];
-        let mut writer = CircuitWriterV5b::new(&path, 2, outputs.clone())
+        let mut writer = CircuitWriterV5b::new(&path, 2, outputs.len() as u64)
             .await
             .unwrap();
 
@@ -663,7 +660,7 @@ mod tests {
         }
         writer.finish_level().await.unwrap();
 
-        let stats = writer.finalize(1000).await.unwrap();
+        let stats = writer.finalize(1000, outputs.clone()).await.unwrap();
         assert_eq!(stats.num_outputs, outputs.len() as u64);
 
         // Verify checksum
@@ -680,7 +677,7 @@ mod tests {
         let path = dir.path().join("scratch.v5b");
 
         // Create circuit with gates using high addresses
-        let mut writer = CircuitWriterV5b::new(&path, 2, vec![1000]).await.unwrap();
+        let mut writer = CircuitWriterV5b::new(&path, 2, 1).await.unwrap();
         writer.start_level().unwrap();
         writer
             .add_gate(GateType::XOR, WriterGate::new(2, 3, 1000).unwrap())
@@ -688,7 +685,7 @@ mod tests {
         writer.finish_level().await.unwrap();
 
         // Should fail if scratch_space is too small
-        let result = writer.finalize(500).await;
+        let result = writer.finalize(500, vec![1000]).await;
         assert!(result.is_err());
         assert!(
             result

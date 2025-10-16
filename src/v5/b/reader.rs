@@ -471,15 +471,7 @@ pub async fn verify_v5b_checksum(path: impl AsRef<std::path::Path>) -> std::io::
 
     let mut hasher = Hasher::new();
 
-    // 1) Outputs section
-    if outputs_len > 0 {
-        let off = HEADER_SIZE as u64;
-        let (res, outs) = file.read_exact_at(vec![0u8; outputs_len], off).await;
-        res?;
-        hasher.update(&outs);
-    }
-
-    // 2) Gate blocks section = all level headers + all blocks, in order
+    // 1) Gate blocks section = all level headers + all blocks, in order
     // Walk levels, hash each 8-byte LevelHeader, then hash N full blocks.
     let mut off = (HEADER_SIZE + outputs_len) as u64;
     let mut total_level_gates: u64 = 0;
@@ -540,6 +532,14 @@ pub async fn verify_v5b_checksum(path: impl AsRef<std::path::Path>) -> std::io::
     // Validate level gate sum matches header total (structural sanity check)
     if total_level_gates != hdr.total_gates() {
         return Ok(false);
+    }
+
+    // 2) Outputs section
+    if outputs_len > 0 {
+        let off = HEADER_SIZE as u64;
+        let (res, outs) = file.read_exact_at(vec![0u8; outputs_len], off).await;
+        res?;
+        hasher.update(&outs);
     }
 
     // 3) Header tail (after checksum field)

@@ -125,9 +125,8 @@ pub struct CircuitWriterV5b {
     num_outputs: u64,
 
     // Offsets
-    outputs_offset: u64,      // start of outputs (immediately after header)
-    levels_start_offset: u64, // first byte after outputs (start of streamed levels)
-    next_offset: u64,         // current end-of-file offset for streaming writes
+    outputs_offset: u64, // start of outputs (immediately after header)
+    next_offset: u64,    // current end-of-file offset for streaming writes
 
     // Aggregation buffer for writes
     io_buf: Vec<u8>,
@@ -189,7 +188,6 @@ impl CircuitWriterV5b {
             primary_inputs,
             num_outputs,
             outputs_offset,
-            levels_start_offset,
             next_offset,
             io_buf: Vec::with_capacity(DEFAULT_IO_BUFFER_CAP),
             io_buf_cap: DEFAULT_IO_BUFFER_CAP,
