@@ -8,6 +8,7 @@ use lvl::types::{CompactWireId, Credits, IntermediateGate};
 use std::alloc::{GlobalAlloc, Layout};
 use std::cell::Cell;
 use std::collections::hash_map::Entry;
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 mod cli;
@@ -22,6 +23,8 @@ struct TrackingAllocator {
     inner: mimalloc::MiMalloc,
 }
 
+static MEMORY_LIMIT: OnceLock<usize> = OnceLock::new();
+
 thread_local! {
     static ALLOCATED_BYTES: Cell<usize> = Cell::new(0);
 
@@ -30,6 +33,12 @@ thread_local! {
 
 unsafe impl GlobalAlloc for TrackingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        if let Some(limit) = MEMORY_LIMIT.get() {
+            let current = ALLOCATED_BYTES.with(|bytes| bytes.get());
+            if current + layout.size() > *limit {
+                std::process::exit(137);
+            }
+        }
         let ptr = self.inner.alloc(layout);
         if !ptr.is_null() {
             let current = ALLOCATED_BYTES.with(|bytes| {
@@ -51,6 +60,12 @@ unsafe impl GlobalAlloc for TrackingAllocator {
     }
 
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
+        if let Some(limit) = MEMORY_LIMIT.get() {
+            let current = ALLOCATED_BYTES.with(|bytes| bytes.get());
+            if current + layout.size() > *limit {
+                std::process::exit(137);
+            }
+        }
         let ptr = self.inner.alloc_zeroed(layout);
         if !ptr.is_null() {
             let current = ALLOCATED_BYTES.with(|bytes| {
@@ -99,6 +114,8 @@ fn get_max_memory_usage_mb() -> f64 {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse command line arguments
     let args = Cli::parse_args();
+
+    MEMORY_LIMIT.set(1 * 1024usize.pow(3)).unwrap();
 
     println!("Circuit Level Organizer - Sliding Window Algorithm");
     println!("===================================================");
