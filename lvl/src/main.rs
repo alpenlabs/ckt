@@ -24,14 +24,20 @@ struct TrackingAllocator {
 
 thread_local! {
     static ALLOCATED_BYTES: Cell<usize> = Cell::new(0);
+
+    static MAX_ALLOCATED_BYTES: Cell<usize> = Cell::new(0);
 }
 
 unsafe impl GlobalAlloc for TrackingAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         let ptr = self.inner.alloc(layout);
         if !ptr.is_null() {
-            ALLOCATED_BYTES.with(|bytes| {
+            let current = ALLOCATED_BYTES.with(|bytes| {
                 bytes.set(bytes.get() + layout.size());
+                bytes.get()
+            });
+            MAX_ALLOCATED_BYTES.with(|max| {
+                max.set(max.get().max(current));
             });
         }
         ptr
@@ -47,8 +53,12 @@ unsafe impl GlobalAlloc for TrackingAllocator {
     unsafe fn alloc_zeroed(&self, layout: Layout) -> *mut u8 {
         let ptr = self.inner.alloc_zeroed(layout);
         if !ptr.is_null() {
-            ALLOCATED_BYTES.with(|bytes| {
+            let current = ALLOCATED_BYTES.with(|bytes| {
                 bytes.set(bytes.get() + layout.size());
+                bytes.get()
+            });
+            MAX_ALLOCATED_BYTES.with(|max| {
+                max.set(max.get().max(current));
             });
         }
         ptr
@@ -57,9 +67,13 @@ unsafe impl GlobalAlloc for TrackingAllocator {
     unsafe fn realloc(&self, ptr: *mut u8, layout: Layout, new_size: usize) -> *mut u8 {
         let new_ptr = self.inner.realloc(ptr, layout, new_size);
         if !new_ptr.is_null() {
-            ALLOCATED_BYTES.with(|bytes| {
+            let current = ALLOCATED_BYTES.with(|bytes| {
                 let current = bytes.get();
                 bytes.set(current - layout.size() + new_size);
+                bytes.get()
+            });
+            MAX_ALLOCATED_BYTES.with(|max| {
+                max.set(max.get().max(current));
             });
         }
         new_ptr
@@ -73,6 +87,10 @@ static GLOBAL: TrackingAllocator = TrackingAllocator {
 
 fn get_memory_usage_mb() -> f64 {
     ALLOCATED_BYTES.with(|bytes| bytes.get() as f64) / (1024.0 * 1024.0)
+}
+
+fn get_max_memory_usage_mb() -> f64 {
+    MAX_ALLOCATED_BYTES.with(|max| max.get() as f64) / (1024.0 * 1024.0)
 }
 
 // Constants removed - now provided via CLI arguments
@@ -145,9 +163,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             0
         };
         pb_load.set_message(format!(
-            "Mem: {:.1}MB ({} B/gate)",
+            "Mem: {:.1}MB ({} B/gate) | Max: {:.1}MB",
             get_memory_usage_mb(),
-            bytes_per_gate
+            bytes_per_gate,
+            get_max_memory_usage_mb()
         ));
     };
 
@@ -160,21 +179,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initial load - fill up to target
     pb_load.set_message("Filling leveller...");
     while !reader_exhausted {
-        match reader.next_block().await {
-            Ok(Some(gates)) => {
-                pb_load.inc(gates.len() as u64);
-                // Always process the entire batch to avoid missing gates
-                for gate in gates {
+        match reader.next_block_soa().await {
+            Ok(Some(block)) => {
+                for gate_idx in 0..block.gates_in_block {
                     let new_gate = IntermediateGate {
-                        in1: CompactWireId::from_u64(gate.in1),
-                        in2: CompactWireId::from_u64(gate.in2),
-                        out: CompactWireId::from_u64(gate.out),
-                        credits: Credits(gate.credits as u16),
+                        in1: CompactWireId::from_u64(block.in1[gate_idx]),
+                        in2: CompactWireId::from_u64(block.in2[gate_idx]),
+                        out: CompactWireId::from_u64(block.out[gate_idx]),
+                        credits: Credits(block.credits[gate_idx] as u16),
                     };
-                    leveller.add_gate(new_gate, gate.gate_type);
-
-                    total_gates_added += 1;
+                    leveller.add_gate(new_gate, block.gate_types[gate_idx]);
                 }
+                total_gates_added += block.gates_in_block;
+                // Always process the entire batch to avoid missing gates
+                pb_load.inc(block.gates_in_block as u64);
 
                 // Check if we've loaded enough after processing the entire batch
                 if total_gates_added >= args.target_pending {
@@ -221,7 +239,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             gates_since_check += level_gates;
             total_levels += 1;
 
-            writer.start_level();
+            writer.start_level().unwrap();
 
             let mut to_free = Vec::new();
 

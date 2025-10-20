@@ -1,17 +1,17 @@
+use std::hash::Hash;
 use std::mem;
 
 pub mod slab;
+// thinvec is no longer needed by this module
 pub mod thinvec;
 pub mod types;
 
-use crate::{
-    thinvec::{ThinVec, ThinVecInternal},
-    types::{
-        CompactDependency, CompactWireId, Credits, IntermediateGate, Level, PendingLevel,
-        SlottedValue, WireAvailability,
-    },
+use crate::types::{
+    CompactDependency, CompactWireId, Credits, IntermediateGate, Level, PendingLevel, SlottedValue,
+    WireAvailability, WireAvailabilityMut,
 };
-use ahash::{HashMap, HashMapExt};
+
+use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
 use ckt::GateType;
 use cynosure::hints::{cold_and_empty, likely, unlikely};
 
@@ -20,17 +20,16 @@ pub struct Leveller {
     permanent_wires: CompactWireId,
     level_id: u32,
     pending_level: PendingLevel,
-    state: HashMap<u32, SlottedValue>, // Changed to use u32 key with SlottedValue
+    state: HashMap<u32, SlottedValue>, // u32 key with SlottedValue
 }
 
 impl Leveller {
-    // Helper to get wire availability
-    fn get_wire(&self, wire_id: CompactWireId) -> Option<WireAvailability> {
+    fn get_wire_mut(&mut self, wire_id: CompactWireId) -> Option<WireAvailabilityMut<'_>> {
         let wire_id_u64 = wire_id.to_u64();
         let key = (wire_id_u64 & 0xFFFFFFFF) as u32;
         self.state
-            .get(&key)
-            .and_then(|slotted| slotted.get_slot(wire_id))
+            .get_mut(&key)
+            .and_then(|slotted| slotted.get_slot_mut(wire_id))
     }
 
     // Helper to set wire availability
@@ -59,12 +58,13 @@ impl Leveller {
     }
 
     fn wire_used(&mut self, wire_id: CompactWireId) {
-        let Some(WireAvailability::Available(credits)) = self.get_wire(wire_id) else {
+        let Some(WireAvailabilityMut::Available(mut guard)) = self.get_wire_mut(wire_id) else {
             panic!("Wire is not available");
         };
         // cleanup memory if no future gates reference this wire
+        let credits = guard.get();
         if credits.0 > 1 {
-            self.set_wire(wire_id, WireAvailability::Available(Credits(credits.0 - 1)));
+            guard.set(Credits(credits.0 - 1));
         } else {
             self.remove_wire(wire_id);
         }
@@ -78,10 +78,9 @@ enum Status {
 }
 
 #[inline]
-fn append_if_not_exists<T: PartialEq>(set: &mut ThinVec<T>, item: T) {
-    if !set.contains(&item) {
-        set.push(item);
-    }
+fn append_if_not_exists<T: Eq + Hash>(set: &mut HashSet<T>, item: T) {
+    // HashSet insert is idempotent; fast path vs O(n) contains + push
+    let _ = set.insert(item);
 }
 
 impl Leveller {
@@ -89,42 +88,44 @@ impl Leveller {
         if unlikely(gate.in1 < self.permanent_wires) {
             return Status::Available { is_primary: true };
         }
-        match self.get_wire(gate.in1) {
+        let mut replacement = None;
+        let status = match self.get_wire_mut(gate.in1) {
             None => {
                 cold_and_empty();
 
-                self.set_wire(
-                    gate.in1,
-                    WireAvailability::WaitingInline(CompactDependency::new(
-                        gate.in2,
-                        gate.out,
-                        gate_type,
-                        gate.credits,
-                    )),
-                );
+                replacement = Some(WireAvailability::WaitingInline(CompactDependency::new(
+                    gate.in2,
+                    gate.out,
+                    gate_type,
+                    gate.credits,
+                )));
 
                 Status::Waiting
             }
-            Some(WireAvailability::Waiting(mut in1_waiting_list)) => {
+            Some(WireAvailabilityMut::Waiting(mut in1_waiting_set)) => {
                 append_if_not_exists(
-                    &mut in1_waiting_list,
+                    &mut in1_waiting_set,
                     CompactDependency::new(gate.in2, gate.out, gate_type, gate.credits),
                 );
-                self.set_wire(gate.in1, WireAvailability::Waiting(in1_waiting_list));
                 Status::Waiting
             }
-            Some(WireAvailability::WaitingInline(existing_dep)) => {
+            Some(WireAvailabilityMut::WaitingInline(existing_dep)) => {
                 let new_dep = CompactDependency::new(gate.in2, gate.out, gate_type, gate.credits);
-                let mut deps = ThinVec::with_capacity(2);
-                deps.push(existing_dep);
-                deps.push(new_dep);
-                if deps[0] != deps[1] {
-                    self.set_wire(gate.in1, WireAvailability::Waiting(deps));
+                if existing_dep.get() != new_dep {
+                    let mut set = HashSet::with_capacity(2);
+                    set.insert(existing_dep.get());
+                    set.insert(new_dep);
+                    replacement = Some(WireAvailability::Waiting(set));
                 }
                 Status::Waiting
             }
-            Some(WireAvailability::Available(..)) => Status::Available { is_primary: false },
+            Some(WireAvailabilityMut::Available(..)) => Status::Available { is_primary: false },
+        };
+
+        if let Some(replacement) = replacement {
+            self.set_wire(gate.in1, replacement);
         }
+        status
     }
 
     fn check_in2(
@@ -136,82 +137,79 @@ impl Leveller {
         if unlikely(gate.in2 < self.permanent_wires) {
             return Status::Available { is_primary: true };
         }
-        match in1_status {
-            Status::Waiting => match self.get_wire(gate.in2) {
-                Some(WireAvailability::Waiting(mut in2_waiting_list)) => {
-                    append_if_not_exists(
-                        &mut in2_waiting_list,
-                        CompactDependency::new(gate.in1, gate.out, gate_type, gate.credits),
-                    );
-                    self.set_wire(gate.in2, WireAvailability::Waiting(in2_waiting_list));
-                    Status::Waiting
-                }
-                None => {
-                    cold_and_empty();
-
-                    self.set_wire(
-                        gate.in2,
-                        WireAvailability::WaitingInline(CompactDependency::new(
-                            gate.in1,
-                            gate.out,
-                            gate_type,
-                            gate.credits,
-                        )),
-                    );
-                    Status::Waiting
-                }
-                Some(WireAvailability::WaitingInline(existing_dep)) => {
-                    let new_dep =
-                        CompactDependency::new(gate.in1, gate.out, gate_type, gate.credits);
-                    let mut deps = ThinVec::with_capacity(2);
-                    deps.push(existing_dep);
-                    deps.push(new_dep);
-                    if deps[0] != deps[1] {
-                        self.set_wire(gate.in2, WireAvailability::Waiting(deps));
+        let mut replacement = None;
+        let status =
+            match in1_status {
+                Status::Waiting => match self.get_wire_mut(gate.in2) {
+                    Some(WireAvailabilityMut::Waiting(mut in2_waiting_set)) => {
+                        append_if_not_exists(
+                            &mut in2_waiting_set,
+                            CompactDependency::new(gate.in1, gate.out, gate_type, gate.credits),
+                        );
+                        Status::Waiting
                     }
-                    Status::Waiting
-                }
+                    None => {
+                        cold_and_empty();
 
-                Some(WireAvailability::Available(..)) => Status::Available { is_primary: false },
-            },
-            Status::Available { .. } => match self.get_wire(gate.in2) {
-                None => {
-                    cold_and_empty();
-
-                    self.set_wire(
-                        gate.in2,
-                        WireAvailability::WaitingInline(CompactDependency::new(
-                            gate.in1,
-                            gate.out,
-                            gate_type,
-                            gate.credits,
-                        )),
-                    );
-
-                    Status::Waiting
-                }
-                Some(WireAvailability::Waiting(mut in2_waiting_list)) => {
-                    append_if_not_exists(
-                        &mut in2_waiting_list,
-                        CompactDependency::new(gate.in1, gate.out, gate_type, gate.credits),
-                    );
-                    self.set_wire(gate.in2, WireAvailability::Waiting(in2_waiting_list));
-                    Status::Waiting
-                }
-                Some(WireAvailability::WaitingInline(existing_dep)) => {
-                    let new_dep =
-                        CompactDependency::new(gate.in1, gate.out, gate_type, gate.credits);
-                    let mut deps = ThinVec::with_capacity(2);
-                    deps.push(existing_dep);
-                    deps.push(new_dep);
-                    if deps[0] != deps[1] {
-                        self.set_wire(gate.in2, WireAvailability::Waiting(deps));
+                        replacement = Some(WireAvailability::WaitingInline(
+                            CompactDependency::new(gate.in1, gate.out, gate_type, gate.credits),
+                        ));
+                        Status::Waiting
                     }
-                    Status::Waiting
-                }
-                Some(WireAvailability::Available(..)) => Status::Available { is_primary: false },
-            },
+                    Some(WireAvailabilityMut::WaitingInline(existing_dep)) => {
+                        let new_dep =
+                            CompactDependency::new(gate.in1, gate.out, gate_type, gate.credits);
+                        if existing_dep.get() != new_dep {
+                            let mut set = HashSet::with_capacity(2);
+                            set.insert(existing_dep.get());
+                            set.insert(new_dep);
+                            replacement = Some(WireAvailability::Waiting(set));
+                        }
+                        Status::Waiting
+                    }
+
+                    Some(WireAvailabilityMut::Available(..)) => {
+                        Status::Available { is_primary: false }
+                    }
+                },
+                Status::Available { .. } => match self.get_wire_mut(gate.in2) {
+                    None => {
+                        cold_and_empty();
+
+                        replacement = Some(WireAvailability::WaitingInline(
+                            CompactDependency::new(gate.in1, gate.out, gate_type, gate.credits),
+                        ));
+
+                        Status::Waiting
+                    }
+                    Some(WireAvailabilityMut::Waiting(mut in2_waiting_set)) => {
+                        append_if_not_exists(
+                            &mut in2_waiting_set,
+                            CompactDependency::new(gate.in1, gate.out, gate_type, gate.credits),
+                        );
+                        Status::Waiting
+                    }
+                    Some(WireAvailabilityMut::WaitingInline(existing_dep)) => {
+                        let new_dep =
+                            CompactDependency::new(gate.in1, gate.out, gate_type, gate.credits);
+                        if existing_dep.get() != new_dep {
+                            let mut set = HashSet::with_capacity(2);
+                            set.insert(existing_dep.get());
+                            set.insert(new_dep);
+                            replacement = Some(WireAvailability::Waiting(set));
+                        }
+                        Status::Waiting
+                    }
+                    Some(WireAvailabilityMut::Available(..)) => {
+                        Status::Available { is_primary: false }
+                    }
+                },
+            };
+
+        if let Some(replacement) = replacement {
+            self.set_wire(gate.in2, replacement);
         }
+        status
     }
 
     fn process_gate(
@@ -288,10 +286,10 @@ impl Leveller {
             buf
         };
 
-        let mut waiting_lists = Vec::new();
+        let mut waiting_lists: Vec<(CompactWireId, HashSet<CompactDependency>)> = Vec::new();
         // mark newly available wires
         for (wire_id, credits) in newly_available_wires {
-            match self.get_wire(wire_id) {
+            match self.remove_wire(wire_id) {
                 None => {
                     self.set_wire(wire_id, WireAvailability::Available(credits));
                 }
@@ -299,21 +297,21 @@ impl Leveller {
                     cold_and_empty();
                     panic!("gate already processed");
                 }
-                Some(WireAvailability::Waiting(waiting_list)) => {
+                Some(WireAvailability::Waiting(waiting_set)) => {
                     self.set_wire(wire_id, WireAvailability::Available(credits));
-                    waiting_lists.push((wire_id, waiting_list));
+                    waiting_lists.push((wire_id, waiting_set));
                 }
                 Some(WireAvailability::WaitingInline(dep)) => {
                     self.set_wire(wire_id, WireAvailability::Available(credits));
-                    let mut vec = ThinVec::with_capacity(1);
-                    vec.push(dep);
-                    waiting_lists.push((wire_id, vec));
+                    let mut set = HashSet::with_capacity(1);
+                    set.insert(dep);
+                    waiting_lists.push((wire_id, set));
                 }
             }
         }
         // prep next level
-        for (real_out, waiting_list) in waiting_lists {
-            for dep in waiting_list {
+        for (real_out, waiting_set) in waiting_lists {
+            for dep in waiting_set {
                 let dep = dep.to_dependency();
                 self.process_gate(
                     IntermediateGate {

@@ -28,7 +28,7 @@ v4 = []
 v5 = ["dep:kanal"]
 
 [workspace]
-members = ["cli", "lvl"]
+members = [ "bench","cli", "lvl"]
 resolver = "3"
 
 [workspace.package]
@@ -56,7 +56,7 @@ lto = true        # Enable Link Time Optimization
 codegen-units = 1 # Reduced to increase optimizations
 panic = "abort"   # Abort on panic
 # strip = "symbols" # Strip symbols from binary
-# debug = true
+debug = true
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(unstable)'] }

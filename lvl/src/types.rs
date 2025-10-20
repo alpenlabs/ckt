@@ -1,10 +1,14 @@
 use ckt::GateType;
 use indexmap::IndexSet;
 
-use crate::thinvec::{ThinVec, ThinVecInternal};
+use std::cmp::Ordering;
+use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut};
 
-/// 34 bit uint
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+use ahash::{HashSet, HashSetExt};
+
+// 34 bit uint
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CompactWireId([u8; 5]);
 
 impl CompactWireId {
@@ -29,6 +33,27 @@ impl CompactWireId {
             | ((self.0[2] as u64) << 16)
             | ((self.0[3] as u64) << 24)
             | ((self.0[4] as u64) << 32)
+    }
+}
+
+impl Ord for CompactWireId {
+    #[inline]
+    fn cmp(&self, other: &Self) -> Ordering {
+        use core::cmp::Ordering::*;
+        for i in (0..5).rev() {
+            match self.0[i].cmp(&other.0[i]) {
+                Equal => continue,
+                non_eq => return non_eq,
+            }
+        }
+        Equal
+    }
+}
+
+impl PartialOrd for CompactWireId {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
@@ -72,14 +97,14 @@ pub struct Credits(pub u16);
 #[derive(Debug, Clone)]
 pub enum WireAvailability {
     Available(Credits),
-    Waiting(ThinVec<CompactDependency>),
+    Waiting(HashSet<CompactDependency>),
     WaitingInline(CompactDependency),
 }
 
 // Compact dependency: 11 bytes (34-bit other_in, 34-bit out, 1-bit gate_type, 1 bit padding, 16 bit credits)
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CompactDependency {
-    bytes: [u8; 11],
+    pub(crate) bytes: [u8; 11],
 }
 
 impl std::fmt::Debug for CompactDependency {
@@ -198,19 +223,114 @@ impl PartialEq for Dependency {
 
 impl Eq for Dependency {}
 
-// Union for storing Credits, inline CompactDependency, or pointer to Vec
+// Type alias for the dependency set
+type DepSet = HashSet<CompactDependency>;
+
+/// Guards for in-place mutation without cloning
+pub enum WireAvailabilityMut<'a> {
+    Available(AvailableGuard<'a>),
+    WaitingInline(InlineGuard<'a>),
+    Waiting(WaitingSetGuard<'a>),
+}
+
+pub struct AvailableGuard<'a> {
+    slot_ptr: *mut Wire,
+    _l: PhantomData<&'a mut SlottedValue>,
+}
+
+impl<'a> AvailableGuard<'a> {
+    pub fn get(&self) -> Credits {
+        unsafe {
+            let p = std::ptr::addr_of!((*self.slot_ptr).credits);
+            Credits(std::ptr::read_unaligned(p))
+        }
+    }
+    pub fn set(&mut self, c: Credits) {
+        unsafe {
+            let p = std::ptr::addr_of_mut!((*self.slot_ptr).credits);
+            std::ptr::write_unaligned(p, c.0);
+        }
+    }
+    pub fn update<F: FnOnce(&mut Credits)>(&mut self, f: F) {
+        let mut v = self.get();
+        f(&mut v);
+        self.set(v);
+    }
+}
+
+pub struct InlineGuard<'a> {
+    slot_ptr: *mut Wire,
+    tmp: CompactDependency,
+    _l: PhantomData<&'a mut SlottedValue>,
+}
+
+impl<'a> InlineGuard<'a> {
+    pub fn get(&self) -> CompactDependency {
+        self.tmp
+    }
+    pub fn get_mut(&mut self) -> &mut CompactDependency {
+        &mut self.tmp
+    }
+    pub fn set(&mut self, dep: CompactDependency) {
+        self.tmp = dep;
+    }
+}
+
+impl<'a> Drop for InlineGuard<'a> {
+    fn drop(&mut self) {
+        unsafe {
+            let p = std::ptr::addr_of_mut!((*self.slot_ptr).waiting_inline);
+            std::ptr::write_unaligned(p, self.tmp.bytes);
+        }
+    }
+}
+
+pub struct WaitingSetGuard<'a> {
+    slot_ptr: *mut Wire,
+    set: Option<Box<DepSet>>,
+    _l: PhantomData<&'a mut SlottedValue>,
+}
+
+impl<'a> Deref for WaitingSetGuard<'a> {
+    type Target = DepSet;
+    fn deref(&self) -> &Self::Target {
+        self.set.as_ref().expect("set already taken")
+    }
+}
+impl<'a> DerefMut for WaitingSetGuard<'a> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.set.as_mut().expect("set already taken")
+    }
+}
+
+impl<'a> Drop for WaitingSetGuard<'a> {
+    fn drop(&mut self) {
+        if let Some(set) = self.set.take() {
+            let ptr = Box::into_raw(set);
+            unsafe {
+                std::ptr::write_unaligned(
+                    std::ptr::addr_of_mut!((*self.slot_ptr).waiting_ptr),
+                    ptr,
+                );
+            }
+        }
+    }
+}
+
+// Union for storing Credits, inline CompactDependency, or pointer to HashSet
 #[repr(packed)]
 union Wire {
-    credits: u16,                      // Credits (2 bytes)
-    waiting_inline: [u8; 11],          // Single CompactDependency (11 bytes)
-    waiting_ptr: *mut ThinVecInternal, // Multiple dependencies using ThinVec
+    credits: u16,             // Credits (2 bytes)
+    waiting_inline: [u8; 11], // Single CompactDependency (11 bytes)
+    waiting_ptr: *mut DepSet, // Multiple dependencies using HashSet
 }
 
 // Slotted value for HashMap: handles collisions from u64→u32 key compression
 #[repr(packed)]
 pub(crate) struct SlottedValue {
-    mask: u8, // 2 bits per slot: 00=empty, 01=available, 10=waiting_vec, 11=waiting_inline
-    slots: [Wire; 4], // 4 slots using union (11 bytes each)
+    // 2 bits per slot: 00=empty, 01=available, 10=waiting_set, 11=waiting_inline
+    mask: u8,
+    slots: [Wire; 4],
 }
 
 impl SlottedValue {
@@ -223,37 +343,51 @@ impl SlottedValue {
         }
     }
 
-    pub fn get_slot(&self, wire_id: CompactWireId) -> Option<WireAvailability> {
+    // Mutable accessor: returns guards for in-place mutation without cloning
+    pub fn get_slot_mut(&mut self, wire_id: CompactWireId) -> Option<WireAvailabilityMut<'_>> {
         let wire_id_u64 = wire_id.to_u64();
         let slot_idx = ((wire_id_u64 >> 32) & 0x3) as usize;
         let mask_bits = (self.mask >> (slot_idx * 2)) & 0x3;
+        let slot_ptr: *mut Wire = unsafe { self.slots.as_mut_ptr().add(slot_idx) };
 
         match mask_bits {
-            0 => None, // Empty
-            1 => {
-                // Available
-                let credits = unsafe { self.slots[slot_idx].credits };
-                Some(WireAvailability::Available(Credits(credits)))
-            }
+            0 => None,
+            1 => Some(WireAvailabilityMut::Available(AvailableGuard {
+                slot_ptr,
+                _l: PhantomData,
+            })),
             2 => {
-                // Waiting - clone from ThinVec
-                let ptr = unsafe { self.slots[slot_idx].waiting_ptr };
+                // Read pointer unaligned
+                let ptr = unsafe {
+                    std::ptr::read_unaligned(std::ptr::addr_of!((*slot_ptr).waiting_ptr))
+                };
                 if ptr.is_null() {
                     None
                 } else {
-                    // Create a ThinVec from the pointer, clone it, then forget the original
-                    let thinvec = unsafe { ThinVec::<CompactDependency>::from_raw(ptr) };
-                    let cloned = thinvec.clone();
-                    // Return the pointer without dropping (preventing deallocation)
-                    let _ = unsafe { thinvec.into_raw() };
-                    Some(WireAvailability::Waiting(cloned))
+                    // LOCK: write null back so a second call can't from_raw the same allocation
+                    unsafe {
+                        std::ptr::write_unaligned(
+                            std::ptr::addr_of_mut!((*slot_ptr).waiting_ptr),
+                            std::ptr::null_mut(),
+                        );
+                    }
+                    let set = unsafe { Box::from_raw(ptr) };
+                    Some(WireAvailabilityMut::Waiting(WaitingSetGuard {
+                        slot_ptr,
+                        set: Some(set),
+                        _l: PhantomData,
+                    }))
                 }
             }
             3 => {
-                // Waiting inline - single dependency
-                let bytes = unsafe { self.slots[slot_idx].waiting_inline };
-                let compact_dep = CompactDependency { bytes };
-                Some(WireAvailability::WaitingInline(compact_dep))
+                let bytes = unsafe {
+                    std::ptr::read_unaligned(std::ptr::addr_of!((*slot_ptr).waiting_inline))
+                };
+                Some(WireAvailabilityMut::WaitingInline(InlineGuard {
+                    slot_ptr,
+                    tmp: CompactDependency { bytes },
+                    _l: PhantomData,
+                }))
             }
             _ => unreachable!(),
         }
@@ -282,58 +416,66 @@ impl SlottedValue {
                     waiting_inline: dep.bytes,
                 };
             }
-            WireAvailability::Waiting(deps) => {
-                // Multiple dependencies - use ThinVec
+            WireAvailability::Waiting(set) => {
+                // Multiple dependencies - use HashSet
                 self.mask |= 2 << (slot_idx * 2);
-                let ptr = unsafe { deps.into_raw() };
+                let ptr = Box::into_raw(Box::new(set));
                 self.slots[slot_idx] = Wire { waiting_ptr: ptr };
             }
         };
     }
 
-    #[allow(dead_code)]
     pub fn remove_slot(&mut self, wire_id: CompactWireId) -> (Option<WireAvailability>, bool) {
         let wire_id_u64 = wire_id.to_u64();
         let slot_idx = ((wire_id_u64 >> 32) & 0x3) as usize;
         let mask_bits = (self.mask >> (slot_idx * 2)) & 0x3;
+        let slot_ptr: *mut Wire = unsafe { self.slots.as_mut_ptr().add(slot_idx) };
 
         let result = match mask_bits {
             0 => None,
             1 => {
-                // Available
-                let credits = Credits(unsafe { self.slots[slot_idx].credits });
-                // Clear mask bits and slot
+                let credits =
+                    unsafe { std::ptr::read_unaligned(std::ptr::addr_of!((*slot_ptr).credits)) };
                 self.mask &= !(0x3 << (slot_idx * 2));
-                self.slots[slot_idx] = Wire {
-                    waiting_ptr: std::ptr::null_mut(),
-                };
-                Some(WireAvailability::Available(credits))
+                unsafe {
+                    std::ptr::write_unaligned(
+                        std::ptr::addr_of_mut!((*slot_ptr).waiting_ptr),
+                        std::ptr::null_mut(),
+                    );
+                }
+                Some(WireAvailability::Available(Credits(credits)))
             }
             2 => {
-                // Waiting - take ownership of ThinVec
-                let ptr = unsafe { self.slots[slot_idx].waiting_ptr };
+                let ptr = unsafe {
+                    std::ptr::read_unaligned(std::ptr::addr_of!((*slot_ptr).waiting_ptr))
+                };
                 if ptr.is_null() {
                     None
                 } else {
-                    let thinvec = unsafe { ThinVec::<CompactDependency>::from_raw(ptr) };
-                    // Clear mask bits and slot
+                    let boxed = unsafe { Box::from_raw(ptr) };
+                    let set = *boxed; // avoid double-drop
                     self.mask &= !(0x3 << (slot_idx * 2));
-                    self.slots[slot_idx] = Wire {
-                        waiting_ptr: std::ptr::null_mut(),
-                    };
-                    Some(WireAvailability::Waiting(thinvec))
+                    unsafe {
+                        std::ptr::write_unaligned(
+                            std::ptr::addr_of_mut!((*slot_ptr).waiting_ptr),
+                            std::ptr::null_mut(),
+                        );
+                    }
+                    Some(WireAvailability::Waiting(set))
                 }
             }
             3 => {
-                // Waiting inline - single dependency
-                let bytes = unsafe { self.slots[slot_idx].waiting_inline };
-                let compact_dep = CompactDependency { bytes };
-                // Clear mask bits and slot
-                self.mask &= !(0x3 << (slot_idx * 2));
-                self.slots[slot_idx] = Wire {
-                    waiting_ptr: std::ptr::null_mut(),
+                let bytes = unsafe {
+                    std::ptr::read_unaligned(std::ptr::addr_of!((*slot_ptr).waiting_inline))
                 };
-                Some(WireAvailability::WaitingInline(compact_dep))
+                self.mask &= !(0x3 << (slot_idx * 2));
+                unsafe {
+                    std::ptr::write_unaligned(
+                        std::ptr::addr_of_mut!((*slot_ptr).waiting_ptr),
+                        std::ptr::null_mut(),
+                    );
+                }
+                Some(WireAvailability::WaitingInline(CompactDependency { bytes }))
             }
             _ => unreachable!(),
         };
@@ -343,21 +485,29 @@ impl SlottedValue {
     }
 
     fn clear_slot_internal(&mut self, slot_idx: usize) {
+        let slot_ptr: *mut Wire = unsafe { self.slots.as_mut_ptr().add(slot_idx) };
         let mask_bits = (self.mask >> (slot_idx * 2)) & 0x3;
         if mask_bits == 2 {
-            // Free the waiting list (ThinVec)
-            let ptr = unsafe { self.slots[slot_idx].waiting_ptr };
+            let ptr =
+                unsafe { std::ptr::read_unaligned(std::ptr::addr_of!((*slot_ptr).waiting_ptr)) };
             if !ptr.is_null() {
-                unsafe { drop(ThinVec::<CompactDependency>::from_raw(ptr)) };
+                unsafe {
+                    drop(Box::from_raw(ptr));
+                }
+                unsafe {
+                    std::ptr::write_unaligned(
+                        std::ptr::addr_of_mut!((*slot_ptr).waiting_ptr),
+                        std::ptr::null_mut(),
+                    );
+                }
             }
         }
-        // mask_bits == 3 (inline) doesn't need cleanup
     }
 }
 
 impl Drop for SlottedValue {
     fn drop(&mut self) {
-        // Clean up any waiting lists
+        // Clean up any waiting sets
         for slot_idx in 0..4 {
             self.clear_slot_internal(slot_idx);
         }
@@ -366,43 +516,74 @@ impl Drop for SlottedValue {
 
 impl Clone for SlottedValue {
     fn clone(&self) -> Self {
-        let mut new = Self::new();
+        let mut new = SlottedValue::new();
+
         for i in 0..4 {
             let mask_bits = (self.mask >> (i * 2)) & 0x3;
+
+            let src: *const Wire = unsafe { self.slots.as_ptr().add(i) };
+            let dst: *mut Wire = unsafe { new.slots.as_mut_ptr().add(i) };
+
             match mask_bits {
-                0 => {}
+                0 => {
+                    // Empty
+                }
                 1 => {
-                    // Copy CompactWireLocation
+                    // Available: copy credits with unaligned ops
+                    let credits =
+                        unsafe { std::ptr::read_unaligned(std::ptr::addr_of!((*src).credits)) };
                     new.mask |= 1 << (i * 2);
-                    new.slots[i] = Wire {
-                        credits: unsafe { self.slots[i].credits },
-                    };
+                    unsafe {
+                        std::ptr::write_unaligned(std::ptr::addr_of_mut!((*dst).credits), credits);
+                    }
                 }
                 2 => {
-                    // Clone waiting list using ThinVec
-                    new.mask |= 2 << (i * 2);
-                    let ptr = unsafe { self.slots[i].waiting_ptr };
+                    // Waiting: clone the HashSet the pointer refers to
+                    let ptr =
+                        unsafe { std::ptr::read_unaligned(std::ptr::addr_of!((*src).waiting_ptr)) };
+
+                    // If you use the "null sentinel" while a guard is active, cloning
+                    // during an active guard would see ptr == null. You can assert or
+                    // treat it as empty. Here we assert in debug builds.
+                    assert!(
+                        ptr.is_null(),
+                        "SlottedValue::clone: waiting_ptr is null (guard active?)"
+                    );
                     if !ptr.is_null() {
-                        let thinvec = unsafe { ThinVec::<CompactDependency>::from_raw(ptr) };
-                        let cloned_thinvec = thinvec.clone();
-                        // Convert back to raw pointer without dropping the original
-                        let _ = unsafe { thinvec.into_raw() };
-                        let new_ptr = unsafe { cloned_thinvec.into_raw() };
-                        new.slots[i] = Wire {
-                            waiting_ptr: new_ptr,
-                        };
+                        // Safe: we only create a shared reference to the heap object and clone it.
+                        let set_ref: &DepSet = unsafe { &*ptr };
+                        let cloned = set_ref.clone();
+                        let new_ptr = Box::into_raw(Box::new(cloned));
+
+                        new.mask |= 2 << (i * 2);
+                        unsafe {
+                            std::ptr::write_unaligned(
+                                std::ptr::addr_of_mut!((*dst).waiting_ptr),
+                                new_ptr,
+                            );
+                        }
+                    } else {
+                        // Optional: if you prefer, keep the slot empty in the clone
+                        // (leave mask bits as 0 for this slot).
                     }
                 }
                 3 => {
-                    // Copy inline dependency
-                    new.mask |= 3 << (i * 2);
-                    new.slots[i] = Wire {
-                        waiting_inline: unsafe { self.slots[i].waiting_inline },
+                    // Waiting inline: copy the 11-byte payload unaligned
+                    let bytes = unsafe {
+                        std::ptr::read_unaligned(std::ptr::addr_of!((*src).waiting_inline))
                     };
+                    new.mask |= 3 << (i * 2);
+                    unsafe {
+                        std::ptr::write_unaligned(
+                            std::ptr::addr_of_mut!((*dst).waiting_inline),
+                            bytes,
+                        );
+                    }
                 }
-                _ => unreachable!(),
+                _ => unsafe { std::hint::unreachable_unchecked() },
             }
         }
+
         new
     }
 }
