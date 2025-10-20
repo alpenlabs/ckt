@@ -12,7 +12,7 @@ opt-level = 3
 ckt = { path = "..", version = "0.1.0", features = ["v5"] }
 monoio = { version = "0.2.4", features = ["sync"] }
 bitvec = "1.0"
-indicatif = "0.17"
+indicatif = "0.18"
 ahash = "0.8.12"
 cynosure = "0.2.2"
 mimalloc = { version = "0.1.48", features = ["v3"] }
