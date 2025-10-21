@@ -47,6 +47,16 @@ pub struct Cli {
     /// Verbose output
     #[arg(short, long, help = "Enable verbose output")]
     pub verbose: bool,
+
+    /// Memory limit in gigabytes
+    #[arg(
+        short = 'm',
+        long = "memory-limit",
+        default_value_t = 1,
+        value_name = "GB",
+        help = "Maximum memory usage in gigabytes"
+    )]
+    pub memory_limit_gb: usize,
 }
 
 impl Cli {

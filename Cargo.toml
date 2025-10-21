@@ -28,7 +28,7 @@ v4 = []
 v5 = ["dep:kanal"]
 
 [workspace]
-members = [ "bench","cli", "lvl"]
+members = [ "bench","cli", "lvl", "dupecheck"]
 resolver = "3"
 
 [workspace.package]

@@ -1,64 +1,71 @@
-use std::hash::Hash;
+//! Circuit levelling algorithm for organizing gates into evaluable levels.
+//!
+//! This module implements a topological sorting algorithm that organizes circuit gates
+//! into "levels" where all gates in a level can be evaluated in parallel. Each level's
+//! gates have their inputs available from either:
+//! - Primary inputs (circuit inputs)
+//! - Outputs from gates in previous levels
+//!
+//! # Key Features
+//! - **Memory efficient**: Uses compact 34-bit wire IDs and 11-byte dependency encoding
+//! - **Reference counting**: Automatically frees wire state when no longer needed
+//! - **Inline optimization**: Single dependencies stored inline to avoid heap allocation
+//! - **Safe API**: All unsafe code encapsulated behind safe abstractions
+//!
+//! # Example
+//! ```ignore
+//! let mut leveller = Leveller::new(num_primary_inputs);
+//!
+//! // Add gates to the leveller
+//! for gate in gates {
+//!     leveller.add_gate(gate, gate_type);
+//! }
+//!
+//! // Extract levels for evaluation
+//! while let Some(level) = leveller.take_level() {
+//!     // Evaluate all gates in this level in parallel
+//!     process_level(level);
+//! }
+//! ```
+
 use std::mem;
 
 pub mod slab;
-// thinvec is no longer needed by this module
-pub mod thinvec;
+pub mod state_map;
 pub mod types;
 
+use crate::state_map::WireStateMap;
 use crate::types::{
-    CompactDependency, CompactWireId, Credits, IntermediateGate, Level, PendingLevel, SlottedValue,
-    WireAvailability, WireAvailabilityMut,
+    CompactDependency, CompactWireId, Credits, IntermediateGate, Level, PendingLevel,
+    WireAvailability,
 };
 
-use ahash::{HashMap, HashMapExt, HashSet, HashSetExt};
+use ahash::{HashSet, HashSetExt};
 use ckt::GateType;
-use cynosure::hints::{cold_and_empty, likely, unlikely};
+use cynosure::hints::{cold_and_empty, unlikely};
 
-#[derive(Clone)]
+/// The main levelling algorithm state.
+///
+/// Maintains wire availability state and organizes gates into evaluable levels.
+/// Gates are processed as their inputs become available, and grouped into levels
+/// where all gates can be evaluated in parallel.
+///
+/// # Invariants
+/// - All gate outputs must have unique wire IDs
+/// - Wire IDs below `permanent_wires` are always considered available (primary inputs + constants)
+/// - Credits track how many gates still need each wire; wires are freed when credits reach 1
 pub struct Leveller {
     permanent_wires: CompactWireId,
     level_id: u32,
     pending_level: PendingLevel,
-    state: HashMap<u32, SlottedValue>, // u32 key with SlottedValue
+    state: WireStateMap,
 }
 
 impl Leveller {
-    fn get_wire_mut(&mut self, wire_id: CompactWireId) -> Option<WireAvailabilityMut<'_>> {
-        let wire_id_u64 = wire_id.to_u64();
-        let key = (wire_id_u64 & 0xFFFFFFFF) as u32;
-        self.state
-            .get_mut(&key)
-            .and_then(|slotted| slotted.get_slot_mut(wire_id))
-    }
-
-    // Helper to set wire availability
-    fn set_wire(&mut self, wire_id: CompactWireId, value: WireAvailability) {
-        let wire_id_u64 = wire_id.to_u64();
-        let key = (wire_id_u64 & 0xFFFFFFFF) as u32;
-        self.state
-            .entry(key)
-            .or_insert_with(SlottedValue::new)
-            .set_slot(wire_id, value);
-    }
-
-    // Helper to remove wire availability
-    fn remove_wire(&mut self, wire_id: CompactWireId) -> Option<WireAvailability> {
-        let wire_id_u64 = wire_id.to_u64();
-        let key = (wire_id_u64 & 0xFFFFFFFF) as u32;
-        if let Some(slotted) = self.state.get_mut(&key) {
-            let (result, all_empty) = slotted.remove_slot(wire_id);
-            if all_empty {
-                self.state.remove(&key);
-            }
-            result
-        } else {
-            None
-        }
-    }
-
     fn wire_used(&mut self, wire_id: CompactWireId) {
-        let Some(WireAvailabilityMut::Available(mut guard)) = self.get_wire_mut(wire_id) else {
+        use crate::state_map::SlotRef;
+
+        let Some(SlotRef::Available(mut guard)) = self.state.get_slot_mut(wire_id) else {
             panic!("Wire is not available");
         };
         // cleanup memory if no future gates reference this wire
@@ -66,157 +73,70 @@ impl Leveller {
         if credits.0 > 1 {
             guard.set(Credits(credits.0 - 1));
         } else {
-            self.remove_wire(wire_id);
+            self.state.remove(wire_id);
         }
     }
 }
 
+/// Internal: Status of a gate input wire.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Status {
+    /// Wire is not yet available; gate must wait
     Waiting,
-    Available { is_primary: bool },
-}
-
-#[inline]
-fn append_if_not_exists<T: Eq + Hash>(set: &mut HashSet<T>, item: T) {
-    // HashSet insert is idempotent; fast path vs O(n) contains + push
-    let _ = set.insert(item);
+    /// Wire is available for use
+    Available {
+        /// True if this is a primary input (below permanent_wires threshold)
+        is_primary: bool,
+    },
 }
 
 impl Leveller {
+    /// Checks if input 1 of a gate is available, enqueueing if not.
+    ///
+    /// If the wire is not available, registers this gate as waiting for it.
     fn check_in1(&mut self, gate: IntermediateGate, gate_type: GateType) -> Status {
         if unlikely(gate.in1 < self.permanent_wires) {
             return Status::Available { is_primary: true };
         }
-        let mut replacement = None;
-        let status = match self.get_wire_mut(gate.in1) {
-            None => {
-                cold_and_empty();
 
-                replacement = Some(WireAvailability::WaitingInline(CompactDependency::new(
-                    gate.in2,
-                    gate.out,
-                    gate_type,
-                    gate.credits,
-                )));
+        let dep = CompactDependency::new(gate.in2, gate.out, gate_type, gate.credits);
+        let waiting = self.state.enqueue_waiting(gate.in1, dep);
 
-                Status::Waiting
-            }
-            Some(WireAvailabilityMut::Waiting(mut in1_waiting_set)) => {
-                append_if_not_exists(
-                    &mut in1_waiting_set,
-                    CompactDependency::new(gate.in2, gate.out, gate_type, gate.credits),
-                );
-                Status::Waiting
-            }
-            Some(WireAvailabilityMut::WaitingInline(existing_dep)) => {
-                let new_dep = CompactDependency::new(gate.in2, gate.out, gate_type, gate.credits);
-                if existing_dep.get() != new_dep {
-                    let mut set = HashSet::with_capacity(2);
-                    set.insert(existing_dep.get());
-                    set.insert(new_dep);
-                    replacement = Some(WireAvailability::Waiting(set));
-                }
-                Status::Waiting
-            }
-            Some(WireAvailabilityMut::Available(..)) => Status::Available { is_primary: false },
-        };
-
-        if let Some(replacement) = replacement {
-            self.set_wire(gate.in1, replacement);
+        if waiting {
+            Status::Waiting
+        } else {
+            Status::Available { is_primary: false }
         }
-        status
     }
 
-    fn check_in2(
-        &mut self,
-        gate: IntermediateGate,
-        gate_type: GateType,
-        in1_status: Status,
-    ) -> Status {
+    /// Checks if input 2 of a gate is available, enqueueing if not.
+    ///
+    /// If the wire is not available, registers this gate as waiting for it.
+    fn check_in2(&mut self, gate: IntermediateGate, gate_type: GateType) -> Status {
         if unlikely(gate.in2 < self.permanent_wires) {
             return Status::Available { is_primary: true };
         }
-        let mut replacement = None;
-        let status =
-            match in1_status {
-                Status::Waiting => match self.get_wire_mut(gate.in2) {
-                    Some(WireAvailabilityMut::Waiting(mut in2_waiting_set)) => {
-                        append_if_not_exists(
-                            &mut in2_waiting_set,
-                            CompactDependency::new(gate.in1, gate.out, gate_type, gate.credits),
-                        );
-                        Status::Waiting
-                    }
-                    None => {
-                        cold_and_empty();
 
-                        replacement = Some(WireAvailability::WaitingInline(
-                            CompactDependency::new(gate.in1, gate.out, gate_type, gate.credits),
-                        ));
-                        Status::Waiting
-                    }
-                    Some(WireAvailabilityMut::WaitingInline(existing_dep)) => {
-                        let new_dep =
-                            CompactDependency::new(gate.in1, gate.out, gate_type, gate.credits);
-                        if existing_dep.get() != new_dep {
-                            let mut set = HashSet::with_capacity(2);
-                            set.insert(existing_dep.get());
-                            set.insert(new_dep);
-                            replacement = Some(WireAvailability::Waiting(set));
-                        }
-                        Status::Waiting
-                    }
+        let dep = CompactDependency::new(gate.in1, gate.out, gate_type, gate.credits);
+        let waiting = self.state.enqueue_waiting(gate.in2, dep);
 
-                    Some(WireAvailabilityMut::Available(..)) => {
-                        Status::Available { is_primary: false }
-                    }
-                },
-                Status::Available { .. } => match self.get_wire_mut(gate.in2) {
-                    None => {
-                        cold_and_empty();
-
-                        replacement = Some(WireAvailability::WaitingInline(
-                            CompactDependency::new(gate.in1, gate.out, gate_type, gate.credits),
-                        ));
-
-                        Status::Waiting
-                    }
-                    Some(WireAvailabilityMut::Waiting(mut in2_waiting_set)) => {
-                        append_if_not_exists(
-                            &mut in2_waiting_set,
-                            CompactDependency::new(gate.in1, gate.out, gate_type, gate.credits),
-                        );
-                        Status::Waiting
-                    }
-                    Some(WireAvailabilityMut::WaitingInline(existing_dep)) => {
-                        let new_dep =
-                            CompactDependency::new(gate.in1, gate.out, gate_type, gate.credits);
-                        if existing_dep.get() != new_dep {
-                            let mut set = HashSet::with_capacity(2);
-                            set.insert(existing_dep.get());
-                            set.insert(new_dep);
-                            replacement = Some(WireAvailability::Waiting(set));
-                        }
-                        Status::Waiting
-                    }
-                    Some(WireAvailabilityMut::Available(..)) => {
-                        Status::Available { is_primary: false }
-                    }
-                },
-            };
-
-        if let Some(replacement) = replacement {
-            self.set_wire(gate.in2, replacement);
+        if waiting {
+            Status::Waiting
+        } else {
+            Status::Available { is_primary: false }
         }
-        status
     }
 
+    /// Processes a gate, adding it to the current level if both inputs are ready.
+    ///
+    /// # Arguments
+    /// - `newly_available`: Optional optimization hint - if provided, skips checking
+    ///   this wire's availability (caller guarantees it's available)
     fn process_gate(
         &mut self,
         gate: IntermediateGate,
         gate_type: GateType,
-        newly_available: Option<CompactWireId>, // save a hashmap lookup when we know one has just been made available
+        newly_available: Option<CompactWireId>,
     ) {
         let in1_status = match newly_available {
             Some(wire_id) if gate.in1 == wire_id => Status::Available { is_primary: false },
@@ -225,7 +145,7 @@ impl Leveller {
 
         let in2_status = match newly_available {
             Some(wire_id) if gate.in2 == wire_id => Status::Available { is_primary: false },
-            _ => self.check_in2(gate, gate_type, in1_status),
+            _ => self.check_in2(gate, gate_type),
         };
 
         if let (
@@ -262,6 +182,27 @@ impl Leveller {
         }
     }
 
+    /// Extracts the next complete level of gates, or None if no gates are ready.
+    ///
+    /// This method:
+    /// 1. Returns None if the pending level is empty
+    /// 2. Takes all gates from the pending level
+    /// 3. Marks their outputs as available
+    /// 4. Processes any gates that were waiting for these outputs
+    /// 5. Returns the completed level
+    ///
+    /// # Panics
+    /// Panics if a gate output is already marked as available, which indicates
+    /// duplicate output wires (invalid circuit structure).
+    ///
+    /// # Example
+    /// ```ignore
+    /// while let Some(level) = leveller.take_level() {
+    ///     println!("Level {}: {} AND gates, {} XOR gates",
+    ///              level.id, level.and_gates.len(), level.xor_gates.len());
+    ///     // Evaluate the level...
+    /// }
+    /// ```
     pub fn take_level(&mut self) -> Option<Level> {
         if unlikely(
             self.pending_level.and_gates.is_empty() && self.pending_level.xor_gates.is_empty(),
@@ -289,20 +230,20 @@ impl Leveller {
         let mut waiting_lists: Vec<(CompactWireId, HashSet<CompactDependency>)> = Vec::new();
         // mark newly available wires
         for (wire_id, credits) in newly_available_wires {
-            match self.remove_wire(wire_id) {
+            match self.state.remove(wire_id) {
                 None => {
-                    self.set_wire(wire_id, WireAvailability::Available(credits));
+                    self.state.set_available(wire_id, credits);
                 }
                 Some(WireAvailability::Available(_)) => {
                     cold_and_empty();
                     panic!("gate already processed");
                 }
                 Some(WireAvailability::Waiting(waiting_set)) => {
-                    self.set_wire(wire_id, WireAvailability::Available(credits));
+                    self.state.set_available(wire_id, credits);
                     waiting_lists.push((wire_id, waiting_set));
                 }
                 Some(WireAvailability::WaitingInline(dep)) => {
-                    self.set_wire(wire_id, WireAvailability::Available(credits));
+                    self.state.set_available(wire_id, credits);
                     let mut set = HashSet::with_capacity(1);
                     set.insert(dep);
                     waiting_lists.push((wire_id, set));
@@ -329,6 +270,17 @@ impl Leveller {
         Some(level)
     }
 
+    /// Creates a new leveller for a circuit with the given number of primary inputs.
+    ///
+    /// # Arguments
+    /// - `primary_inputs`: Number of primary input wires in the circuit
+    ///
+    /// The first `primary_inputs + 2` wires are reserved for:
+    /// - Wire 0: constant false
+    /// - Wire 1: constant true
+    /// - Wires 2..primary_inputs+2: actual primary inputs
+    ///
+    /// These wires are always considered available and never stored in the state map.
     pub fn new(primary_inputs: u64) -> Self {
         Self {
             permanent_wires: CompactWireId::from_u64(
@@ -336,10 +288,31 @@ impl Leveller {
             ),
             level_id: 1,
             pending_level: PendingLevel::default(),
-            state: HashMap::new(),
+            state: WireStateMap::new(),
         }
     }
 
+    /// Adds a gate to the leveller.
+    ///
+    /// If both inputs are available, the gate is added to the current level immediately.
+    /// Otherwise, the gate is registered as waiting for its unavailable input(s).
+    ///
+    /// # Requirements
+    /// - Gate output wire ID must be unique (not used by any other gate)
+    /// - Gate output must not be a primary input wire
+    ///
+    /// # Example
+    /// ```ignore
+    /// leveller.add_gate(
+    ///     IntermediateGate {
+    ///         in1: CompactWireId::from_u64(0),  // false constant
+    ///         in2: CompactWireId::from_u64(2),  // first primary input
+    ///         out: CompactWireId::from_u64(100),
+    ///         credits: Credits(1),
+    ///     },
+    ///     GateType::AND,
+    /// );
+    /// ```
     pub fn add_gate(&mut self, gate: IntermediateGate, gate_type: GateType) {
         self.process_gate(gate, gate_type, None);
     }

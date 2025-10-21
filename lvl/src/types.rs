@@ -1,17 +1,34 @@
+//! Core types for the levelling algorithm.
+//!
+//! This module defines compact, memory-efficient representations for circuit elements:
+//! - Wire IDs compressed to 34 bits (5 bytes)
+//! - Gate dependencies packed into 11 bytes
+//! - Efficient tracking of wire availability and pending dependencies
+
 use ckt::GateType;
 use indexmap::IndexSet;
 
 use std::cmp::Ordering;
-use std::marker::PhantomData;
-use std::ops::{Deref, DerefMut};
 
-use ahash::{HashSet, HashSetExt};
+use ahash::HashSet;
 
-// 34 bit uint
+/// A compact 34-bit wire identifier stored in 5 bytes.
+///
+/// Wire IDs are used throughout the levelling algorithm to identify circuit wires.
+/// The 34-bit representation (2^34 = ~17 billion wires) is sufficient for large circuits
+/// while saving memory compared to 64-bit IDs.
+///
+/// # Bit Layout
+/// - Bytes 0-3: Lower 32 bits
+/// - Byte 4 (bits 0-1): Upper 2 bits (total 34 bits)
+/// - Byte 4 (bits 2-7): Unused (always zero)
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CompactWireId([u8; 5]);
 
 impl CompactWireId {
+    /// Creates a CompactWireId from a u64, masking to 34 bits.
+    ///
+    /// Values exceeding 34 bits (> 0x3_FFFF_FFFF) are truncated.
     pub fn from_u64(value: u64) -> Self {
         // Mask to ensure we only use 34 bits (0x3_FFFF_FFFF)
         let masked_value = value & 0x3_FFFF_FFFF;
@@ -27,12 +44,15 @@ impl CompactWireId {
         Self(bytes)
     }
 
+    /// Converts the CompactWireId back to a u64.
+    ///
+    /// The result is always in the range [0, 0x3_FFFF_FFFF] (34 bits).
     pub fn to_u64(&self) -> u64 {
         (self.0[0] as u64)
             | ((self.0[1] as u64) << 8)
             | ((self.0[2] as u64) << 16)
             | ((self.0[3] as u64) << 24)
-            | ((self.0[4] as u64) << 32)
+            | (((self.0[4] as u64) & 0x3) << 32) // ensure only 2 bits contribute
     }
 }
 
@@ -63,12 +83,30 @@ impl std::fmt::Debug for CompactWireId {
     }
 }
 
-#[derive(Debug, Clone, Copy, Hash)]
+/// Represents a 2-input logic gate in the circuit.
+///
+/// # Hash and Equality
+/// **Important**: Gates are considered equal if they have the same output wire,
+/// regardless of their inputs. This is intentional, as the algorithm requires all
+/// gates to have unique output wires. The hash and equality implementations
+/// enable efficient deduplication in IndexSet/HashMap.
+///
+/// # Fields
+/// - `in1`, `in2`: Input wire IDs
+/// - `out`: Output wire ID (must be unique across all gates)
+/// - `credits`: Reference count indicating how many future gates use this output
+#[derive(Debug, Clone, Copy)]
 pub struct IntermediateGate {
     pub in1: CompactWireId,
     pub in2: CompactWireId,
     pub out: CompactWireId,
     pub credits: Credits,
+}
+
+impl std::hash::Hash for IntermediateGate {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.out.hash(state);
+    }
 }
 
 impl PartialEq for IntermediateGate {
@@ -79,21 +117,42 @@ impl PartialEq for IntermediateGate {
 
 impl Eq for IntermediateGate {}
 
+/// A single level in the levelled circuit representation.
+///
+/// Each level contains gates that can be evaluated in parallel, as all their
+/// inputs are available from previous levels or primary inputs.
+///
+/// Gates are separated by type (XOR vs AND) for potential optimization during
+/// evaluation (e.g., different handling in MPC protocols).
 pub struct Level {
     pub id: u32,
     pub xor_gates: IndexSet<IntermediateGate>,
     pub and_gates: IndexSet<IntermediateGate>,
 }
 
+/// Internal: Gates pending addition to the next level.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct PendingLevel {
     pub xor_gates: IndexSet<IntermediateGate>,
     pub and_gates: IndexSet<IntermediateGate>,
 }
 
+/// Reference count for a wire indicating how many gates use it as input.
+///
+/// When a wire is used by a gate, its credits are decremented. When credits
+/// reach 1 (meaning this is the last use), the wire is removed from the state
+/// map to free memory.
 #[derive(Debug, Clone, Copy, Hash)]
 pub struct Credits(pub u16);
 
+/// The state of a wire in the levelling algorithm.
+///
+/// # States
+/// - `Available`: Wire has been produced and is ready for use, with a reference count
+/// - `WaitingInline`: Wire is not yet available; one gate is waiting for it (optimized inline storage)
+/// - `Waiting`: Wire is not yet available; multiple gates are waiting for it (heap-allocated set)
+///
+/// The inline optimization avoids heap allocation for the common case of a single dependency.
 #[derive(Debug, Clone)]
 pub enum WireAvailability {
     Available(Credits),
@@ -101,7 +160,21 @@ pub enum WireAvailability {
     WaitingInline(CompactDependency),
 }
 
-// Compact dependency: 11 bytes (34-bit other_in, 34-bit out, 1-bit gate_type, 1 bit padding, 16 bit credits)
+/// A gate dependency packed into 11 bytes.
+///
+/// When a gate is waiting for an input wire to become available, we store a compact
+/// representation of that gate. This saves memory compared to storing the full
+/// `IntermediateGate` structure.
+///
+/// # Bit Layout (88 bits total in 11 bytes)
+/// - Bits 0-33: `other_in` wire ID (34 bits) - the wire that IS available
+/// - Bits 34-67: `out` wire ID (34 bits) - the gate's output
+/// - Bit 68: `gate_type` (1 bit: 0=XOR, 1=AND)
+/// - Bits 69-71: Padding (unused)
+/// - Bits 72-87: `credits` (16 bits) - reference count for the output wire
+///
+/// When the waiting wire becomes available, we can reconstruct the full gate by
+/// combining the stored information with the newly-available wire ID.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CompactDependency {
     pub(crate) bytes: [u8; 11],
@@ -120,6 +193,13 @@ impl std::fmt::Debug for CompactDependency {
 }
 
 impl CompactDependency {
+    /// Packs a gate dependency into 11 bytes.
+    ///
+    /// # Arguments
+    /// - `other_in`: The input wire that IS available
+    /// - `out`: The gate's output wire
+    /// - `gate_type`: XOR or AND
+    /// - `credits`: Reference count for the output wire
     pub fn new(
         other_in: CompactWireId,
         out: CompactWireId,
@@ -161,6 +241,7 @@ impl CompactDependency {
         Self { bytes }
     }
 
+    /// Unpacks the compact dependency into a full structure.
     pub fn to_dependency(&self) -> Dependency {
         // Unpack other_in
         let other_in_u64 = self.bytes[0] as u64
@@ -195,6 +276,10 @@ impl CompactDependency {
     }
 }
 
+/// Internal: Unpacked representation of a gate dependency.
+///
+/// This is the runtime representation used when processing dependencies.
+/// It's larger than `CompactDependency` but easier to work with.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Dependency {
     pub other_in: CompactWireId,
@@ -222,368 +307,3 @@ impl PartialEq for Dependency {
 }
 
 impl Eq for Dependency {}
-
-// Type alias for the dependency set
-type DepSet = HashSet<CompactDependency>;
-
-/// Guards for in-place mutation without cloning
-pub enum WireAvailabilityMut<'a> {
-    Available(AvailableGuard<'a>),
-    WaitingInline(InlineGuard<'a>),
-    Waiting(WaitingSetGuard<'a>),
-}
-
-pub struct AvailableGuard<'a> {
-    slot_ptr: *mut Wire,
-    _l: PhantomData<&'a mut SlottedValue>,
-}
-
-impl<'a> AvailableGuard<'a> {
-    pub fn get(&self) -> Credits {
-        unsafe {
-            let p = std::ptr::addr_of!((*self.slot_ptr).credits);
-            Credits(std::ptr::read_unaligned(p))
-        }
-    }
-    pub fn set(&mut self, c: Credits) {
-        unsafe {
-            let p = std::ptr::addr_of_mut!((*self.slot_ptr).credits);
-            std::ptr::write_unaligned(p, c.0);
-        }
-    }
-    pub fn update<F: FnOnce(&mut Credits)>(&mut self, f: F) {
-        let mut v = self.get();
-        f(&mut v);
-        self.set(v);
-    }
-}
-
-pub struct InlineGuard<'a> {
-    slot_ptr: *mut Wire,
-    tmp: CompactDependency,
-    _l: PhantomData<&'a mut SlottedValue>,
-}
-
-impl<'a> InlineGuard<'a> {
-    pub fn get(&self) -> CompactDependency {
-        self.tmp
-    }
-    pub fn get_mut(&mut self) -> &mut CompactDependency {
-        &mut self.tmp
-    }
-    pub fn set(&mut self, dep: CompactDependency) {
-        self.tmp = dep;
-    }
-}
-
-impl<'a> Drop for InlineGuard<'a> {
-    fn drop(&mut self) {
-        unsafe {
-            let p = std::ptr::addr_of_mut!((*self.slot_ptr).waiting_inline);
-            std::ptr::write_unaligned(p, self.tmp.bytes);
-        }
-    }
-}
-
-pub struct WaitingSetGuard<'a> {
-    slot_ptr: *mut Wire,
-    set: Option<Box<DepSet>>,
-    _l: PhantomData<&'a mut SlottedValue>,
-}
-
-impl<'a> Deref for WaitingSetGuard<'a> {
-    type Target = DepSet;
-    fn deref(&self) -> &Self::Target {
-        self.set.as_ref().expect("set already taken")
-    }
-}
-impl<'a> DerefMut for WaitingSetGuard<'a> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.set.as_mut().expect("set already taken")
-    }
-}
-
-impl<'a> Drop for WaitingSetGuard<'a> {
-    fn drop(&mut self) {
-        if let Some(set) = self.set.take() {
-            let ptr = Box::into_raw(set);
-            unsafe {
-                std::ptr::write_unaligned(
-                    std::ptr::addr_of_mut!((*self.slot_ptr).waiting_ptr),
-                    ptr,
-                );
-            }
-        }
-    }
-}
-
-// Union for storing Credits, inline CompactDependency, or pointer to HashSet
-#[repr(packed)]
-union Wire {
-    credits: u16,             // Credits (2 bytes)
-    waiting_inline: [u8; 11], // Single CompactDependency (11 bytes)
-    waiting_ptr: *mut DepSet, // Multiple dependencies using HashSet
-}
-
-// Slotted value for HashMap: handles collisions from u64→u32 key compression
-#[repr(packed)]
-pub(crate) struct SlottedValue {
-    // 2 bits per slot: 00=empty, 01=available, 10=waiting_set, 11=waiting_inline
-    mask: u8,
-    slots: [Wire; 4],
-}
-
-impl SlottedValue {
-    pub fn new() -> Self {
-        Self {
-            mask: 0,
-            slots: std::array::from_fn(|_| Wire {
-                waiting_ptr: std::ptr::null_mut(),
-            }),
-        }
-    }
-
-    // Mutable accessor: returns guards for in-place mutation without cloning
-    pub fn get_slot_mut(&mut self, wire_id: CompactWireId) -> Option<WireAvailabilityMut<'_>> {
-        let wire_id_u64 = wire_id.to_u64();
-        let slot_idx = ((wire_id_u64 >> 32) & 0x3) as usize;
-        let mask_bits = (self.mask >> (slot_idx * 2)) & 0x3;
-        let slot_ptr: *mut Wire = unsafe { self.slots.as_mut_ptr().add(slot_idx) };
-
-        match mask_bits {
-            0 => None,
-            1 => Some(WireAvailabilityMut::Available(AvailableGuard {
-                slot_ptr,
-                _l: PhantomData,
-            })),
-            2 => {
-                // Read pointer unaligned
-                let ptr = unsafe {
-                    std::ptr::read_unaligned(std::ptr::addr_of!((*slot_ptr).waiting_ptr))
-                };
-                if ptr.is_null() {
-                    None
-                } else {
-                    // LOCK: write null back so a second call can't from_raw the same allocation
-                    unsafe {
-                        std::ptr::write_unaligned(
-                            std::ptr::addr_of_mut!((*slot_ptr).waiting_ptr),
-                            std::ptr::null_mut(),
-                        );
-                    }
-                    let set = unsafe { Box::from_raw(ptr) };
-                    Some(WireAvailabilityMut::Waiting(WaitingSetGuard {
-                        slot_ptr,
-                        set: Some(set),
-                        _l: PhantomData,
-                    }))
-                }
-            }
-            3 => {
-                let bytes = unsafe {
-                    std::ptr::read_unaligned(std::ptr::addr_of!((*slot_ptr).waiting_inline))
-                };
-                Some(WireAvailabilityMut::WaitingInline(InlineGuard {
-                    slot_ptr,
-                    tmp: CompactDependency { bytes },
-                    _l: PhantomData,
-                }))
-            }
-            _ => unreachable!(),
-        }
-    }
-
-    pub fn set_slot(&mut self, wire_id: CompactWireId, value: WireAvailability) {
-        let wire_id_u64 = wire_id.to_u64();
-        let slot_idx = ((wire_id_u64 >> 32) & 0x3) as usize;
-
-        // Clear existing slot if occupied
-        self.clear_slot_internal(slot_idx);
-
-        // Clear mask bits for this slot
-        self.mask &= !(0x3 << (slot_idx * 2));
-
-        match value {
-            WireAvailability::Available(credits) => {
-                // Set mask bits to 01
-                self.mask |= 1 << (slot_idx * 2);
-                self.slots[slot_idx] = Wire { credits: credits.0 };
-            }
-            WireAvailability::WaitingInline(dep) => {
-                // Single dependency - use inline storage
-                self.mask |= 3 << (slot_idx * 2);
-                self.slots[slot_idx] = Wire {
-                    waiting_inline: dep.bytes,
-                };
-            }
-            WireAvailability::Waiting(set) => {
-                // Multiple dependencies - use HashSet
-                self.mask |= 2 << (slot_idx * 2);
-                let ptr = Box::into_raw(Box::new(set));
-                self.slots[slot_idx] = Wire { waiting_ptr: ptr };
-            }
-        };
-    }
-
-    pub fn remove_slot(&mut self, wire_id: CompactWireId) -> (Option<WireAvailability>, bool) {
-        let wire_id_u64 = wire_id.to_u64();
-        let slot_idx = ((wire_id_u64 >> 32) & 0x3) as usize;
-        let mask_bits = (self.mask >> (slot_idx * 2)) & 0x3;
-        let slot_ptr: *mut Wire = unsafe { self.slots.as_mut_ptr().add(slot_idx) };
-
-        let result = match mask_bits {
-            0 => None,
-            1 => {
-                let credits =
-                    unsafe { std::ptr::read_unaligned(std::ptr::addr_of!((*slot_ptr).credits)) };
-                self.mask &= !(0x3 << (slot_idx * 2));
-                unsafe {
-                    std::ptr::write_unaligned(
-                        std::ptr::addr_of_mut!((*slot_ptr).waiting_ptr),
-                        std::ptr::null_mut(),
-                    );
-                }
-                Some(WireAvailability::Available(Credits(credits)))
-            }
-            2 => {
-                let ptr = unsafe {
-                    std::ptr::read_unaligned(std::ptr::addr_of!((*slot_ptr).waiting_ptr))
-                };
-                if ptr.is_null() {
-                    None
-                } else {
-                    let boxed = unsafe { Box::from_raw(ptr) };
-                    let set = *boxed; // avoid double-drop
-                    self.mask &= !(0x3 << (slot_idx * 2));
-                    unsafe {
-                        std::ptr::write_unaligned(
-                            std::ptr::addr_of_mut!((*slot_ptr).waiting_ptr),
-                            std::ptr::null_mut(),
-                        );
-                    }
-                    Some(WireAvailability::Waiting(set))
-                }
-            }
-            3 => {
-                let bytes = unsafe {
-                    std::ptr::read_unaligned(std::ptr::addr_of!((*slot_ptr).waiting_inline))
-                };
-                self.mask &= !(0x3 << (slot_idx * 2));
-                unsafe {
-                    std::ptr::write_unaligned(
-                        std::ptr::addr_of_mut!((*slot_ptr).waiting_ptr),
-                        std::ptr::null_mut(),
-                    );
-                }
-                Some(WireAvailability::WaitingInline(CompactDependency { bytes }))
-            }
-            _ => unreachable!(),
-        };
-
-        let all_empty = self.mask == 0;
-        (result, all_empty)
-    }
-
-    fn clear_slot_internal(&mut self, slot_idx: usize) {
-        let slot_ptr: *mut Wire = unsafe { self.slots.as_mut_ptr().add(slot_idx) };
-        let mask_bits = (self.mask >> (slot_idx * 2)) & 0x3;
-        if mask_bits == 2 {
-            let ptr =
-                unsafe { std::ptr::read_unaligned(std::ptr::addr_of!((*slot_ptr).waiting_ptr)) };
-            if !ptr.is_null() {
-                unsafe {
-                    drop(Box::from_raw(ptr));
-                }
-                unsafe {
-                    std::ptr::write_unaligned(
-                        std::ptr::addr_of_mut!((*slot_ptr).waiting_ptr),
-                        std::ptr::null_mut(),
-                    );
-                }
-            }
-        }
-    }
-}
-
-impl Drop for SlottedValue {
-    fn drop(&mut self) {
-        // Clean up any waiting sets
-        for slot_idx in 0..4 {
-            self.clear_slot_internal(slot_idx);
-        }
-    }
-}
-
-impl Clone for SlottedValue {
-    fn clone(&self) -> Self {
-        let mut new = SlottedValue::new();
-
-        for i in 0..4 {
-            let mask_bits = (self.mask >> (i * 2)) & 0x3;
-
-            let src: *const Wire = unsafe { self.slots.as_ptr().add(i) };
-            let dst: *mut Wire = unsafe { new.slots.as_mut_ptr().add(i) };
-
-            match mask_bits {
-                0 => {
-                    // Empty
-                }
-                1 => {
-                    // Available: copy credits with unaligned ops
-                    let credits =
-                        unsafe { std::ptr::read_unaligned(std::ptr::addr_of!((*src).credits)) };
-                    new.mask |= 1 << (i * 2);
-                    unsafe {
-                        std::ptr::write_unaligned(std::ptr::addr_of_mut!((*dst).credits), credits);
-                    }
-                }
-                2 => {
-                    // Waiting: clone the HashSet the pointer refers to
-                    let ptr =
-                        unsafe { std::ptr::read_unaligned(std::ptr::addr_of!((*src).waiting_ptr)) };
-
-                    // If you use the "null sentinel" while a guard is active, cloning
-                    // during an active guard would see ptr == null. You can assert or
-                    // treat it as empty. Here we assert in debug builds.
-                    assert!(
-                        ptr.is_null(),
-                        "SlottedValue::clone: waiting_ptr is null (guard active?)"
-                    );
-                    if !ptr.is_null() {
-                        // Safe: we only create a shared reference to the heap object and clone it.
-                        let set_ref: &DepSet = unsafe { &*ptr };
-                        let cloned = set_ref.clone();
-                        let new_ptr = Box::into_raw(Box::new(cloned));
-
-                        new.mask |= 2 << (i * 2);
-                        unsafe {
-                            std::ptr::write_unaligned(
-                                std::ptr::addr_of_mut!((*dst).waiting_ptr),
-                                new_ptr,
-                            );
-                        }
-                    } else {
-                        // Optional: if you prefer, keep the slot empty in the clone
-                        // (leave mask bits as 0 for this slot).
-                    }
-                }
-                3 => {
-                    // Waiting inline: copy the 11-byte payload unaligned
-                    let bytes = unsafe {
-                        std::ptr::read_unaligned(std::ptr::addr_of!((*src).waiting_inline))
-                    };
-                    new.mask |= 3 << (i * 2);
-                    unsafe {
-                        std::ptr::write_unaligned(
-                            std::ptr::addr_of_mut!((*dst).waiting_inline),
-                            bytes,
-                        );
-                    }
-                }
-                _ => unsafe { std::hint::unreachable_unchecked() },
-            }
-        }
-
-        new
-    }
-}

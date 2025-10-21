@@ -12,8 +12,6 @@ use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 mod cli;
-#[allow(dead_code)]
-mod thinvec;
 
 use cli::Cli;
 use lvl::Leveller;
@@ -115,7 +113,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Parse command line arguments
     let args = Cli::parse_args();
 
-    MEMORY_LIMIT.set(1 * 1024usize.pow(3)).unwrap();
+    MEMORY_LIMIT
+        .set(args.memory_limit_gb * 1024usize.pow(3))
+        .unwrap();
 
     println!("Circuit Level Organizer - Sliding Window Algorithm");
     println!("===================================================");
@@ -134,6 +134,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Primary inputs: {}", primary_inputs);
 
     if args.verbose {
+        println!("Memory limit: {} GB", args.memory_limit_gb);
         println!("Target pending gates in memory: {}", args.target_pending);
         println!("Refill check interval: {} gates", args.check_interval);
         println!("Stuck batch size: {} gates", args.stuck_batch_size);
