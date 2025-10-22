@@ -22,15 +22,18 @@ async fn main() {
             Some(block) => block,
             None => break,
         };
-        gates += block.gates_in_block;
-        pb.inc(block.gates_in_block as u64);
         for i in 0..block.gates_in_block {
+            if i < 100 && gates == 0 {
+                println!("Gate {} {} -> {}", block.in1[i], block.in2[i], block.out[i]);
+            }
             if seen_outputs.contains(block.out[i]) {
                 println!("Duplicate output found: {}", block.out[i]);
             }
             seen_outputs.insert(block.out[i]);
             max_seen = max_seen.max(block.out[i]);
         }
+        gates += block.gates_in_block;
+        pb.inc(block.gates_in_block as u64);
     }
     let gates_per_second = gates as f64 / now.elapsed().as_millis() as f64 * 1000.0;
     println!("Gates read: {}", gates);

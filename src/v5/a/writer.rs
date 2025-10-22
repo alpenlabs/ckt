@@ -17,6 +17,7 @@ use crate::v5::a::{
     CREDITS_OFFSET, CREDITS_SIZE, FORMAT_TYPE_A, HEADER_SIZE_V5A, IN_STREAM_SIZE, IN1_OFFSET,
     IN2_OFFSET, MAGIC, OUT_OFFSET, TYPES_OFFSET, VERSION,
 };
+use crate::v5::avx512::BlockV5a;
 
 use super::{BLOCK_SIZE_BYTES, GATES_PER_BLOCK, GateV5a, MAX_CREDITS, MAX_WIRE_ID};
 
@@ -35,7 +36,7 @@ pub struct CircuitStats {
 }
 
 /// Internal fixed-capacity block builder (no clones/allocs per block).
-struct BlockBuilder {
+pub struct BlockBuilder {
     len: usize,
     in1: [u64; GATES_PER_BLOCK],
     in2: [u64; GATES_PER_BLOCK],
@@ -45,7 +46,7 @@ struct BlockBuilder {
 }
 
 impl BlockBuilder {
-    fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             len: 0,
             in1: [0; GATES_PER_BLOCK],
@@ -56,15 +57,19 @@ impl BlockBuilder {
         }
     }
 
-    fn is_full(&self) -> bool {
+    pub fn is_full(&self) -> bool {
         self.len >= GATES_PER_BLOCK
     }
 
-    fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.len == 0
     }
 
-    fn push(&mut self, gate: GateV5a) -> Result<()> {
+    pub fn len(&self) -> usize {
+        self.len
+    }
+
+    pub fn push(&mut self, gate: GateV5a) -> Result<()> {
         if self.is_full() {
             return Err(Error::new(
                 ErrorKind::Other,
@@ -97,7 +102,7 @@ impl BlockBuilder {
 
     /// Encode current gates into the provided block buffer (must be 4064 bytes).
     /// Padding for unused gates is zero-filled.
-    fn encode_into(&self, block: &mut [u8]) {
+    pub fn encode_into(&self, block: &mut [u8]) {
         debug_assert_eq!(block.len(), BLOCK_SIZE_BYTES);
         // Zero the whole block
         block.fill(0);
@@ -132,7 +137,28 @@ impl BlockBuilder {
         // Padding remains zero
     }
 
-    fn clear(&mut self) {
+    pub fn encode(&self) -> BlockV5a {
+        let mut block = BlockV5a::new();
+
+        // Pack streams
+        pack_34_bits(&self.in1[..self.len], &mut block.in1_packed);
+        pack_34_bits(&self.in2[..self.len], &mut block.in2_packed);
+        pack_34_bits(&self.out[..self.len], &mut block.out_packed);
+        pack_24_bits(&self.credits[..self.len], &mut block.credits_packed);
+
+        // Pack gate types bitset
+        // Byte 0 bit 0 => gate 0, ..., byte 31 bit 7 => gate 255
+        for i in 0..self.len {
+            if self.gate_types[i] != GateType::XOR {
+                let byte_idx = i / 8;
+                let bit_idx = i % 8;
+                block.gate_types[byte_idx] |= 1u8 << bit_idx;
+            }
+        }
+        block
+    }
+
+    pub fn clear(&mut self) {
         // Just reset len; content will be overwritten next time.
         self.len = 0;
     }

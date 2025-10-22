@@ -257,7 +257,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             gates_since_check += level_gates;
             total_levels += 1;
 
-            writer.start_level().unwrap();
+            // writer.start_level().unwrap();
 
             let mut to_free = Vec::new();
 
@@ -312,16 +312,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     max_slab_entries = slab_idx;
                 }
 
-                writer
-                    .add_gate(
-                        GateType::XOR,
-                        v5::b::writer::GateV5b {
-                            in1: in1_slab_idx as u32,
-                            in2: in2_slab_idx as u32,
-                            out: slab_idx as u32,
-                        },
-                    )
-                    .unwrap();
+                // writer
+                //     .add_gate(
+                //         GateType::XOR,
+                //         v5::b::writer::GateV5b {
+                //             in1: in1_slab_idx as u32,
+                //             in2: in2_slab_idx as u32,
+                //             out: slab_idx as u32,
+                //         },
+                //     )
+                //     .unwrap();
             }
 
             for gate in level.and_gates {
@@ -337,16 +337,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     max_slab_entries = slab_idx;
                 }
 
-                writer
-                    .add_gate(
-                        GateType::AND,
-                        v5::b::writer::GateV5b {
-                            in1: in1_slab_idx as u32,
-                            in2: in2_slab_idx as u32,
-                            out: slab_idx as u32,
-                        },
-                    )
-                    .unwrap();
+                // writer
+                //     .add_gate(
+                //         GateType::AND,
+                //         v5::b::writer::GateV5b {
+                //             in1: in1_slab_idx as u32,
+                //             in2: in2_slab_idx as u32,
+                //             out: slab_idx as u32,
+                //         },
+                //     )
+                //     .unwrap();
             }
 
             // freeing outputs AFTER a level completes ensures memory safety
@@ -355,7 +355,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 slab.deallocate(*idx);
             }
             to_free.clear();
-            writer.finish_level().await.unwrap();
+            // writer.finish_level().await.unwrap();
 
             // Update level progress bar
             pb_level.set_position(total_gates_in_levels as u64);
@@ -368,8 +368,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     0
                 };
                 // Update load bar message
-                update_pb_load(total_gates_added - total_gates_in_levels);
-                pb_level.set_message(format!("avg {} gates/level", avg_gates_per_level));
+                let pending = total_gates_added - total_gates_in_levels;
+                update_pb_load(pending);
+                pb_level.set_message(format!(
+                    "avg {} gates/level | pending {}",
+                    avg_gates_per_level, pending
+                ));
                 last_message_update = Instant::now();
             }
 

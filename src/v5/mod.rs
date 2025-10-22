@@ -8,9 +8,9 @@
 //! with AVX-512 SIMD processing and io_uring I/O.
 
 pub mod a;
-mod avx512;
+pub mod avx512;
 pub mod b;
-mod scalar;
+pub mod scalar;
 
 /// Magic bytes for v5 format: "Zk2u" in ASCII
 pub const MAGIC: [u8; 4] = [0x5A, 0x6B, 0x32, 0x75];

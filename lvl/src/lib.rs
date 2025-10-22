@@ -30,6 +30,7 @@
 
 use std::mem;
 
+pub mod new;
 pub mod slab;
 pub mod state_map;
 pub mod types;

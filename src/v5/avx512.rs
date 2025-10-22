@@ -14,12 +14,25 @@ pub fn is_x86_avx512f() -> bool {
     }
 }
 
+#[derive(Debug)]
 pub struct BlockV5a {
     pub in1_packed: [u8; 1088],
     pub in2_packed: [u8; 1088],
     pub out_packed: [u8; 1088],
     pub credits_packed: [u8; 768],
     pub gate_types: [u8; 32],
+}
+
+impl BlockV5a {
+    pub fn new() -> Self {
+        Self {
+            in1_packed: [0u8; 1088],
+            in2_packed: [0u8; 1088],
+            out_packed: [0u8; 1088],
+            credits_packed: [0u8; 768],
+            gate_types: [0u8; 32],
+        }
+    }
 }
 
 // Expand 34-bit little-endian fields to u64, and 24-bit little-endian to u32.

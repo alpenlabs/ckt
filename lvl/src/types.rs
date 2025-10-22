@@ -54,6 +54,18 @@ impl CompactWireId {
             | ((self.0[3] as u64) << 24)
             | (((self.0[4] as u64) & 0x3) << 32) // ensure only 2 bits contribute
     }
+
+    /// Returns a reference to the raw 5-byte representation.
+    ///
+    /// # Layout
+    /// - Bytes 0-3: Lower 32 bits of the wire ID
+    /// - Byte 4: Upper 2 bits (bits 0-1), with bits 2-7 always zero
+    ///
+    /// # Invariant
+    /// The 5th byte (index 4) is always in the range 0-3 (only lower 2 bits set).
+    pub fn as_bytes(&self) -> &[u8; 5] {
+        &self.0
+    }
 }
 
 impl Ord for CompactWireId {
@@ -307,3 +319,135 @@ impl PartialEq for Dependency {
 }
 
 impl Eq for Dependency {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compact_wire_id_as_bytes() {
+        // Test basic values
+        let wire_id = CompactWireId::from_u64(0);
+        assert_eq!(wire_id.as_bytes(), &[0, 0, 0, 0, 0]);
+
+        let wire_id = CompactWireId::from_u64(255);
+        assert_eq!(wire_id.as_bytes(), &[255, 0, 0, 0, 0]);
+
+        let wire_id = CompactWireId::from_u64(0x12345678);
+        assert_eq!(wire_id.as_bytes(), &[0x78, 0x56, 0x34, 0x12, 0]);
+
+        // Test 34-bit value
+        let wire_id = CompactWireId::from_u64(0x3_FFFF_FFFF);
+        assert_eq!(wire_id.as_bytes(), &[0xFF, 0xFF, 0xFF, 0xFF, 0x3]);
+    }
+
+    #[test]
+    fn test_compact_wire_id_byte_4_invariant() {
+        // Test that byte 4 is always 0-3 for various inputs
+        let test_values = vec![
+            0u64,
+            1,
+            255,
+            256,
+            0xFFFF,
+            0xFFFF_FFFF,
+            0x1_0000_0000,
+            0x2_0000_0000,
+            0x3_0000_0000,
+            0x3_FFFF_FFFF, // Maximum 34-bit value
+        ];
+
+        for value in test_values {
+            let wire_id = CompactWireId::from_u64(value);
+            let bytes = wire_id.as_bytes();
+            assert!(
+                bytes[4] <= 3,
+                "Byte 4 should be 0-3, got {} for input {}",
+                bytes[4],
+                value
+            );
+            // Also verify upper 6 bits are zero
+            assert_eq!(
+                bytes[4] & 0xFC,
+                0,
+                "Upper 6 bits of byte 4 should be zero, got {:#x} for input {}",
+                bytes[4],
+                value
+            );
+        }
+    }
+
+    #[test]
+    fn test_compact_wire_id_byte_4_truncation() {
+        // Test that values > 34 bits are truncated properly
+        let wire_id = CompactWireId::from_u64(0xFFFF_FFFF_FFFF_FFFF);
+        let bytes = wire_id.as_bytes();
+        assert_eq!(
+            bytes[4], 3,
+            "Should truncate to 34 bits, byte 4 should be 3"
+        );
+        assert_eq!(bytes[0], 0xFF);
+        assert_eq!(bytes[1], 0xFF);
+        assert_eq!(bytes[2], 0xFF);
+        assert_eq!(bytes[3], 0xFF);
+    }
+
+    #[test]
+    fn test_compact_wire_id_round_trip_with_bytes() {
+        // Test round-trip conversion using as_bytes
+        let test_values = vec![
+            0u64,
+            1,
+            42,
+            255,
+            256,
+            0x1234,
+            0x1234_5678,
+            0x1_0000_0000,
+            0x3_FFFF_FFFF,
+        ];
+
+        for value in test_values {
+            let wire_id = CompactWireId::from_u64(value);
+            let bytes = wire_id.as_bytes();
+            let reconstructed = wire_id.to_u64();
+
+            // Mask value to 34 bits for comparison
+            let expected = value & 0x3_FFFF_FFFF;
+            assert_eq!(
+                reconstructed, expected,
+                "Round-trip failed for value {:#x}",
+                value
+            );
+
+            // Verify bytes representation matches expected
+            assert_eq!(bytes[0], (expected & 0xFF) as u8);
+            assert_eq!(bytes[1], ((expected >> 8) & 0xFF) as u8);
+            assert_eq!(bytes[2], ((expected >> 16) & 0xFF) as u8);
+            assert_eq!(bytes[3], ((expected >> 24) & 0xFF) as u8);
+            assert_eq!(bytes[4], ((expected >> 32) & 0x3) as u8);
+        }
+    }
+
+    #[test]
+    fn test_compact_wire_id_different_upper_bits() {
+        // Test values that differ only in upper 2 bits (for slot testing)
+        let base = 0x1234_5678u64;
+
+        let wire_id_0 = CompactWireId::from_u64(base);
+        let wire_id_1 = CompactWireId::from_u64(base | (1u64 << 32));
+        let wire_id_2 = CompactWireId::from_u64(base | (2u64 << 32));
+        let wire_id_3 = CompactWireId::from_u64(base | (3u64 << 32));
+
+        // All should have same lower 4 bytes
+        assert_eq!(wire_id_0.as_bytes()[..4], wire_id_1.as_bytes()[..4]);
+        assert_eq!(wire_id_0.as_bytes()[..4], wire_id_2.as_bytes()[..4]);
+        assert_eq!(wire_id_0.as_bytes()[..4], wire_id_3.as_bytes()[..4]);
+
+        // But different 5th byte
+        assert_eq!(wire_id_0.as_bytes()[4], 0);
+        assert_eq!(wire_id_1.as_bytes()[4], 1);
+        assert_eq!(wire_id_2.as_bytes()[4], 2);
+        assert_eq!(wire_id_3.as_bytes()[4], 3);
+    }
+}
