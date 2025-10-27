@@ -30,7 +30,7 @@
 
 use std::mem;
 
-pub mod new;
+// pub mod new;
 pub mod slab;
 pub mod state_map;
 pub mod types;
@@ -44,6 +44,7 @@ use crate::types::{
 use ahash::{HashSet, HashSetExt};
 use ckt::GateType;
 use cynosure::hints::{cold_and_empty, unlikely};
+use fixedbitset::FixedBitSet;
 
 /// The main levelling algorithm state.
 ///
@@ -60,22 +61,23 @@ pub struct Leveller {
     level_id: u32,
     pending_level: PendingLevel,
     state: WireStateMap,
+    available: FixedBitSet,
 }
 
 impl Leveller {
     fn wire_used(&mut self, wire_id: CompactWireId) {
-        use crate::state_map::SlotRef;
+        // use crate::state_map::SlotRef;
 
-        let Some(SlotRef::Available(mut guard)) = self.state.get_slot_mut(wire_id) else {
-            panic!("Wire is not available");
-        };
-        // cleanup memory if no future gates reference this wire
-        let credits = guard.get();
-        if credits.0 > 1 {
-            guard.set(Credits(credits.0 - 1));
-        } else {
-            self.state.remove(wire_id);
-        }
+        // let Some(SlotRef::Available(mut guard)) = self.state.get_slot_mut(wire_id) else {
+        //     panic!("Wire is not available");
+        // };
+        // // cleanup memory if no future gates reference this wire
+        // let credits = guard.get();
+        // if credits.0 > 1 {
+        //     guard.set(Credits(credits.0 - 1));
+        // } else {
+        //     self.state.remove(wire_id);
+        // }
     }
 }
 
@@ -100,6 +102,10 @@ impl Leveller {
             return Status::Available { is_primary: true };
         }
 
+        if self.available.contains(gate.in1.to_u64() as usize) {
+            return Status::Available { is_primary: false };
+        }
+
         let dep = CompactDependency::new(gate.in2, gate.out, gate_type, gate.credits);
         let waiting = self.state.enqueue_waiting(gate.in1, dep);
 
@@ -116,6 +122,10 @@ impl Leveller {
     fn check_in2(&mut self, gate: IntermediateGate, gate_type: GateType) -> Status {
         if unlikely(gate.in2 < self.permanent_wires) {
             return Status::Available { is_primary: true };
+        }
+
+        if self.available.contains(gate.in2.to_u64() as usize) {
+            return Status::Available { is_primary: false };
         }
 
         let dep = CompactDependency::new(gate.in1, gate.out, gate_type, gate.credits);
@@ -233,18 +243,18 @@ impl Leveller {
         for (wire_id, credits) in newly_available_wires {
             match self.state.remove(wire_id) {
                 None => {
-                    self.state.set_available(wire_id, credits);
+                    self.available.insert(wire_id.to_u64() as usize);
                 }
                 Some(WireAvailability::Available(_)) => {
                     cold_and_empty();
                     panic!("gate already processed");
                 }
                 Some(WireAvailability::Waiting(waiting_set)) => {
-                    self.state.set_available(wire_id, credits);
+                    self.available.insert(wire_id.to_u64() as usize);
                     waiting_lists.push((wire_id, waiting_set));
                 }
                 Some(WireAvailability::WaitingInline(dep)) => {
-                    self.state.set_available(wire_id, credits);
+                    self.available.insert(wire_id.to_u64() as usize);
                     let mut set = HashSet::with_capacity(1);
                     set.insert(dep);
                     waiting_lists.push((wire_id, set));
@@ -290,6 +300,7 @@ impl Leveller {
             level_id: 1,
             pending_level: PendingLevel::default(),
             state: WireStateMap::new(),
+            available: FixedBitSet::with_capacity(2usize.pow(34)),
         }
     }
 

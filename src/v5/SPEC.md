@@ -7,7 +7,7 @@ CKT Format v5 represents a revolutionary advancement in Boolean circuit storage,
 The format offers two variants optimized for different stages of the circuit pipeline:
 
 - **v5a**: Intermediate format with 34-bit wire IDs and 24-bit credits for wire garbage collection
-- **v5b**: Production format with 24-bit memory addresses for direct execution
+- **v5b**: Production format with 32-bit memory addresses for direct GPU execution
 
 ## Key Innovations
 
@@ -16,10 +16,10 @@ The format offers two variants optimized for different stages of the circuit pip
 - **Predictable performance**: Constant-time field access
 - **SIMD-friendly**: Aligned for vectorized processing
 
-### Structure-of-Arrays (SoA) Layout
-- **Cache optimal**: All in1 values together, all in2 values together, etc.
-- **AVX-512 ready**: Process 16+ gates in parallel
-- **Memory bandwidth efficient**: Sequential access patterns
+### Optimized Layout
+- **v5a**: Structure-of-Arrays (SoA) for AVX-512 SIMD processing
+- **v5b**: Array-of-Structures (AoS) for optimal CUDA coalesced memory access
+- **Cache optimal**: Sequential access patterns
 
 ### Performance Targets
 - **200M+ gates/second** processing rate
@@ -46,7 +46,7 @@ The BLAKE3 checksum is computed over the concatenation of:
 
 **Note**: This order differs from the physical file layout (Header → Outputs → Gate Blocks). The modified order enables streaming hash computation during write operations: levels can be hashed as they're written to disk, then outputs and header metadata are hashed at finalization. This eliminates the need for a second pass over potentially billions of gates.
 
-**Physical file order**: Header → Outputs → Gate Blocks  
+**Physical file order**: Header → Outputs → Gate Blocks
 **Checksum order**: Gate Blocks → Outputs → Header tail
 
 This design allows writers to compute checksums in a single streaming pass without seeking.
@@ -164,7 +164,7 @@ Credits represent how many times a wire will be consumed:
 ## Format v5b - Production Format with Memory Addresses
 
 ### Purpose
-v5b is the production format output by the leveller, with precomputed memory addresses for zero-allocation runtime execution. All gates are organized by level for parallel evaluation.
+v5b is the production format output by the leveller, with precomputed 32-bit memory addresses for zero-allocation runtime execution on CUDA GPUs. All gates are organized by level for parallel evaluation, with Array-of-Structures (AoS) layout optimized for coalesced GPU memory access (1 gate per thread).
 
 ### Header Structure (88 bytes)
 
@@ -193,60 +193,58 @@ struct HeaderV5b {
 ### Outputs Section
 
 ```c
-// Each output memory address is stored as 3 bytes (24 bits)
-outputs: [[u8; 3]; num_outputs]
+// Each output memory address is stored as 4 bytes (32 bits, little-endian)
+outputs: [u32; num_outputs]
 ```
 
 Output addresses reference locations in the scratch space where final values will be stored after circuit evaluation.
 
 ### Level Structure
 
-v5b organizes gates by level. Each level starts with a header followed by gate blocks:
-
-```rs
-struct LevelHeader {
-    num_xor: u32,          // 4 bytes: Number of XOR gates
-    num_and: u32,      // 4 bytes: Number of AND gates
-}
-```
-
-### Gate Block Structure (v5b)
-
-Within each level, gates are organized in blocks of 504 gates for optimal bit packing:
+v5b organizes gates by level. Each level starts with a header followed by gates in Array-of-Structures (AoS) layout:
 
 ```c
-struct BlockV5b {
-    // Input 1 stream: 504 × 24 bits = 12096 bits = 1512 bytes
-    in1_stream: [u8; 1512],
-
-    // Input 2 stream: 504 × 24 bits = 12096 bits = 1512 bytes
-    in2_stream: [u8; 1512],
-
-    // Output stream: 504 × 24 bits = 12096 bits = 1512 bytes
-    out_stream: [u8; 1512],
+struct LevelHeader {
+    num_xor_gates: u32,    // 4 bytes: Number of XOR gates
+    num_and_gates: u32,    // 4 bytes: Number of AND gates
 }
-// Total: 4536 bytes per 504 gates = 9 bytes/gate exactly
 ```
 
-Note: Gate types are determined by position - first `num_xor` are XOR, remainder are AND.
+### Gate Layout (v5b)
 
-#### Why 504 Gates?
+Gates within each level are stored in Array-of-Structures format with 32-bit little-endian addresses:
 
-504 × 24 = 12096 bits = 1512 bytes
-- 504 = 7 × 72 = 8 × 63 = 21 × 24 (many factorizations)
-- 21 × 24 = 504 bits fits perfectly in AVX-512 (512 bits)
-- Enables processing 21 gates per AVX-512 operation
+```c
+struct GateV5b {
+    in1: u32,    // 4 bytes: Input 1 memory address (little-endian)
+    in2: u32,    // 4 bytes: Input 2 memory address (little-endian)
+    out: u32,    // 4 bytes: Output memory address (little-endian)
+}
+// Total: 12 bytes per gate
+```
 
-#### Bit Packing Details
+Each level contains `num_xor_gates + num_and_gates` consecutive gate structures. Gate types are determined by position: the first `num_xor_gates` are XOR gates, the remainder are AND gates.
 
-**24-bit values** are packed sequentially:
-- Gate N's address starts at bit N × 24
-- Byte offset: (N × 24) / 8
-- Bit shift: (N × 24) % 8
+#### Why AoS for v5b?
+
+Array-of-Structures layout is optimal for CUDA execution with 1 gate per thread:
+- **Coalesced memory access**: Threads in a warp accessing consecutive gates read consecutive memory addresses
+- **Cache locality**: Each thread's in1, in2, out are adjacent (12 bytes together, same cache line)
+- **Simple kernels**: Each thread reads one 12-byte gate structure
+- **Zero parsing**: Direct cast from bytes to `&[GateV5b]` slice
+
+Complete level layout:
+```
+[LevelHeader: 8 bytes]
+[Gate 0: in1(4) in2(4) out(4)]
+[Gate 1: in1(4) in2(4) out(4)]
+...
+[Gate N-1: in1(4) in2(4) out(4)]
+```
 
 ### Memory Model
 
-The scratch space is a linear array indexed by the 24-bit addresses:
+The scratch space is a linear array indexed by the 32-bit addresses:
 
 ```
 Index Range          | Purpose
@@ -257,7 +255,7 @@ Index Range          | Purpose
 (2+inputs)..max     | Gate outputs (managed by credits in v5a)
 ```
 
-Maximum addressable memory: 2^24 = 16,777,216 entries
+Maximum addressable memory: 2^32 = 4,294,967,296 entries (~4.3 billion)
 
 ### Level Ordering
 
@@ -300,22 +298,23 @@ let file = OpenOptions::new()
     .open(path)?;
 ```
 
-### AVX-512 Processing
+### Zero-Copy Reading for v5b
 
 ```rust
-// Process multiple gates in parallel
-#[target_feature(enable = "avx512f,avx512vbmi,avx512vbmi2")]
-unsafe fn process_gates_avx512(block: &BlockV5b) {
-    // Extract 21 gates at once (504 bits = 21 × 24)
-    let data = _mm512_loadu_si512(block.in1_stream.as_ptr());
+// v5b uses standard u32 arrays - no bit packing, zero parsing overhead
+#[repr(C)]
+struct GateV5b {
+    in1: u32,
+    in2: u32,
+    out: u32,
+}
 
-    // Use VPMULTISHIFTQB for parallel bit extraction
-    let shifts = _mm512_setr_epi64(0, 24, 48, 72, 96, 120, 144, 168);
-    let addresses = _mm512_multishift_epi64_epi8(shifts, data);
-
-    // Mask to 24 bits
-    let mask24 = _mm512_set1_epi32(0xFFFFFF);
-    let result = _mm512_and_si512(addresses, mask24);
+// Direct cast from bytes to gate slice - true zero copy
+unsafe fn read_level_gates(bytes: &[u8]) -> &[GateV5b] {
+    assert_eq!(bytes.len() % 12, 0);
+    let ptr = bytes.as_ptr() as *const GateV5b;
+    let len = bytes.len() / 12;
+    std::slice::from_raw_parts(ptr, len)
 }
 ```
 
@@ -328,11 +327,13 @@ use memmap2::MmapOptions;
 let file = File::open(path)?;
 let mmap = unsafe { MmapOptions::new().map(&file)? };
 
-// Cast directly to block structure - zero parsing!
-let blocks = unsafe {
+// v5b: Cast directly to gate structures - zero parsing!
+// Each level can be directly accessed as &[GateV5b]
+let level_bytes = &mmap[level_offset..level_offset + level_size];
+let gates: &[GateV5b] = unsafe {
     slice::from_raw_parts(
-        mmap[HEADER_SIZE + outputs_size..].as_ptr() as *const BlockV5b,
-        num_blocks
+        level_bytes.as_ptr() as *const GateV5b,
+        num_gates
     )
 };
 ```
@@ -347,11 +348,11 @@ let blocks = unsafe {
 - **Total time**: 95 seconds for 12B gates (I/O bound)
 
 ### v5b Performance
-- **File size**: 9 bytes/gate (108GB for 12B gates)
+- **File size**: 12 bytes/gate (144GB for 12B gates)
 - **Read speed**: 2GB/s with io_uring
-- **Parse time**: ~0 (direct memory access)
-- **AVX-512**: Process 21 gates per 512-bit operation
-- **Total time**: 54 seconds for 12B gates (I/O bound)
+- **Parse time**: 0 (direct pointer cast to u32 arrays)
+- **GPU transfer**: Optimal coalesced memory access, 1 gate per thread
+- **Total time**: 72 seconds for 12B gates (I/O bound)
 
 ### Compared to v4 (varint encoding)
 | Metric | v4 (varint) | v5 (fixed) | Improvement |
@@ -371,10 +372,11 @@ let blocks = unsafe {
 5. Gate counts must sum to valid total
 
 ### Block Validation
-1. Sum of all blocks' gates must equal header gate count
+1. Sum of all blocks' gates must equal header gate count (v5a)
 2. Unused bits in 34-bit values must be zero (v5a)
-3. 24-bit addresses must be < scratch_space (v5b)
+3. 32-bit addresses must be < scratch_space (v5b)
 4. Level gate counts must sum correctly (v5b)
+5. Level byte counts must be multiple of 12 (v5b)
 
 ### Checksum Verification
 ```rust
@@ -439,7 +441,7 @@ Output: wire 7
 ```
 
 **v5a encoding**: Single block with 4 gates + 252 padding = 4064 bytes
-**v5b encoding**: Two levels, single block each = 4536 bytes × 2
+**v5b encoding**: Two levels with 2 gates each = (8 + 2×12) + (8 + 2×12) = 64 bytes
 
 ### Large Circuit (12 billion gates)
 
@@ -456,9 +458,10 @@ Levels: ~40 (typical depth)
 - Read time: 95 seconds at 2GB/s
 
 **v5b encoding**:
-- 23,809,524 blocks of 504 gates
-- File size: 108 GB
-- Read time: 54 seconds at 2GB/s
+- No blocking, direct gate array
+- File size: 144 GB (12B gates × 12 bytes + overhead)
+- Read time: 72 seconds at 2GB/s
+- GPU-optimized: zero parsing, coalesced memory access
 
 ## Reference Implementation
 
@@ -473,9 +476,9 @@ Key modules:
 ## Conclusion
 
 CKT v5 format achieves unprecedented performance through:
-- **Fixed-width encoding**: Eliminates parsing overhead
-- **SoA layout**: Optimizes for SIMD/cache efficiency
+- **Fixed-width encoding**: Eliminates parsing overhead entirely
+- **Optimized layouts**: SoA for v5a CPU/AVX-512, AoS for v5b GPU/CUDA
 - **io_uring integration**: Maximizes I/O throughput
-- **AVX-512 optimization**: Processes 15-21 gates per operation
+- **Zero-copy design**: Direct memory/pointer casting with no parsing
 
-The format is specifically designed for billion-gate circuits, achieving 20,000x speedup over traditional varint formats while maintaining the flexibility of the credits system for memory management.
+The v5a format uses SoA with AVX-512 for CPU processing (15 gates per operation), while v5b uses AoS for optimal GPU execution with coalesced memory access. Both variants are specifically designed for billion-gate circuits, achieving 20,000x speedup over traditional varint formats.
