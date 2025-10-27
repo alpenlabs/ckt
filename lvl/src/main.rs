@@ -238,7 +238,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     .unwrap();
 
     let mut slab = FakeSlabAllocator::new();
-    // let mut wire_map = HashMap::new();
+    let mut wire_map = HashMap::new();
     slab.allocate(); // false wire
     slab.allocate(); // true wire
     for _ in 0..primary_inputs {
@@ -257,7 +257,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             gates_since_check += level_gates;
             total_levels += 1;
 
-            // writer.start_level().unwrap();
+            writer.start_level().unwrap();
 
             let mut to_free = Vec::new();
 
@@ -299,63 +299,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 level_time
             ));
 
-            // for gate in level.xor_gates {
-            //     let in1_slab_idx = slab_idx(gate.in1, &mut wire_map);
-            //     let in2_slab_idx = slab_idx(gate.in2, &mut wire_map);
+            for (gates, gate_type) in [
+                (level.xor_gates, GateType::XOR),
+                (level.and_gates, GateType::AND),
+            ] {
+                for gate in gates {
+                    let in1_slab_idx = slab_idx(gate.in1, &mut wire_map);
+                    let in2_slab_idx = slab_idx(gate.in2, &mut wire_map);
 
-            //     // map [level_idx][wire_idx] from leveller to v5b "memory address"
-            //     let slab_idx = slab.allocate();
-            //     wire_map.insert(gate.out, (slab_idx, gate.credits));
+                    // map [level_idx][wire_idx] from leveller to v5b "memory address"
+                    let slab_idx = slab.allocate();
+                    wire_map.insert(gate.out, (slab_idx, gate.credits));
 
-            //     // update max_slab_entries if necessary
-            //     if max_slab_entries < slab_idx {
-            //         max_slab_entries = slab_idx;
-            //     }
+                    // update max_slab_entries if necessary
+                    if max_slab_entries < slab_idx {
+                        max_slab_entries = slab_idx;
+                    }
 
-            //     // writer
-            //     //     .add_gate(
-            //     //         GateType::XOR,
-            //     //         v5::b::writer::GateV5b {
-            //     //             in1: in1_slab_idx as u32,
-            //     //             in2: in2_slab_idx as u32,
-            //     //             out: slab_idx as u32,
-            //     //         },
-            //     //     )
-            //     //     .unwrap();
-            // }
-
-            // for gate in level.and_gates {
-            //     let in1_slab_idx = slab_idx(gate.in1, &mut wire_map);
-            //     let in2_slab_idx = slab_idx(gate.in2, &mut wire_map);
-
-            //     // map [level_idx][wire_idx] from leveller to v4b "memory address"
-            //     let slab_idx = slab.allocate();
-            //     wire_map.insert(gate.out, (slab_idx, gate.credits));
-
-            //     // update max_slab_entries if necessary
-            //     if max_slab_entries < slab_idx {
-            //         max_slab_entries = slab_idx;
-            //     }
-
-            //     // writer
-            //     //     .add_gate(
-            //     //         GateType::AND,
-            //     //         v5::b::writer::GateV5b {
-            //     //             in1: in1_slab_idx as u32,
-            //     //             in2: in2_slab_idx as u32,
-            //     //             out: slab_idx as u32,
-            //     //         },
-            //     //     )
-            //     //     .unwrap();
-            // }
+                    writer
+                        .add_gate(
+                            gate_type,
+                            v5::b::writer::GateV5b {
+                                in1: in1_slab_idx as u32,
+                                in2: in2_slab_idx as u32,
+                                out: slab_idx as u32,
+                            },
+                        )
+                        .unwrap();
+                }
+            }
 
             // freeing outputs AFTER a level completes ensures memory safety
             // and allows all gates in the level to be executed simultaneously
-            // for idx in to_free.iter() {
-            //     slab.deallocate(*idx);
-            // }
-            // to_free.clear();
-            // writer.finish_level().await.unwrap();
+            for idx in to_free.iter() {
+                slab.deallocate(*idx);
+            }
+            to_free.clear();
+            writer.finish_level().await.unwrap();
 
             // Update level progress bar
             pb_level.set_position(total_gates_in_levels as u64);
@@ -473,16 +453,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     pb_level.set_message("Finalizing...");
 
-    // let outputs = reader
-    //     .outputs()
-    //     .iter()
-    //     .map(|wid| wire_map.get(&CompactWireId::from_u64(*wid)).unwrap().0 as u32)
-    //     .collect();
+    let outputs = reader
+        .outputs()
+        .iter()
+        .map(|wid| wire_map.get(&CompactWireId::from_u64(*wid)).unwrap().0 as u32)
+        .collect();
 
-    // writer
-    //     .finalize(slab.max_allocated_concurrently() as u64, outputs)
-    //     .await
-    //     .unwrap();
+    writer
+        .finalize(slab.max_allocated_concurrently() as u64, outputs)
+        .await
+        .unwrap();
     pb_load.finish_with_message("Complete!");
     pb_level.finish_with_message("Complete!");
 
