@@ -1,28 +1,24 @@
-// CKT v5b – production format (24-bit addresses, levelled)
+// CKT v5b – production format (32-bit addresses, AoS layout, levelled)
 //
-// The design mirrors v5a::reader:
-//
+// Design:
 // 1. Parse & validate header + outputs
 // 2. Spawn an I/O thread with triple-buffered O_DIRECT reads
-// 3. Expose a two-level iterator hierarchy
+// 3. Expose level iteration with zero-copy access
 //      • CircuitReaderV5b::next_level()  ->  Option<Level<'_>>
-//      • Level<'_>::next_block_soa() / next_block()
-// 4. Zero-allocation SoA decoding; reuses reader-owned scratch buffers
+//      • Level<'_> provides xor_gates: &[GateV5b], and_gates: &[GateV5b]
+// 4. Zero-copy via direct pointer cast from bytes to &[GateV5b]
 
 #![allow(clippy::let_unit_value)] // for select! branches
 
 use std::{
     io::{Error, ErrorKind, Read, Result},
-    mem,
     path::{Path, PathBuf},
     pin::pin,
     thread,
 };
 
-use crate::v5::avx512 as avx;
 use crate::v5::b::{
-    BLOCK_SIZE, GATES_PER_BLOCK, HEADER_SIZE, HeaderV5b, IN1_STREAM_SIZE, IN2_STREAM_SIZE,
-    LEVEL_HEADER_SIZE, LevelHeader, OUTPUT_ENTRY_SIZE,
+    GATE_SIZE, HEADER_SIZE, HeaderV5b, LEVEL_HEADER_SIZE, LevelHeader, OUTPUT_ENTRY_SIZE,
 };
 use blake3::Hasher;
 use cynosure::site_d::triplebuffer::{
@@ -31,25 +27,20 @@ use cynosure::site_d::triplebuffer::{
 use kanal::{AsyncReceiver, AsyncSender, bounded_async};
 use monoio::{FusionDriver, select};
 
+// Re-export GateV5b for public API
+pub use crate::v5::b::GateV5b;
+
 // -----------------------------------------------------------------------------
-// Public decoded views
+// Public decoded view - zero-copy level data
 // -----------------------------------------------------------------------------
 
-pub struct DecodedBlockSoA<'a> {
-    pub in1: &'a [u32],
-    pub in2: &'a [u32],
-    pub out: &'a [u32],
-    pub xor_gates: usize, // leading XORs; rest are ANDs
-    pub block_index: u64,
-    pub gates_in_block: usize,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct GateV5b {
-    pub in1: u32,
-    pub in2: u32,
-    pub out: u32,
-    // gate_type inferred by caller (see xor_gates in DecodedBlockSoA)
+/// A level with owned XOR and AND gate data
+///
+/// The byte vectors are directly reinterpreted as Vec<GateV5b> for zero-parse access.
+pub struct Level {
+    pub xor_gates: Vec<GateV5b>,
+    pub and_gates: Vec<GateV5b>,
+    pub level_index: u32,
 }
 
 // -----------------------------------------------------------------------------
@@ -66,17 +57,11 @@ pub struct CircuitReaderV5b {
 
     cur_buf: Option<AlignedBuffer>,
     cur_pos: usize,       // cursor in current buffer
-    bytes_remaining: u64, // gate-area bytes (levels+blocks) left
+    bytes_remaining: u64, // gate-area bytes (levels) left
 
     // Per-file accounting
     levels_remaining: u32,
-    block_index: u64, // global across file (debug/metrics only)
-
-    // Decode scratch -----------------------------------------------------------
-    block_staging: [u8; BLOCK_SIZE],
-    in1: [u32; GATES_PER_BLOCK],
-    in2: [u32; GATES_PER_BLOCK],
-    out: [u32; GATES_PER_BLOCK],
+    level_index: u32, // current level index for metrics
 
     // Alignment handling
     prefix_skip: usize,
@@ -107,13 +92,9 @@ impl CircuitReaderV5b {
         if outputs_bytes_len > 0 {
             f.read_exact(&mut outputs_raw)?;
         }
-        let outputs = decode_outputs_le24(&outputs_raw)?;
+        let outputs = decode_outputs_le32(&outputs_raw)?;
 
         // ---- Gate region bookkeeping ----------------------------------------
-        //   [ level headers ][ blocks             ]
-        // Note: We can't know the exact block count without reading level headers,
-        // since each level rounds up its block count independently.
-        // Instead, use the actual file size to determine the gate region size.
         let file_metadata = f.metadata()?;
         let file_size = file_metadata.len();
 
@@ -159,12 +140,7 @@ impl CircuitReaderV5b {
             cur_pos: 0,
             bytes_remaining: gate_region_bytes,
             levels_remaining: header.num_levels,
-            block_index: 0,
-
-            block_staging: [0u8; BLOCK_SIZE],
-            in1: [0u32; GATES_PER_BLOCK],
-            in2: [0u32; GATES_PER_BLOCK],
-            out: [0u32; GATES_PER_BLOCK],
+            level_index: 0,
 
             prefix_skip,
             first_chunk: prefix_skip > 0,
@@ -177,35 +153,59 @@ impl CircuitReaderV5b {
     pub fn header(&self) -> HeaderV5b {
         self.header
     }
+
     pub fn outputs(&self) -> &[u32] {
         &self.outputs
     }
 
     // -------------------------------------------------------------------------
-    // Level iteration
+    // Level iteration with owned gate data
     // -------------------------------------------------------------------------
-    pub async fn next_level<'r>(&'r mut self) -> Result<Option<Level<'r>>> {
+    pub async fn next_level(&mut self) -> Result<Option<Level>> {
         loop {
             if self.levels_remaining == 0 {
                 return Ok(None);
             }
-            // Read next 8-byte LevelHeader
+
+            // Read 8-byte LevelHeader
             let mut hdr_buf = [0u8; LEVEL_HEADER_SIZE];
             self.read_exact_into(&mut hdr_buf).await?;
             let lvl = LevelHeader::from_bytes(&hdr_buf);
             lvl.validate().map_err(io_err)?;
 
             self.levels_remaining -= 1;
+            let current_level_index = self.level_index;
+            self.level_index += 1;
 
-            // Skip empty levels if encountered during read
+            // Skip empty levels
             if lvl.num_gates() == 0 {
                 continue;
             }
 
+            let num_xor = lvl.num_xor_gates as usize;
+            let num_and = lvl.num_and_gates as usize;
+            let total_gates = num_xor + num_and;
+
+            // Read all gate bytes for this level
+            let level_bytes_len = total_gates
+                .checked_mul(GATE_SIZE)
+                .ok_or_else(|| Error::new(ErrorKind::InvalidData, "level bytes overflow"))?;
+
+            // Use temporary vector to avoid borrow issues
+            let mut level_bytes = vec![0u8; level_bytes_len];
+            self.read_exact_into(&mut level_bytes).await?;
+
+            // Split bytes into XOR and AND portions
+            let xor_bytes_len = num_xor * GATE_SIZE;
+
+            // Reinterpret byte slices as Vec<GateV5b> (zero-parse with proper alignment)
+            let xor_gates = bytes_to_gates(&level_bytes[..xor_bytes_len], num_xor)?;
+            let and_gates = bytes_to_gates(&level_bytes[xor_bytes_len..], num_and)?;
+
             return Ok(Some(Level {
-                reader: self,
-                gates_remaining: lvl.num_gates(),
-                xor_remaining: lvl.num_xor_gates,
+                xor_gates,
+                and_gates,
+                level_index: current_level_index,
             }));
         }
     }
@@ -253,55 +253,6 @@ impl CircuitReaderV5b {
         Ok(())
     }
 
-    // Read the next packed block into a temporary local buffer, decode it into
-    // the reader's SoA arrays, and place the buffer back. No references to
-    // self-fields live across the await.
-    async fn read_and_decode_block(&mut self, gates_in_block: usize) -> Result<()> {
-        // Handle empty blocks (no gates to read)
-        if gates_in_block == 0 {
-            return Ok(());
-        }
-
-        if self.bytes_remaining < BLOCK_SIZE as u64 {
-            return Err(Error::new(
-                ErrorKind::UnexpectedEof,
-                "truncated gate region",
-            ));
-        }
-
-        // Move the staging buffer out to avoid holding a field-borrow across await.
-        let mut tmp = mem::replace(&mut self.block_staging, [0u8; BLOCK_SIZE]);
-        self.read_exact_into(&mut tmp).await?;
-
-        // Decode from the local buffer into reader-owned SoA arrays.
-        if avx::is_x86_avx512f() {
-            unsafe {
-                // Safe layout cast: avx::BlockV5b is a POD of three [u8; 1512] fields.
-                debug_assert_eq!(core::mem::size_of::<avx::BlockV5b>(), BLOCK_SIZE);
-                let blk_ref: &avx::BlockV5b = &*(tmp.as_ptr() as *const avx::BlockV5b);
-                avx::decode_block_v5b_avx512(
-                    blk_ref,
-                    gates_in_block,
-                    &mut self.in1,
-                    &mut self.in2,
-                    &mut self.out,
-                );
-            }
-        } else {
-            decode_block_scalar(
-                &tmp,
-                gates_in_block,
-                &mut self.in1,
-                &mut self.in2,
-                &mut self.out,
-            );
-        }
-
-        // Move the buffer back for reuse.
-        self.block_staging = tmp;
-        Ok(())
-    }
-
     #[allow(dead_code)]
     pub fn triple_buffer_stats(&self) -> BufferStats {
         self.reader.stats()
@@ -320,105 +271,56 @@ impl Drop for CircuitReaderV5b {
 }
 
 // -----------------------------------------------------------------------------
-// Level<'r> – borrows the parent reader & yields blocks
-// -----------------------------------------------------------------------------
-pub struct Level<'r> {
-    reader: &'r mut CircuitReaderV5b,
-    gates_remaining: u32,
-    xor_remaining: u32,
-}
-
-impl<'r> Level<'r> {
-    pub async fn next_block_soa(&mut self) -> Result<Option<DecodedBlockSoA<'_>>> {
-        if self.gates_remaining == 0 {
-            return Ok(None);
-        }
-
-        let gates_in_block = std::cmp::min(self.gates_remaining as usize, GATES_PER_BLOCK);
-        self.reader.read_and_decode_block(gates_in_block).await?;
-
-        let xor_here = std::cmp::min(self.xor_remaining as usize, gates_in_block);
-        self.xor_remaining -= xor_here as u32;
-        self.gates_remaining -= gates_in_block as u32;
-        let idx = self.reader.block_index;
-        self.reader.block_index += 1;
-
-        Ok(Some(DecodedBlockSoA {
-            in1: &self.reader.in1[..gates_in_block],
-            in2: &self.reader.in2[..gates_in_block],
-            out: &self.reader.out[..gates_in_block],
-            xor_gates: xor_here,
-            block_index: idx,
-            gates_in_block,
-        }))
-    }
-
-    pub async fn next_block(&mut self) -> Result<Option<Vec<GateV5b>>> {
-        let soa = match self.next_block_soa().await? {
-            Some(b) => b,
-            None => return Ok(None),
-        };
-        let mut v = Vec::with_capacity(soa.gates_in_block);
-        for i in 0..soa.gates_in_block {
-            v.push(GateV5b {
-                in1: soa.in1[i],
-                in2: soa.in2[i],
-                out: soa.out[i],
-            });
-        }
-        Ok(Some(v))
-    }
-}
-
-// -----------------------------------------------------------------------------
-// Scalar unpacker (24-bit fixed-width)
-// -----------------------------------------------------------------------------
-fn decode_block_scalar(
-    block: &[u8; BLOCK_SIZE],
-    gates: usize,
-    out_in1: &mut [u32; GATES_PER_BLOCK],
-    out_in2: &mut [u32; GATES_PER_BLOCK],
-    out_out: &mut [u32; GATES_PER_BLOCK],
-) {
-    let in1 = &block[0..IN1_STREAM_SIZE];
-    let in2 = &block[IN1_STREAM_SIZE..IN1_STREAM_SIZE + IN2_STREAM_SIZE];
-    let out = &block[IN1_STREAM_SIZE + IN2_STREAM_SIZE..];
-
-    for i in 0..gates {
-        out_in1[i] = unpack_24(in1, i);
-        out_in2[i] = unpack_24(in2, i);
-        out_out[i] = unpack_24(out, i);
-    }
-}
-
-#[inline]
-fn unpack_24(stream: &[u8], idx: usize) -> u32 {
-    let bit_off = idx * 24;
-    let byte_off = bit_off / 8;
-    let shift = bit_off % 8;
-
-    let mut buf = [0u8; 4];
-    let end = std::cmp::min(byte_off + 4, stream.len());
-    buf[..end - byte_off].copy_from_slice(&stream[byte_off..end]);
-
-    (u32::from_le_bytes(buf) >> shift) & 0xFF_FFFF
-}
-
-// -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
-fn decode_outputs_le24(bytes: &[u8]) -> Result<Vec<u32>> {
-    if bytes.len() % 3 != 0 {
+
+/// Convert a byte slice to Vec<GateV5b> with proper alignment
+///
+/// This function copies bytes into a properly aligned Vec<GateV5b>.
+/// GateV5b is repr(C) with 3 u32s in LE format, so we can safely
+/// reinterpret the bytes after ensuring proper alignment.
+fn bytes_to_gates(bytes: &[u8], num_gates: usize) -> Result<Vec<GateV5b>> {
+    // Verify length
+    if bytes.len() != num_gates * GATE_SIZE {
         return Err(Error::new(
             ErrorKind::InvalidData,
-            "outputs length not multiple of 3",
+            "byte length doesn't match gate count",
         ));
     }
-    let n = bytes.len() / 3;
+
+    // Allocate Vec<GateV5b> directly (guarantees proper alignment)
+    let mut gates: Vec<GateV5b> = Vec::with_capacity(num_gates);
+
+    // Safety: We're copying bytes into properly aligned GateV5b structs.
+    // GateV5b is repr(C) with 3 u32s = 12 bytes in LE format.
+    // The source bytes are in LE format from the file.
+    unsafe {
+        // Copy bytes directly into the gate vector's allocation
+        std::ptr::copy_nonoverlapping(bytes.as_ptr(), gates.as_mut_ptr() as *mut u8, bytes.len());
+        gates.set_len(num_gates);
+    }
+
+    Ok(gates)
+}
+
+/// Decode outputs from 4-byte little-endian u32 entries
+fn decode_outputs_le32(bytes: &[u8]) -> Result<Vec<u32>> {
+    if bytes.len() % 4 != 0 {
+        return Err(Error::new(
+            ErrorKind::InvalidData,
+            "outputs length not multiple of 4",
+        ));
+    }
+    let n = bytes.len() / 4;
     let mut v = Vec::with_capacity(n);
     for i in 0..n {
-        let base = i * 3;
-        let val = u32::from_le_bytes([bytes[base], bytes[base + 1], bytes[base + 2], 0]);
+        let base = i * 4;
+        let val = u32::from_le_bytes([
+            bytes[base],
+            bytes[base + 1],
+            bytes[base + 2],
+            bytes[base + 3],
+        ]);
         v.push(val);
     }
     Ok(v)
@@ -429,24 +331,17 @@ fn io_err<E: ToString>(e: E) -> Error {
     Error::new(ErrorKind::InvalidData, e.to_string())
 }
 
-#[inline]
-fn div_round_up(n: usize, d: usize) -> usize {
-    (n + d - 1) / d
-}
-
 /// Verifies the checksum of a v5b file.
 ///
 /// Hash order (spec):
-/// 1) outputs section
-/// 2) gate blocks section (for v5b: all level headers + all packed blocks)
+/// 1) gate blocks section (all level headers + all gate bytes)
+/// 2) outputs section
 /// 3) header tail (bytes after the checksum field)
 ///
 /// Returns:
 /// - Ok(true) if checksum matches,
-/// - Ok(false) if checksum mismatch or structural mismatch (e.g. level gate sum),
+/// - Ok(false) if checksum mismatch or structural mismatch,
 /// - Err(io::Error) on I/O failures or malformed file reads.
-///
-/// This implementation reuses a single buffer for block reads to minimize allocations.
 pub async fn verify_v5b_checksum(path: impl AsRef<std::path::Path>) -> std::io::Result<bool> {
     use crate::v5::b::{HeaderV5b, LevelHeader};
 
@@ -479,13 +374,9 @@ pub async fn verify_v5b_checksum(path: impl AsRef<std::path::Path>) -> std::io::
 
     let mut hasher = Hasher::new();
 
-    // 1) Gate blocks section = all level headers + all blocks, in order
-    // Walk levels, hash each 8-byte LevelHeader, then hash N full blocks.
+    // 1) Gate blocks section = all level headers + all gate bytes, in order
     let mut off = (HEADER_SIZE + outputs_len) as u64;
     let mut total_level_gates: u64 = 0;
-
-    // Reusable buffer for block reads (one block at a time to minimize allocations)
-    let mut block_buf = vec![0u8; BLOCK_SIZE];
 
     for _ in 0..hdr.num_levels {
         // Read and hash level header
@@ -507,49 +398,22 @@ pub async fn verify_v5b_checksum(path: impl AsRef<std::path::Path>) -> std::io::
         let lvl_gates = lvl_hdr.num_gates() as usize;
         total_level_gates = total_level_gates.saturating_add(lvl_gates as u64);
 
-        let lvl_blocks = div_round_up(lvl_gates, GATES_PER_BLOCK);
-        let lvl_bytes = lvl_blocks.checked_mul(BLOCK_SIZE).ok_or_else(|| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "level blocks bytes overflow",
-            )
+        let lvl_bytes_len = lvl_gates.checked_mul(GATE_SIZE).ok_or_else(|| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, "level bytes overflow")
         })?;
 
-        // Hash all blocks of this level, reusing block_buf
-        let mut remaining = lvl_bytes;
-        let mut lvl_off = off;
-        while remaining > 0 {
-            let take = remaining.min(BLOCK_SIZE);
-
-            // Resize buffer if needed for partial blocks
-            if take < BLOCK_SIZE {
-                block_buf.resize(take, 0);
-            }
-
-            let (res, buf) = file
-                .read_exact_at(std::mem::take(&mut block_buf), lvl_off)
-                .await;
+        // Read and hash all gate bytes for this level
+        if lvl_bytes_len > 0 {
+            let (res, gate_bytes) = file.read_exact_at(vec![0u8; lvl_bytes_len], off).await;
             res?;
-            hasher.update(&buf);
-            block_buf = buf; // Reuse the buffer for next iteration
-
-            lvl_off += take as u64;
-            remaining -= take;
+            hasher.update(&gate_bytes);
+            off += lvl_bytes_len as u64;
         }
-
-        off += lvl_bytes as u64;
     }
 
     // Validate level gate sum matches header total (structural sanity check)
     if total_level_gates != hdr.total_gates() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            format!(
-                "level gate sum {} does not match header total {}",
-                total_level_gates,
-                hdr.total_gates()
-            ),
-        ));
+        return Ok(false);
     }
 
     // 2) Outputs section
@@ -568,7 +432,7 @@ pub async fn verify_v5b_checksum(path: impl AsRef<std::path::Path>) -> std::io::
 }
 
 // -----------------------------------------------------------------------------
-// I/O thread – identical to v5a except for region sizes
+// I/O thread – triple-buffered O_DIRECT reads
 // -----------------------------------------------------------------------------
 fn io_thread_run(
     path: PathBuf,

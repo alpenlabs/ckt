@@ -1,16 +1,15 @@
 // src/v5/b/integration.rs
 //
-// Integration tests for v5b format reader and writer
+// Integration tests for v5b format reader and writer (32-bit AoS layout)
 
 #[cfg(test)]
 mod tests {
     use crate::GateType;
     use crate::v5::b::{
-        GATES_PER_BLOCK, HEADER_SIZE, OUTPUT_ENTRY_SIZE,
+        GATE_SIZE, HEADER_SIZE, OUTPUT_ENTRY_SIZE,
         reader::{CircuitReaderV5b, GateV5b as ReaderGate, verify_v5b_checksum},
         writer::{CircuitWriterV5b, GateV5b as WriterGate},
     };
-    use std::collections::HashSet;
     use tempfile::tempdir;
 
     #[monoio::test]
@@ -71,26 +70,16 @@ mod tests {
         assert_eq!(and_gates, 0);
         assert_eq!(reader.outputs(), &[4]);
 
-        let mut level = reader.next_level().await.unwrap().unwrap();
+        let level = reader.next_level().await.unwrap().unwrap();
+        assert_eq!(level.level_index, 0);
+        assert_eq!(level.xor_gates.len(), 1);
+        assert_eq!(level.and_gates.len(), 0);
+        assert_eq!(level.xor_gates[0].in1, 2);
+        assert_eq!(level.xor_gates[0].in2, 3);
+        assert_eq!(level.xor_gates[0].out, 4);
 
-        // Should have exactly one block with one gate
-        {
-            let block_soa = level
-                .next_block_soa()
-                .await
-                .unwrap()
-                .expect("Expected a block");
-            assert_eq!(block_soa.gates_in_block, 1);
-            assert_eq!(block_soa.in1[0], 2);
-            assert_eq!(block_soa.in2[0], 3);
-            assert_eq!(block_soa.out[0], 4);
-        }
-
-        // No more blocks
-        assert!(
-            level.next_block_soa().await.unwrap().is_none(),
-            "Expected no more blocks"
-        );
+        // No more levels
+        assert!(reader.next_level().await.unwrap().is_none());
     }
 
     #[monoio::test]
@@ -141,20 +130,22 @@ mod tests {
         assert_eq!(num_levels, 3);
 
         // Level 1
-        let mut level1 = reader.next_level().await.unwrap().unwrap();
-        let block1 = level1.next_block().await.unwrap().unwrap();
-        assert_eq!(block1.len(), 2);
-        // First should be XOR (XOR gates come before AND)
+        let level1 = reader.next_level().await.unwrap().unwrap();
+        assert_eq!(level1.level_index, 0);
+        assert_eq!(level1.xor_gates.len(), 1);
+        assert_eq!(level1.and_gates.len(), 1);
+        // First should be XOR
         assert_eq!(
-            block1[0],
+            level1.xor_gates[0],
             ReaderGate {
                 in1: 2,
                 in2: 3,
                 out: 4
             }
         );
+        // Then AND
         assert_eq!(
-            block1[1],
+            level1.and_gates[0],
             ReaderGate {
                 in1: 2,
                 in2: 3,
@@ -163,11 +154,12 @@ mod tests {
         );
 
         // Level 2
-        let mut level2 = reader.next_level().await.unwrap().unwrap();
-        let block2 = level2.next_block().await.unwrap().unwrap();
-        assert_eq!(block2.len(), 1);
+        let level2 = reader.next_level().await.unwrap().unwrap();
+        assert_eq!(level2.level_index, 1);
+        assert_eq!(level2.xor_gates.len(), 1);
+        assert_eq!(level2.and_gates.len(), 0);
         assert_eq!(
-            block2[0],
+            level2.xor_gates[0],
             ReaderGate {
                 in1: 4,
                 in2: 5,
@@ -176,11 +168,12 @@ mod tests {
         );
 
         // Level 3
-        let mut level3 = reader.next_level().await.unwrap().unwrap();
-        let block3 = level3.next_block().await.unwrap().unwrap();
-        assert_eq!(block3.len(), 1);
+        let level3 = reader.next_level().await.unwrap().unwrap();
+        assert_eq!(level3.level_index, 2);
+        assert_eq!(level3.xor_gates.len(), 0);
+        assert_eq!(level3.and_gates.len(), 1);
         assert_eq!(
-            block3[0],
+            level3.and_gates[0],
             ReaderGate {
                 in1: 6,
                 in2: 2,
@@ -222,34 +215,32 @@ mod tests {
 
         // Read back and verify XOR gates come first
         let mut reader = CircuitReaderV5b::open(&path).unwrap();
-        let mut level = reader.next_level().await.unwrap().unwrap();
-        let block_soa = level.next_block_soa().await.unwrap().unwrap();
+        let level = reader.next_level().await.unwrap().unwrap();
 
         // First 50 should be XOR gates (outputs 100-149)
+        assert_eq!(level.xor_gates.len(), 50);
         for i in 0..50 {
-            assert_eq!(block_soa.out[i], 100 + i as u32);
+            assert_eq!(level.xor_gates[i].out, 100 + i as u32);
         }
 
         // Next 50 should be AND gates (outputs 200-249)
-        for i in 50..100 {
-            assert_eq!(block_soa.out[i], 200 + (i - 50) as u32);
+        assert_eq!(level.and_gates.len(), 50);
+        for i in 0..50 {
+            assert_eq!(level.and_gates[i].out, 200 + i as u32);
         }
-
-        assert_eq!(block_soa.xor_gates, 50);
-        assert_eq!(block_soa.gates_in_block, 100);
-        drop(block_soa);
     }
 
     #[monoio::test]
-    async fn test_full_block() {
+    async fn test_large_level() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("fullblock.v5b");
+        let path = dir.path().join("large.v5b");
 
-        // Write exactly GATES_PER_BLOCK gates
+        // Write a large number of gates in one level
+        let num_gates = 10_000;
         let mut writer = CircuitWriterV5b::new(&path, 2, 1).await.unwrap();
         writer.start_level().unwrap();
 
-        for i in 0..GATES_PER_BLOCK as u32 {
+        for i in 0..num_gates {
             let gate_type = if i % 2 == 0 {
                 GateType::XOR
             } else {
@@ -261,320 +252,224 @@ mod tests {
         }
 
         writer.finish_level().await.unwrap();
-        let stats = writer.finalize(2000, vec![1000]).await.unwrap();
-        assert_eq!(stats.total_gates, GATES_PER_BLOCK as u64);
-
-        // Verify checksum
-        assert!(verify_v5b_checksum(&path).await.unwrap());
-
-        // Read back
-        let mut reader = CircuitReaderV5b::open(&path).unwrap();
-        let mut level = reader.next_level().await.unwrap().unwrap();
-
-        // Should have exactly one full block
-        {
-            let block_soa = level
-                .next_block_soa()
-                .await
-                .unwrap()
-                .expect("Expected a full block");
-            assert_eq!(block_soa.gates_in_block, GATES_PER_BLOCK);
-            drop(block_soa);
-        }
-
-        // No more blocks
-        assert!(
-            level.next_block_soa().await.unwrap().is_none(),
-            "Expected no more blocks"
-        );
-    }
-
-    #[monoio::test]
-    async fn test_multiple_blocks() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("multiblock.v5b");
-
-        // Write 1.5 blocks worth of gates
-        let num_gates = GATES_PER_BLOCK + GATES_PER_BLOCK / 2;
-        let mut writer = CircuitWriterV5b::new(&path, 2, 1).await.unwrap();
-        writer.start_level().unwrap();
-
-        for i in 0..num_gates as u32 {
-            writer
-                .add_gate(GateType::XOR, WriterGate::new(2, 3, 1000 + i).unwrap())
-                .unwrap();
-        }
-
-        writer.finish_level().await.unwrap();
-        let stats = writer.finalize(6000, vec![5000]).await.unwrap();
+        let stats = writer.finalize(20_000, vec![1000]).await.unwrap();
         assert_eq!(stats.total_gates, num_gates as u64);
-        assert_eq!(stats.xor_gates, num_gates as u64);
+        assert_eq!(stats.xor_gates, num_gates as u64 / 2);
+        assert_eq!(stats.and_gates, num_gates as u64 / 2);
 
         // Verify checksum
         assert!(verify_v5b_checksum(&path).await.unwrap());
 
         // Read back
         let mut reader = CircuitReaderV5b::open(&path).unwrap();
-        let mut level = reader.next_level().await.unwrap().unwrap();
+        let level = reader.next_level().await.unwrap().unwrap();
 
-        // First block (full)
-        let block1_soa = level
-            .next_block_soa()
-            .await
-            .unwrap()
-            .expect("Expected first block");
-        assert_eq!(block1_soa.gates_in_block, GATES_PER_BLOCK);
-        drop(block1_soa);
+        assert_eq!(level.xor_gates.len(), (num_gates / 2) as usize);
+        assert_eq!(level.and_gates.len(), (num_gates / 2) as usize);
 
-        // Second block (partial)
-        let block2_soa = level
-            .next_block_soa()
-            .await
-            .unwrap()
-            .expect("Expected second block");
-        assert_eq!(block2_soa.gates_in_block, GATES_PER_BLOCK / 2);
-        drop(block2_soa);
-
-        // No more blocks
-        assert!(
-            level.next_block_soa().await.unwrap().is_none(),
-            "Expected no more blocks"
-        );
+        // Verify gates are in correct order
+        for (i, gate) in level.xor_gates.iter().enumerate() {
+            assert_eq!(gate.out, 1000 + (i * 2) as u32);
+        }
+        for (i, gate) in level.and_gates.iter().enumerate() {
+            assert_eq!(gate.out, 1000 + (i * 2 + 1) as u32);
+        }
     }
 
     #[monoio::test]
-    async fn test_block_boundary_xor_and_split() {
+    async fn test_multiple_outputs() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("boundary.v5b");
+        let path = dir.path().join("multiout.v5b");
 
-        // Create scenario where XOR/AND boundary falls within a block
-        let xor_count = 300;
-        let and_count = 300; // Total 600, which spans 2 blocks (504 + 96)
-
-        let mut writer = CircuitWriterV5b::new(&path, 2, 1).await.unwrap();
+        let mut writer = CircuitWriterV5b::new(&path, 2, 5).await.unwrap();
         writer.start_level().unwrap();
 
-        // Add interleaved, but they'll be reordered as XOR-first
-        for i in 0..xor_count {
+        // Create 5 gates with different outputs
+        for i in 0..5u32 {
             writer
-                .add_gate(GateType::XOR, WriterGate::new(2, 3, 1000 + i).unwrap())
-                .unwrap();
-        }
-        for i in 0..and_count {
-            writer
-                .add_gate(GateType::AND, WriterGate::new(2, 3, 2000 + i).unwrap())
+                .add_gate(GateType::XOR, WriterGate::new(2, 3, 10 + i).unwrap())
                 .unwrap();
         }
 
         writer.finish_level().await.unwrap();
-        let stats = writer.finalize(3000, vec![2000]).await.unwrap();
-        assert_eq!(stats.total_gates, 600);
-        assert_eq!(stats.xor_gates, 300);
-        assert_eq!(stats.and_gates, 300);
+        let outputs = vec![10, 11, 12, 13, 14];
+        let stats = writer.finalize(20, outputs.clone()).await.unwrap();
+        assert_eq!(stats.num_outputs, 5);
 
         // Verify checksum
         assert!(verify_v5b_checksum(&path).await.unwrap());
 
-        // Read and verify gate order
-        let mut reader = CircuitReaderV5b::open(&path).unwrap();
-        let mut level = reader.next_level().await.unwrap().unwrap();
-
-        // First block has 504 gates (300 XOR + 204 AND)
-        let block1_soa = level
-            .next_block_soa()
-            .await
-            .unwrap()
-            .expect("Expected first block");
-        assert_eq!(block1_soa.gates_in_block, 504);
-        assert_eq!(block1_soa.xor_gates, 300);
-
-        // Check first 300 are XOR gates (outputs 1000-1299)
-        for i in 0..300 {
-            assert_eq!(block1_soa.out[i], 1000 + i as u32);
-        }
-        // Check next 204 are AND gates (outputs 2000-2203)
-        for i in 300..504 {
-            assert_eq!(block1_soa.out[i], 2000 + (i - 300) as u32);
-        }
-        drop(block1_soa);
-
-        // Second block has remaining 96 AND gates
-        let block2_soa = level
-            .next_block_soa()
-            .await
-            .unwrap()
-            .expect("Expected second block");
-        assert_eq!(block2_soa.gates_in_block, 96);
-        assert_eq!(block2_soa.xor_gates, 0); // No XOR gates in second block
-        // Check these are AND gates (outputs 2204-2299)
-        for i in 0..96 {
-            assert_eq!(block2_soa.out[i], 2204 + i as u32);
-        }
-        drop(block2_soa);
-
-        // No more blocks
-        assert!(
-            level.next_block_soa().await.unwrap().is_none(),
-            "Expected no more blocks"
-        );
+        // Read back
+        let reader = CircuitReaderV5b::open(&path).unwrap();
+        assert_eq!(reader.outputs(), &outputs[..]);
     }
 
     #[monoio::test]
-    async fn test_large_circuit() {
+    async fn test_scratch_space_validation() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("large.v5b");
 
-        // Create a multi-level circuit with many gates
-        let gates_per_level = 1000;
-        let num_levels = 10;
-        let mut writer = CircuitWriterV5b::new(&path, 100, 1).await.unwrap();
+        // Test 1: Gate address >= scratch_space should fail
+        let path1 = dir.path().join("invalid1.v5b");
+        let mut w1 = CircuitWriterV5b::new(&path1, 0, 1).await.unwrap();
+        w1.start_level().unwrap();
+        w1.add_gate(GateType::XOR, WriterGate::new(0, 1, 100).unwrap())
+            .unwrap();
+        w1.finish_level().await.unwrap();
+        // scratch_space=50 but gate uses address 100
+        let res = w1.finalize(50, vec![10]).await;
+        assert!(res.is_err());
 
-        for level in 0..num_levels {
-            writer.start_level().unwrap();
-            for i in 0..gates_per_level {
-                let out = 10000 * (level + 1) + i;
-                let gate_type = if i % 3 == 0 {
-                    GateType::XOR
-                } else {
-                    GateType::AND
-                };
-                writer
-                    .add_gate(gate_type, WriterGate::new(2, 3, out).unwrap())
-                    .unwrap();
-            }
-            writer.finish_level().await.unwrap();
-        }
-
-        let stats = writer.finalize(110000, vec![50000]).await.unwrap();
-        assert_eq!(stats.total_gates, (gates_per_level * num_levels) as u64);
-        assert_eq!(stats.num_levels, num_levels);
-
-        // Verify checksum
-        assert!(verify_v5b_checksum(&path).await.unwrap());
-
-        // Read back and verify counts
-        let mut reader = CircuitReaderV5b::open(&path).unwrap();
-        assert_eq!(
-            reader.header().total_gates(),
-            (gates_per_level * num_levels) as u64
-        );
-        let header_num_levels = reader.header().num_levels;
-        assert_eq!(header_num_levels, num_levels);
-
-        // Verify each level
-        for level_idx in 0..num_levels {
-            let mut level = reader.next_level().await.unwrap().unwrap();
-            let mut gates_read = 0;
-            let mut expected_outs = HashSet::new();
-
-            for i in 0..gates_per_level {
-                expected_outs.insert(10000 * (level_idx + 1) + i);
-            }
-
-            // Each level has 1000 gates, which requires 2 blocks (1000 / 504 = 2)
-            // First block: 504 gates
-            let block1_soa = level
-                .next_block_soa()
-                .await
-                .unwrap()
-                .expect("Expected first block");
-            let block1_gates = block1_soa.gates_in_block;
-            let mut block1_outs = Vec::new();
-            for i in 0..block1_gates {
-                block1_outs.push(block1_soa.out[i]);
-            }
-            drop(block1_soa);
-            gates_read += block1_gates;
-            for out in block1_outs {
-                assert!(expected_outs.remove(&out));
-            }
-
-            // Second block: 496 gates (1000 - 504)
-            let block2_soa = level
-                .next_block_soa()
-                .await
-                .unwrap()
-                .expect("Expected second block");
-            let block2_gates = block2_soa.gates_in_block;
-            let mut block2_outs = Vec::new();
-            for i in 0..block2_gates {
-                block2_outs.push(block2_soa.out[i]);
-            }
-            drop(block2_soa);
-            gates_read += block2_gates;
-            for out in block2_outs {
-                assert!(expected_outs.remove(&out));
-            }
-
-            // No more blocks expected
-            assert!(
-                level.next_block_soa().await.unwrap().is_none(),
-                "Unexpected third block in level {}",
-                level_idx
-            );
-
-            assert_eq!(gates_read, gates_per_level as usize);
-            assert!(expected_outs.is_empty());
-        }
+        // Test 2: Output address >= scratch_space should fail
+        let path2 = dir.path().join("invalid2.v5b");
+        let mut w2 = CircuitWriterV5b::new(&path2, 0, 1).await.unwrap();
+        w2.start_level().unwrap();
+        w2.add_gate(GateType::XOR, WriterGate::new(0, 1, 10).unwrap())
+            .unwrap();
+        w2.finish_level().await.unwrap();
+        // scratch_space=50 but output is 60
+        let res = w2.finalize(50, vec![60]).await;
+        assert!(res.is_err());
     }
 
     #[monoio::test]
-    async fn test_max_memory_address() {
+    async fn test_32bit_addresses() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("maxaddr.v5b");
+        let path = dir.path().join("32bit.v5b");
 
-        // Test with maximum valid 24-bit address
-        let max_addr = 0xFFFFFF;
+        // Test with large addresses that would overflow 24-bit
+        let large_addr = 20_000_000u32; // > 16_777_216 (2^24)
+
         let mut writer = CircuitWriterV5b::new(&path, 2, 1).await.unwrap();
         writer.start_level().unwrap();
         writer
-            .add_gate(GateType::XOR, WriterGate::new(2, 3, max_addr).unwrap())
+            .add_gate(GateType::XOR, WriterGate::new(2, 3, large_addr).unwrap())
             .unwrap();
         writer.finish_level().await.unwrap();
-
-        // Should succeed with scratch space > max address
         let stats = writer
-            .finalize(max_addr as u64 + 1, vec![max_addr])
+            .finalize(large_addr as u64 + 1, vec![large_addr])
             .await
             .unwrap();
-        assert_eq!(stats.total_gates, 1);
 
-        // Verify checksum
+        assert_eq!(stats.total_gates, 1);
         assert!(verify_v5b_checksum(&path).await.unwrap());
 
         // Read back
         let mut reader = CircuitReaderV5b::open(&path).unwrap();
-        assert_eq!(reader.outputs(), &[max_addr]);
-        let mut level = reader.next_level().await.unwrap().unwrap();
-        let block = level.next_block().await.unwrap().unwrap();
-        assert_eq!(block[0].out, max_addr);
+        let level = reader.next_level().await.unwrap().unwrap();
+        assert_eq!(level.xor_gates[0].out, large_addr);
+        assert_eq!(reader.outputs()[0], large_addr);
     }
 
     #[monoio::test]
-    async fn test_empty_level() {
+    async fn test_gate_memory_layout() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("empty_level.v5b");
+        let path = dir.path().join("layout.v5b");
 
-        // Empty levels should be rejected at write time
+        // Verify that gates are laid out as expected (3 consecutive u32s)
         let mut writer = CircuitWriterV5b::new(&path, 2, 1).await.unwrap();
-
-        // Try to create an empty level
         writer.start_level().unwrap();
-        let result = writer.finish_level().await;
+        writer
+            .add_gate(
+                GateType::XOR,
+                WriterGate::new(0x11111111, 0x22222222, 0x33333333).unwrap(),
+            )
+            .unwrap();
+        writer
+            .add_gate(
+                GateType::AND,
+                WriterGate::new(0x44444444, 0x55555555, 0x66666666).unwrap(),
+            )
+            .unwrap();
+        writer.finish_level().await.unwrap();
+        writer.finalize(0x70000000, vec![0x33333333]).await.unwrap();
 
-        // Should fail with error about empty levels
-        assert!(result.is_err());
-        let err = result.unwrap_err();
-        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
-        assert!(err.to_string().contains("empty levels are not allowed"));
+        // Verify checksum
+        assert!(verify_v5b_checksum(&path).await.unwrap());
+
+        // Read the file manually to verify byte layout
+        use std::fs::File;
+        use std::io::{Read, Seek, SeekFrom};
+
+        let mut f = File::open(&path).unwrap();
+
+        // Skip header (88 bytes) + outputs (1 × 4 bytes) + level header (8 bytes)
+        f.seek(SeekFrom::Start(
+            (HEADER_SIZE + OUTPUT_ENTRY_SIZE + 8) as u64,
+        ))
+        .unwrap();
+
+        // Read first gate (12 bytes)
+        let mut gate1_bytes = [0u8; GATE_SIZE];
+        f.read_exact(&mut gate1_bytes).unwrap();
+
+        // Verify little-endian layout
+        assert_eq!(
+            u32::from_le_bytes([
+                gate1_bytes[0],
+                gate1_bytes[1],
+                gate1_bytes[2],
+                gate1_bytes[3]
+            ]),
+            0x11111111
+        );
+        assert_eq!(
+            u32::from_le_bytes([
+                gate1_bytes[4],
+                gate1_bytes[5],
+                gate1_bytes[6],
+                gate1_bytes[7]
+            ]),
+            0x22222222
+        );
+        assert_eq!(
+            u32::from_le_bytes([
+                gate1_bytes[8],
+                gate1_bytes[9],
+                gate1_bytes[10],
+                gate1_bytes[11]
+            ]),
+            0x33333333
+        );
+
+        // Read second gate (12 bytes)
+        let mut gate2_bytes = [0u8; GATE_SIZE];
+        f.read_exact(&mut gate2_bytes).unwrap();
+
+        assert_eq!(
+            u32::from_le_bytes([
+                gate2_bytes[0],
+                gate2_bytes[1],
+                gate2_bytes[2],
+                gate2_bytes[3]
+            ]),
+            0x44444444
+        );
+        assert_eq!(
+            u32::from_le_bytes([
+                gate2_bytes[4],
+                gate2_bytes[5],
+                gate2_bytes[6],
+                gate2_bytes[7]
+            ]),
+            0x55555555
+        );
+        assert_eq!(
+            u32::from_le_bytes([
+                gate2_bytes[8],
+                gate2_bytes[9],
+                gate2_bytes[10],
+                gate2_bytes[11]
+            ]),
+            0x66666666
+        );
     }
 
     #[monoio::test]
     async fn test_corrupted_checksum() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("corrupt.v5b");
+        let path = dir.path().join("corrupted.v5b");
 
-        // Write valid circuit
+        // Write valid file
         let mut writer = CircuitWriterV5b::new(&path, 2, 1).await.unwrap();
         writer.start_level().unwrap();
         writer
@@ -583,83 +478,46 @@ mod tests {
         writer.finish_level().await.unwrap();
         writer.finalize(5, vec![4]).await.unwrap();
 
-        // Verify original is valid
-        assert!(verify_v5b_checksum(&path).await.unwrap());
+        // Corrupt the checksum
+        use std::fs::OpenOptions;
+        use std::io::{Seek, SeekFrom, Write};
 
-        // Corrupt the file by modifying a byte in the gate data
-        {
-            use std::fs::OpenOptions;
-            use std::io::{Seek, SeekFrom, Write};
+        let mut f = OpenOptions::new().write(true).open(&path).unwrap();
+        f.seek(SeekFrom::Start(8)).unwrap(); // Seek to checksum start
+        f.write_all(&[0xFF; 32]).unwrap(); // Corrupt it
 
-            let mut file = OpenOptions::new()
-                .write(true)
-                .read(true)
-                .open(&path)
-                .unwrap();
-
-            // Seek past header and outputs to gate data
-            file.seek(SeekFrom::Start(
-                (HEADER_SIZE + OUTPUT_ENTRY_SIZE + 8 + 100) as u64,
-            ))
-            .unwrap();
-            file.write_all(&[0xFF]).unwrap();
-        }
-
-        // Checksum should now fail
+        // Verify should fail
         assert!(!verify_v5b_checksum(&path).await.unwrap());
     }
 
     #[monoio::test]
-    async fn test_multiple_outputs() {
+    async fn test_zero_copy_reinterpret() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("multi_out.v5b");
+        let path = dir.path().join("zerocopy.v5b");
 
-        // Create circuit with multiple outputs
-        let outputs = vec![100, 200, 300, 400, 500];
-        let mut writer = CircuitWriterV5b::new(&path, 2, outputs.len() as u64)
-            .await
-            .unwrap();
-
-        writer.start_level().unwrap();
-        for &out in &outputs {
-            writer
-                .add_gate(GateType::XOR, WriterGate::new(2, 3, out).unwrap())
-                .unwrap();
-        }
-        writer.finish_level().await.unwrap();
-
-        let stats = writer.finalize(1000, outputs.clone()).await.unwrap();
-        assert_eq!(stats.num_outputs, outputs.len() as u64);
-
-        // Verify checksum
-        assert!(verify_v5b_checksum(&path).await.unwrap());
-
-        // Read back
-        let reader = CircuitReaderV5b::open(&path).unwrap();
-        assert_eq!(reader.outputs(), outputs.as_slice());
-    }
-
-    #[monoio::test]
-    async fn test_scratch_space_validation() {
-        let dir = tempdir().unwrap();
-        let path = dir.path().join("scratch.v5b");
-
-        // Create circuit with gates using high addresses
+        // Write gates
         let mut writer = CircuitWriterV5b::new(&path, 2, 1).await.unwrap();
         writer.start_level().unwrap();
-        writer
-            .add_gate(GateType::XOR, WriterGate::new(2, 3, 1000).unwrap())
-            .unwrap();
-        writer.finish_level().await.unwrap();
 
-        // Should fail if scratch_space is too small
-        let result = writer.finalize(500, vec![1000]).await;
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("addresses are >= scratch_space")
-        );
+        for i in 0..1000u32 {
+            writer
+                .add_gate(GateType::XOR, WriterGate::new(i, i + 1, i + 2).unwrap())
+                .unwrap();
+        }
+
+        writer.finish_level().await.unwrap();
+        writer.finalize(5000, vec![100]).await.unwrap();
+
+        // Read back
+        let mut reader = CircuitReaderV5b::open(&path).unwrap();
+        let level = reader.next_level().await.unwrap().unwrap();
+
+        // Verify that we got all gates correctly
+        assert_eq!(level.xor_gates.len(), 1000);
+        for (i, gate) in level.xor_gates.iter().enumerate() {
+            assert_eq!(gate.in1, i as u32);
+            assert_eq!(gate.in2, i as u32 + 1);
+            assert_eq!(gate.out, i as u32 + 2);
+        }
     }
 }

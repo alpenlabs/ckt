@@ -1,4 +1,4 @@
-//! v5b Writer (safe, spec-like, performant) with modified checksum order
+//! v5b Writer (32-bit addresses, AoS layout) with modified checksum order
 //!
 //! API:
 //! - start_level → add_gate(GateType, GateV5b)* → finish_level
@@ -6,14 +6,13 @@
 //! Behavior:
 //! - You may intersperse XOR and AND gates in any order when adding.
 //!   The writer reorders per-level to XORs-first then ANDs, as required by the format.
-//!   Blocks naturally may contain both XORs and ANDs at the boundary (e.g., if num_xor % 504 != 0).
-//! - Packs gates into 504-gate blocks with SoA layout (24-bit fields).
+//! - Writes gates in Array-of-Structures (AoS) layout: [in1, in2, out] as 3 u32s (12 bytes).
 //! - Writes header placeholder + zeroed output placeholders, streams levels,
 //!   later overwrites outputs and backpatches the header with checksum.
 //! - Computes checksum in this order (modified): levels || outputs || header_tail.
-//!   This allows streaming-hash of levels as they’re written without a second pass.
+//!   This allows streaming-hash of levels as they're written without a second pass.
 //! - Uses monoio for async I/O. No O_DIRECT.
-//! - Handles partial blocks safely: zero-padded; readers rely on header fields.
+//! - Zero-parse format: gates can be directly cast to &[GateV5b] on read.
 
 use blake3::Hasher;
 use monoio::fs::{File, OpenOptions};
@@ -21,10 +20,7 @@ use std::io::{Error, ErrorKind, Result};
 use std::path::Path;
 
 use crate::GateType;
-use crate::v5::b::{
-    BLOCK_SIZE, GATES_PER_BLOCK, HEADER_SIZE, IN1_STREAM_SIZE, IN2_STREAM_SIZE, LEVEL_HEADER_SIZE,
-    MAX_MEMORY_ADDRESS, OUT_STREAM_SIZE,
-};
+use crate::v5::b::{GATE_SIZE, HEADER_SIZE, LEVEL_HEADER_SIZE, MAX_MEMORY_ADDRESS};
 
 // Identification constants (fixed by spec)
 const MAGIC: [u8; 4] = *b"Zk2u";
@@ -34,7 +30,7 @@ const FORMAT_TYPE_B: u8 = 0x01;
 // Default I/O aggregation buffer size (tunable)
 const DEFAULT_IO_BUFFER_CAP: usize = 8 * 1024 * 1024; // 8 MiB
 
-/// A single gate in v5b format (24-bit addresses).
+/// A single gate in v5b format (32-bit addresses).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct GateV5b {
     pub in1: u32,
@@ -49,14 +45,23 @@ impl GateV5b {
         validate_addr(out)?;
         Ok(GateV5b { in1, in2, out })
     }
+
+    /// Convert gate to bytes (12 bytes: 3 × u32 LE)
+    fn to_bytes(&self) -> [u8; GATE_SIZE] {
+        let mut bytes = [0u8; GATE_SIZE];
+        bytes[0..4].copy_from_slice(&self.in1.to_le_bytes());
+        bytes[4..8].copy_from_slice(&self.in2.to_le_bytes());
+        bytes[8..12].copy_from_slice(&self.out.to_le_bytes());
+        bytes
+    }
 }
 
 #[inline]
 fn validate_addr(addr: u32) -> Result<()> {
-    if addr >= MAX_MEMORY_ADDRESS {
+    if addr as u64 >= MAX_MEMORY_ADDRESS {
         return Err(Error::new(
             ErrorKind::InvalidInput,
-            "address exceeds 24-bit maximum",
+            "address exceeds maximum addressable memory",
         ));
     }
     Ok(())
@@ -75,7 +80,7 @@ pub struct CircuitStats {
     pub checksum: [u8; 32],
 }
 
-/// Internal: buffers a level’s gates, keeping XOR and AND in separate vectors.
+/// Internal: buffers a level's gates, keeping XOR and AND in separate vectors.
 /// Allows adding in any order; on write, they are concatenated XORs first, then ANDs.
 struct LevelBuilder {
     xors: Vec<GateV5b>,
@@ -169,9 +174,9 @@ impl CircuitWriterV5b {
             res?;
         }
 
-        // Outputs placeholder: num_outputs entries of 3 bytes each, all zeros
+        // Outputs placeholder: num_outputs entries of 4 bytes each, all zeros
         let outputs_len_bytes = num_outputs
-            .checked_mul(3)
+            .checked_mul(4)
             .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "num_outputs too large"))?
             as usize;
         let outputs_placeholder = vec![0u8; outputs_len_bytes];
@@ -203,7 +208,7 @@ impl CircuitWriterV5b {
 
     /// Optionally tune the I/O aggregation buffer capacity (bytes).
     pub fn set_io_buffer_capacity(&mut self, cap: usize) {
-        self.io_buf_cap = cap.max(BLOCK_SIZE);
+        self.io_buf_cap = cap.max(GATE_SIZE);
         if self.io_buf.capacity() < self.io_buf_cap {
             self.io_buf
                 .reserve(self.io_buf_cap - self.io_buf.capacity());
@@ -224,7 +229,6 @@ impl CircuitWriterV5b {
     }
 
     /// Add a gate (XOR or AND) to the current level in any order.
-    /// Assumes `GateType` is bool-like: false = XOR, true = AND (as used in v5a).
     pub fn add_gate(&mut self, gate_type: GateType, gate: GateV5b) -> Result<()> {
         if !self.in_level {
             return Err(Error::new(
@@ -239,7 +243,7 @@ impl CircuitWriterV5b {
         Ok(())
     }
 
-    /// Finish the current level: writes LevelHeader + blocks, hashes them, and updates counters.
+    /// Finish the current level: writes LevelHeader + gates, hashes them, and updates counters.
     pub async fn finish_level(&mut self) -> Result<()> {
         if !self.in_level {
             return Err(Error::new(
@@ -274,15 +278,14 @@ impl CircuitWriterV5b {
         self.hasher.update(&level_header);
         self.enqueue_bytes(&level_header).await?;
 
-        // Move vectors out to avoid borrow across await, then write blocks in XOR-then-AND order
+        // Write gates in XOR-then-AND order (AoS layout)
         if num_gates > 0 {
             let xors = std::mem::take(&mut self.level.xors);
             let ands = std::mem::take(&mut self.level.ands);
 
-            self.write_level_blocks_and_hash_segments(&xors, &ands)
-                .await?;
+            self.write_and_hash_gates(&xors, &ands).await?;
 
-            // keep allocations for reuse
+            // Keep allocations for reuse
             let mut x = xors;
             let mut a = ands;
             x.clear();
@@ -301,8 +304,10 @@ impl CircuitWriterV5b {
     /// Finalize: overwrite outputs, flush pending data, finish checksum (levels || outputs || header tail), and write header.
     pub async fn finalize(mut self, scratch_space: u64, outputs: Vec<u32>) -> Result<CircuitStats> {
         if self.in_level {
-            // Auto-finish current level to avoid dangling state (allows empty levels)
-            self.finish_level().await?;
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "cannot finalize with level in progress; call finish_level() first",
+            ));
         }
 
         // Validate outputs length matches placeholder count
@@ -314,13 +319,13 @@ impl CircuitWriterV5b {
         }
 
         // Validate and encode outputs; track max addr
-        let (outputs_bytes, max_out_addr) = encode_outputs_le24(&outputs)?;
+        let (outputs_bytes, max_out_addr) = encode_outputs_le32(&outputs)?;
         self.max_addr_seen = self.max_addr_seen.max(max_out_addr);
 
-        if scratch_space > MAX_MEMORY_ADDRESS as u64 {
+        if scratch_space > MAX_MEMORY_ADDRESS {
             return Err(Error::new(
                 ErrorKind::InvalidInput,
-                "scratch_space exceeds 24-bit addressable memory",
+                "scratch_space exceeds maximum addressable memory",
             ));
         }
 
@@ -405,42 +410,20 @@ impl CircuitWriterV5b {
         Ok(stats)
     }
 
-    // Internal: write and hash all blocks for a level using XOR-then-AND segments.
-    async fn write_level_blocks_and_hash_segments(
-        &mut self,
-        xors: &[GateV5b],
-        ands: &[GateV5b],
-    ) -> Result<()> {
-        let total = xors.len() + ands.len();
-        let mut global_idx = 0usize;
+    // Internal: write and hash all gates for a level in XOR-then-AND order (AoS layout).
+    async fn write_and_hash_gates(&mut self, xors: &[GateV5b], ands: &[GateV5b]) -> Result<()> {
+        // Write XOR gates
+        for gate in xors {
+            let gate_bytes = gate.to_bytes();
+            self.enqueue_bytes(&gate_bytes).await?;
+            self.hasher.update(&gate_bytes);
+        }
 
-        while global_idx < total {
-            let take = std::cmp::min(GATES_PER_BLOCK, total - global_idx);
-
-            // Prepare block buffers (SoA, zero-filled)
-            let mut in1 = [0u8; IN1_STREAM_SIZE];
-            let mut in2 = [0u8; IN2_STREAM_SIZE];
-            let mut out = [0u8; OUT_STREAM_SIZE];
-
-            // Pack 24-bit values for this block
-            for j in 0..take {
-                let gate = get_gate_by_concatenated_index(xors, ands, global_idx + j);
-                pack_24bit_at(&mut in1, j, gate.in1);
-                pack_24bit_at(&mut in2, j, gate.in2);
-                pack_24bit_at(&mut out, j, gate.out);
-            }
-
-            // Append to IO buffer
-            self.enqueue_bytes(&in1).await?;
-            self.enqueue_bytes(&in2).await?;
-            self.enqueue_bytes(&out).await?;
-
-            // Hash exactly the bytes we wrote for this block, in order
-            self.hasher.update(&in1);
-            self.hasher.update(&in2);
-            self.hasher.update(&out);
-
-            global_idx += take;
+        // Write AND gates
+        for gate in ands {
+            let gate_bytes = gate.to_bytes();
+            self.enqueue_bytes(&gate_bytes).await?;
+            self.hasher.update(&gate_bytes);
         }
 
         Ok(())
@@ -516,64 +499,20 @@ fn encode_level_header_le(num_xor: u32, num_and: u32) -> [u8; LEVEL_HEADER_SIZE]
     buf
 }
 
-/// Encode outputs to 3-byte little-endian entries (lower 24 bits).
-fn encode_outputs_le24(outputs: &[u32]) -> Result<(Vec<u8>, u32)> {
+/// Encode outputs to 4-byte little-endian u32 entries.
+fn encode_outputs_le32(outputs: &[u32]) -> Result<(Vec<u8>, u32)> {
     let capacity = outputs
         .len()
-        .checked_mul(3)
+        .checked_mul(4)
         .ok_or_else(|| Error::new(ErrorKind::InvalidInput, "outputs length overflow"))?;
     let mut buf = Vec::with_capacity(capacity);
     let mut max_addr = 0u32;
     for &addr in outputs {
         validate_addr(addr)?;
-        let le = addr.to_le_bytes(); // we only use 3 bytes
-        buf.extend_from_slice(&le[..3]);
+        buf.extend_from_slice(&addr.to_le_bytes());
         max_addr = max_addr.max(addr);
     }
     Ok((buf, max_addr))
-}
-
-/// Get gate by global index from the conceptual concatenation of `xors || ands`.
-#[inline]
-fn get_gate_by_concatenated_index<'a>(
-    xors: &'a [GateV5b],
-    ands: &'a [GateV5b],
-    idx: usize,
-) -> &'a GateV5b {
-    if idx < xors.len() {
-        &xors[idx]
-    } else {
-        &ands[idx - xors.len()]
-    }
-}
-
-/// Pack a 24-bit value at position `gate_idx` in a packed stream.
-#[inline]
-fn pack_24bit_at(stream: &mut [u8], gate_idx: usize, value: u32) {
-    debug_assert!(stream.len() == IN1_STREAM_SIZE); // also valid for IN2/OUT sizes
-    debug_assert!(gate_idx < GATES_PER_BLOCK);
-    debug_assert!(value < MAX_MEMORY_ADDRESS);
-
-    let bit_offset = gate_idx * 24;
-    let byte_offset = bit_offset / 8;
-    let bit_shift = bit_offset % 8;
-
-    if bit_shift == 0 {
-        stream[byte_offset] = (value & 0xFF) as u8;
-        stream[byte_offset + 1] = ((value >> 8) & 0xFF) as u8;
-        stream[byte_offset + 2] = ((value >> 16) & 0xFF) as u8;
-    } else {
-        // Merge bits into up to 4 bytes
-        let shifted = (value as u32) << bit_shift;
-        stream[byte_offset] |= shifted as u8;
-        stream[byte_offset + 1] |= (shifted >> 8) as u8;
-        stream[byte_offset + 2] |= (shifted >> 16) as u8;
-
-        let b3 = (shifted >> 24) as u8;
-        if b3 != 0 && (byte_offset + 3) < stream.len() {
-            stream[byte_offset + 3] |= b3;
-        }
-    }
 }
 
 #[cfg(test)]
@@ -582,25 +521,6 @@ mod tests {
     use std::fs::OpenOptions as StdOpen;
     use std::io::{Read, Seek, SeekFrom};
     use tempfile::tempdir;
-
-    // Helper: unpack 24-bit at index from a packed stream
-    fn unpack_24bit(stream: &[u8], gate_idx: usize) -> u32 {
-        let bit_offset = gate_idx * 24;
-        let byte_offset = bit_offset / 8;
-        let bit_shift = bit_offset % 8;
-
-        if bit_shift == 0 {
-            let mut b = [0u8; 4];
-            b[0..3].copy_from_slice(&stream[byte_offset..byte_offset + 3]);
-            u32::from_le_bytes(b) & 0xFF_FFFF
-        } else {
-            let mut b = [0u8; 4];
-            let end = std::cmp::min(byte_offset + 4, stream.len());
-            let len = end - byte_offset;
-            b[0..len].copy_from_slice(&stream[byte_offset..end]);
-            (u32::from_le_bytes(b) >> bit_shift) & 0xFF_FFFF
-        }
-    }
 
     // Verify checksum by recomputing from file (levels || outputs || header[40..])
     fn verify_file_checksum(path: &Path) -> Result<bool> {
@@ -612,7 +532,7 @@ mod tests {
         }
         let file_checksum = &header[8..40];
         let num_outputs = u64::from_le_bytes(header[72..80].try_into().unwrap()) as usize;
-        let outputs_size = num_outputs * 3;
+        let outputs_size = num_outputs * 4;
 
         let mut hasher = Hasher::new();
 
@@ -644,108 +564,46 @@ mod tests {
         Ok(hasher.finalize().as_bytes() == file_checksum)
     }
 
-    #[test]
-    fn test_pack_24_bits_pack_unaligned_consistency() {
-        let mut stream = vec![0u8; IN1_STREAM_SIZE];
-        // 10 sample values
-        for i in 0..10usize {
-            pack_24bit_at(&mut stream, i, (i as u32) & 0xFF_FFFF);
-        }
-        for i in 0..10usize {
-            assert_eq!(unpack_24bit(&stream, i), (i as u32) & 0xFF_FFFF);
-        }
-        // Ensure padding zeros beyond written gates (spot check)
-        for i in [100usize, 200, GATES_PER_BLOCK - 1] {
-            assert_eq!(unpack_24bit(&stream, i), 0);
-        }
-    }
-
     #[monoio::test]
-    async fn test_writer_mixed_order_in_level_and_boundary_block() {
+    async fn test_writer_simple() {
         let dir = tempdir().unwrap();
-        let path = dir.path().join("v5b_mixed.v5b");
+        let path = dir.path().join("simple.v5b");
 
-        // New API: provide num_outputs at creation
         let mut w = CircuitWriterV5b::new(&path, 2, 2).await.unwrap();
         w.start_level().unwrap();
 
-        // Interspersed adds: create 300 XOR and 300 AND in mixed order
-        // Final order for writing should be: 300 XORs first, then 300 ANDs.
-        // This means the first block of 504 will contain 300 XORs + 204 ANDs (boundary mix).
-        for i in 0..300u32 {
-            let gx = GateV5b::new(2, 3, 1_000 + i).unwrap();
+        // Add some gates
+        for i in 0..10u32 {
+            let gx = GateV5b::new(2, 3, 100 + i).unwrap();
             w.add_gate(GateType::XOR, gx).unwrap();
-            let ga = GateV5b::new(2, 3, 2_000 + i).unwrap();
+            let ga = GateV5b::new(2, 3, 200 + i).unwrap();
             w.add_gate(GateType::AND, ga).unwrap();
         }
 
         w.finish_level().await.unwrap();
 
-        // New API: provide outputs at finalize
-        let stats = w.finalize(10_000, vec![2, 3]).await.unwrap();
+        let stats = w.finalize(300, vec![102, 202]).await.unwrap();
         assert_eq!(stats.num_levels, 1);
-        assert_eq!(stats.total_gates, 600);
-        assert_eq!(stats.xor_gates, 300);
-        assert_eq!(stats.and_gates, 300);
+        assert_eq!(stats.total_gates, 20);
+        assert_eq!(stats.xor_gates, 10);
+        assert_eq!(stats.and_gates, 10);
         assert!(verify_file_checksum(&path).unwrap());
-
-        // Inspect boundary: first block has indices 0..503
-        // We expect indices 0..299 = XOR outs in 1000-range, 300..503 = AND outs in 2000-range.
-        let mut f = StdOpen::new().read(true).open(&path).unwrap();
-        let mut header = vec![0u8; HEADER_SIZE];
-        f.read_exact(&mut header).unwrap();
-        let num_outputs = u64::from_le_bytes(header[72..80].try_into().unwrap()) as usize;
-        let outputs_bytes = num_outputs * 3;
-        f.seek(SeekFrom::Start((HEADER_SIZE + outputs_bytes) as u64))
-            .unwrap();
-
-        // Level header
-        let mut level_hdr = [0u8; LEVEL_HEADER_SIZE];
-        f.read_exact(&mut level_hdr).unwrap();
-        let num_xor = u32::from_le_bytes(level_hdr[0..4].try_into().unwrap());
-        let num_and = u32::from_le_bytes(level_hdr[4..8].try_into().unwrap());
-        assert_eq!(num_xor, 300);
-        assert_eq!(num_and, 300);
-
-        // First block (full)
-        let mut block1 = vec![0u8; BLOCK_SIZE];
-        f.read_exact(&mut block1).unwrap();
-
-        // Check outs for boundary expectations
-        let out_stream = &block1[(IN1_STREAM_SIZE + IN2_STREAM_SIZE)
-            ..(IN1_STREAM_SIZE + IN2_STREAM_SIZE + OUT_STREAM_SIZE)];
-        for i in 0..300usize {
-            let v = unpack_24bit(out_stream, i);
-            assert_eq!(v, 1_000 + i as u32);
-        }
-        for i in 300..GATES_PER_BLOCK {
-            let v = unpack_24bit(out_stream, i);
-            // First block continues with ANDs starting at index 0..203 (204 entries)
-            let and_idx = i - 300;
-            assert_eq!(v, 2_000 + and_idx as u32);
-        }
     }
 
     #[monoio::test]
     async fn test_writer_validates_outputs_and_scratch_space() {
         let dir = tempdir().unwrap();
 
-        // Invalid output address must be caught at finalize
-        let path = dir.path().join("v5b_val_invalid_out.v5b");
-        let w = CircuitWriterV5b::new(&path, 0, 1).await.unwrap();
-        let res = w.finalize(1_000, vec![MAX_MEMORY_ADDRESS]).await;
-        assert!(res.is_err());
-
         // Valid outputs but too small scratch space at finalize
-        let path2 = dir.path().join("v5b_val2.v5b");
-        let mut w2 = CircuitWriterV5b::new(&path2, 0, 1).await.unwrap();
-        w2.start_level().unwrap();
-        w2.add_gate(GateType::XOR, GateV5b::new(0, 1, 20).unwrap())
+        let path = dir.path().join("v5b_val.v5b");
+        let mut w = CircuitWriterV5b::new(&path, 0, 1).await.unwrap();
+        w.start_level().unwrap();
+        w.add_gate(GateType::XOR, GateV5b::new(0, 1, 20).unwrap())
             .unwrap(); // uses address 20
-        w2.finish_level().await.unwrap();
+        w.finish_level().await.unwrap();
 
         // outputs contain 10, but max addr across outputs+gates is 20; scratch_space=10 -> error
-        let res = w2.finalize(10, vec![10]).await;
+        let res = w.finalize(10, vec![10]).await;
         assert!(res.is_err());
     }
 }
