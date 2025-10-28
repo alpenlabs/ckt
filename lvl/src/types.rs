@@ -2,7 +2,7 @@
 //!
 //! This module defines compact, memory-efficient representations for circuit elements:
 //! - Wire IDs compressed to 34 bits (5 bytes)
-//! - Gate dependencies packed into 11 bytes
+//! - Gate dependencies packed into 12 bytes
 //! - Efficient tracking of wire availability and pending dependencies
 
 use ckt::GateType;
@@ -155,7 +155,7 @@ pub(crate) struct PendingLevel {
 /// reach 1 (meaning this is the last use), the wire is removed from the state
 /// map to free memory.
 #[derive(Debug, Clone, Copy, Hash)]
-pub struct Credits(pub u16);
+pub struct Credits(pub u32);
 
 /// The state of a wire in the levelling algorithm.
 ///
@@ -172,24 +172,24 @@ pub enum WireAvailability {
     WaitingInline(CompactDependency),
 }
 
-/// A gate dependency packed into 11 bytes.
+/// A gate dependency packed into 12 bytes.
 ///
 /// When a gate is waiting for an input wire to become available, we store a compact
 /// representation of that gate. This saves memory compared to storing the full
 /// `IntermediateGate` structure.
 ///
-/// # Bit Layout (88 bits total in 11 bytes)
+/// # Bit Layout (96 bits total in 12 bytes)
 /// - Bits 0-33: `other_in` wire ID (34 bits) - the wire that IS available
 /// - Bits 34-67: `out` wire ID (34 bits) - the gate's output
 /// - Bit 68: `gate_type` (1 bit: 0=XOR, 1=AND)
 /// - Bits 69-71: Padding (unused)
-/// - Bits 72-87: `credits` (16 bits) - reference count for the output wire
+/// - Bits 72-95: `credits` (24 bits) - reference count for the output wire
 ///
 /// When the waiting wire becomes available, we can reconstruct the full gate by
 /// combining the stored information with the newly-available wire ID.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CompactDependency {
-    pub(crate) bytes: [u8; 11],
+    pub(crate) bytes: [u8; 12],
 }
 
 impl std::fmt::Debug for CompactDependency {
@@ -205,7 +205,7 @@ impl std::fmt::Debug for CompactDependency {
 }
 
 impl CompactDependency {
-    /// Packs a gate dependency into 11 bytes.
+    /// Packs a gate dependency into 12 bytes.
     ///
     /// # Arguments
     /// - `other_in`: The input wire that IS available
@@ -224,8 +224,8 @@ impl CompactDependency {
         debug_assert!(other_in_u64 < (1u64 << 34), "other_in exceeds 34 bits");
         debug_assert!(out_u64 < (1u64 << 34), "out exceeds 34 bits");
 
-        let mut bytes = [0u8; 11];
-        // Pack: 34 bits other_in | 34 bits out | 1 bit gate_type | 16 bit credits
+        let mut bytes = [0u8; 12];
+        // Pack: 34 bits other_in | 34 bits out | 1 bit gate_type | 24 bit credits
 
         // other_in: bits 0-33
         bytes[0] = (other_in_u64 & 0xFF) as u8;
@@ -246,9 +246,10 @@ impl CompactDependency {
             bytes[8] |= 0x10; // Set bit 4
         }
 
-        // credits: bytes 9-10 (bits 72-87)
+        // credits: bytes 9-11 (bits 72-95, using 24 bits)
         bytes[9] = (credits.0 & 0xFF) as u8;
         bytes[10] = ((credits.0 >> 8) & 0xFF) as u8;
+        bytes[11] = ((credits.0 >> 16) & 0xFF) as u8;
 
         Self { bytes }
     }
@@ -276,8 +277,12 @@ impl CompactDependency {
             GateType::XOR
         };
 
-        // Unpack credits
-        let credits = Credits((self.bytes[9] as u16) | ((self.bytes[10] as u16) << 8));
+        // Unpack credits (24 bits)
+        let credits = Credits(
+            (self.bytes[9] as u32)
+                | ((self.bytes[10] as u32) << 8)
+                | ((self.bytes[11] as u32) << 16),
+        );
 
         Dependency {
             other_in: CompactWireId::from_u64(other_in_u64),

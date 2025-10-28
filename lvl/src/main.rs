@@ -204,7 +204,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         in1: CompactWireId::from_u64(block.in1[gate_idx]),
                         in2: CompactWireId::from_u64(block.in2[gate_idx]),
                         out: CompactWireId::from_u64(block.out[gate_idx]),
-                        credits: Credits(block.credits[gate_idx] as u16),
+                        credits: Credits(block.credits[gate_idx]),
                     };
                     leveller.add_gate(new_gate, block.gate_types[gate_idx]);
                 }
@@ -377,7 +377,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         in1: CompactWireId::from_u64(v5a_gate.in1),
                                         in2: CompactWireId::from_u64(v5a_gate.in2),
                                         out: CompactWireId::from_u64(v5a_gate.out),
-                                        credits: Credits(v5a_gate.credits as u16),
+                                        credits: Credits(v5a_gate.credits),
                                     };
 
                                     leveller.add_gate(gate, v5a_gate.gate_type);
@@ -420,7 +420,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     in1: CompactWireId::from_u64(v5a_gate.in1),
                                     in2: CompactWireId::from_u64(v5a_gate.in2),
                                     out: CompactWireId::from_u64(v5a_gate.out),
-                                    credits: Credits(v5a_gate.credits as u16),
+                                    credits: Credits(v5a_gate.credits),
                                 };
                                 // Always process the entire batch
                                 leveller.add_gate(gate, v5a_gate.gate_type);

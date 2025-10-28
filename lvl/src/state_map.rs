@@ -136,8 +136,8 @@ impl<'a> Drop for WaitingSetGuard<'a> {
 /// unaligned reads/writes.
 #[repr(packed)]
 union Wire {
-    credits: u16,             // Credits (2 bytes)
-    waiting_inline: [u8; 11], // Single CompactDependency (11 bytes)
+    credits: u32,             // Credits (4 bytes) - only lower 24 bits used
+    waiting_inline: [u8; 12], // Single CompactDependency (12 bytes)
     waiting_ptr: *mut DepSet, // Multiple dependencies using HashSet
 }
 
@@ -563,7 +563,7 @@ impl<'a> InlineDep<'a> {
     #[inline]
     pub fn take(&mut self) -> CompactDependency {
         let current = self.inner.get();
-        self.inner.set(CompactDependency { bytes: [0; 11] });
+        self.inner.set(CompactDependency { bytes: [0; 12] });
         current
     }
 }
