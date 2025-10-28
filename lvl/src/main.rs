@@ -276,14 +276,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                         // remove the wire from "memory" aka slab allocator if it's ran out of credits
                         let value: &mut (usize, Credits) = entry.get_mut();
                         let slab_idx = value.0;
-                        if value.1 .0 > 1 {
+                        // if its credits is 0, it's a special wire
+                        if value.1 .0 != 0 {
                             value.1 .0 -= 1;
-                        } else {
-                            // defer free until end of level
-                            to_free.push(slab_idx);
 
-                            // remove from mapping table
-                            entry.remove_entry();
+                            if value.1 .0 == 0 {
+                                // defer free until end of level
+                                to_free.push(slab_idx);
+
+                                // remove from mapping table
+                                entry.remove_entry();
+                            }
                         }
                         slab_idx
                     }

@@ -39,7 +39,7 @@ pub(crate) enum WireAvailabilityMut<'a> {
 ///
 /// Holds a raw pointer to the slot's Wire union. The lifetime ensures the
 /// SlottedValue cannot be moved or dropped while this guard exists.
-struct AvailableGuard<'a> {
+pub struct AvailableGuard<'a> {
     slot_ptr: *mut Wire,
     _l: PhantomData<&'a mut SlottedValue>,
 }

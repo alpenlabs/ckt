@@ -1,10 +1,11 @@
+//! as
 use std::time::{Duration, Instant};
 
 use ckt::v5::a::reader::CircuitReaderV5a;
 
 #[monoio::main]
 async fn main() {
-    let mut reader = CircuitReaderV5a::open("/home/user/dev/alpen/g16/g16/g16.ckt").unwrap();
+    let mut reader = CircuitReaderV5a::open("/home/user/g16.ckt").unwrap();
     let now = Instant::now();
     let mut gates = 0;
     let dur = Duration::from_secs(10);
