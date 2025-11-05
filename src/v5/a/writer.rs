@@ -17,7 +17,6 @@ use crate::v5::a::{
     CREDITS_OFFSET, CREDITS_SIZE, FORMAT_TYPE_A, HEADER_SIZE_V5A, IN_STREAM_SIZE, IN1_OFFSET,
     IN2_OFFSET, MAGIC, OUT_OFFSET, TYPES_OFFSET, VERSION,
 };
-use crate::v5::avx512::BlockV5a;
 
 use super::{BLOCK_SIZE_BYTES, GATES_PER_BLOCK, GateV5a, MAX_CREDITS, MAX_WIRE_ID};
 
@@ -135,27 +134,6 @@ impl BlockBuilder {
             }
         }
         // Padding remains zero
-    }
-
-    pub fn encode(&self) -> BlockV5a {
-        let mut block = BlockV5a::new();
-
-        // Pack streams
-        pack_34_bits(&self.in1[..self.len], &mut block.in1_packed);
-        pack_34_bits(&self.in2[..self.len], &mut block.in2_packed);
-        pack_34_bits(&self.out[..self.len], &mut block.out_packed);
-        pack_24_bits(&self.credits[..self.len], &mut block.credits_packed);
-
-        // Pack gate types bitset
-        // Byte 0 bit 0 => gate 0, ..., byte 31 bit 7 => gate 255
-        for i in 0..self.len {
-            if self.gate_types[i] != GateType::XOR {
-                let byte_idx = i / 8;
-                let bit_idx = i % 8;
-                block.gate_types[byte_idx] |= 1u8 << bit_idx;
-            }
-        }
-        block
     }
 
     pub fn clear(&mut self) {

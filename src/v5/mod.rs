@@ -8,9 +8,12 @@
 //! with AVX-512 SIMD processing and io_uring I/O.
 
 pub mod a;
-pub mod avx512;
 pub mod b;
 pub mod scalar;
+
+// Decoder module is private - callers use dispatch functions
+#[cfg(all(target_arch = "x86_64"))]
+mod avx512;
 
 /// Magic bytes for v5 format: "Zk2u" in ASCII
 pub const MAGIC: [u8; 4] = [0x5A, 0x6B, 0x32, 0x75];
@@ -84,25 +87,92 @@ impl CircuitStats {
     }
 }
 
-/// Check if CPU supports required AVX-512 features
-#[cfg(target_arch = "x86_64")]
-pub fn check_avx512_support() -> bool {
-    if !is_x86_feature_detected!("avx512f") {
-        return false;
-    }
-    if !is_x86_feature_detected!("avx512bw") {
-        return false;
-    }
-    if !is_x86_feature_detected!("avx512vbmi") {
-        return false;
+/// Dispatch to AVX-512 or scalar implementation for v5a block decoding
+///
+/// This function automatically selects the best available implementation:
+/// - On x86_64 with AVX-512F support: uses SIMD acceleration
+/// - Otherwise: uses portable scalar code
+///
+/// The caller doesn't need to know which path is taken or manage any scratch space.
+#[inline]
+pub fn decode_block_v5a(
+    block_bytes: &[u8],
+    num_gates: usize,
+    in1_out: &mut [u64],
+    in2_out: &mut [u64],
+    out_out: &mut [u64],
+    credits_out: &mut [u32],
+    gate_types_out: &mut [bool],
+) {
+    #[cfg(all(target_arch = "x86_64"))]
+    {
+        if is_x86_feature_detected!("avx512f") {
+            use a::{
+                CREDITS_OFFSET, CREDITS_SIZE, GATES_PER_BLOCK, IN_STREAM_SIZE, IN1_OFFSET,
+                IN2_OFFSET, OUT_OFFSET, TYPES_OFFSET,
+            };
+
+            // Create AVX block on-stack (only when AVX path is taken)
+            let mut avx_block = avx512::BlockV5a::new();
+
+            avx_block
+                .in1_packed
+                .copy_from_slice(&block_bytes[IN1_OFFSET..IN1_OFFSET + IN_STREAM_SIZE]);
+            avx_block
+                .in2_packed
+                .copy_from_slice(&block_bytes[IN2_OFFSET..IN2_OFFSET + IN_STREAM_SIZE]);
+            avx_block
+                .out_packed
+                .copy_from_slice(&block_bytes[OUT_OFFSET..OUT_OFFSET + IN_STREAM_SIZE]);
+            avx_block
+                .credits_packed
+                .copy_from_slice(&block_bytes[CREDITS_OFFSET..CREDITS_OFFSET + CREDITS_SIZE]);
+            avx_block
+                .gate_types
+                .copy_from_slice(&block_bytes[TYPES_OFFSET..TYPES_OFFSET + 32]);
+
+            unsafe {
+                avx512::decode_block_v5a_avx512(
+                    &avx_block,
+                    num_gates,
+                    in1_out,
+                    in2_out,
+                    out_out,
+                    credits_out,
+                    gate_types_out,
+                );
+            }
+            return;
+        }
     }
 
-    true
-}
+    // Fallback to scalar on all platforms
+    use a::GATES_PER_BLOCK;
 
-#[cfg(not(target_arch = "x86_64"))]
-pub fn check_avx512_support() -> bool {
-    false
+    // Convert slices to fixed-size array references for scalar decoder
+    debug_assert!(in1_out.len() >= GATES_PER_BLOCK);
+    debug_assert!(in2_out.len() >= GATES_PER_BLOCK);
+    debug_assert!(out_out.len() >= GATES_PER_BLOCK);
+    debug_assert!(credits_out.len() >= GATES_PER_BLOCK);
+    debug_assert!(gate_types_out.len() >= GATES_PER_BLOCK);
+
+    // Safety: We've asserted the slices are at least GATES_PER_BLOCK elements
+    let in1_arr = unsafe { &mut *(in1_out.as_mut_ptr() as *mut [u64; GATES_PER_BLOCK]) };
+    let in2_arr = unsafe { &mut *(in2_out.as_mut_ptr() as *mut [u64; GATES_PER_BLOCK]) };
+    let out_arr = unsafe { &mut *(out_out.as_mut_ptr() as *mut [u64; GATES_PER_BLOCK]) };
+    let credits_arr = unsafe { &mut *(credits_out.as_mut_ptr() as *mut [u32; GATES_PER_BLOCK]) };
+    let gate_types_arr =
+        unsafe { &mut *(gate_types_out.as_mut_ptr() as *mut [bool; GATES_PER_BLOCK]) };
+
+    scalar::decode_block_v5a_scalar(
+        block_bytes,
+        num_gates,
+        in1_arr,
+        in2_arr,
+        out_arr,
+        credits_arr,
+        gate_types_arr,
+    );
 }
 
 #[cfg(test)]

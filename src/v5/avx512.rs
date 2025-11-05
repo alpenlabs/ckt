@@ -1,18 +1,12 @@
+//! AVX-512 accelerated decoding for v5 format
+//!
+//! This module provides SIMD-accelerated unpacking of packed bit streams.
+//! All functions here require AVX-512F support and should only be called
+//! after runtime feature detection.
+//!
+//! This module is private and accessed through dispatch functions in the parent module.
+
 use std::arch::x86_64::*;
-
-// ================= CPU feature detection =================
-
-#[inline]
-pub fn is_x86_avx512f() -> bool {
-    #[cfg(all(target_arch = "x86_64"))]
-    {
-        std::is_x86_feature_detected!("avx512f")
-    }
-    #[cfg(not(all(target_arch = "x86_64")))]
-    {
-        false
-    }
-}
 
 #[derive(Debug)]
 pub struct BlockV5a {
@@ -35,9 +29,17 @@ impl BlockV5a {
     }
 }
 
-// Expand 34-bit little-endian fields to u64, and 24-bit little-endian to u32.
-// - num_gates: how many gates to decode (<= 256)
-// - Outputs are written to the first num_gates entries of the destination slices.
+/// Decode a v5a block using AVX-512 SIMD instructions
+///
+/// Expands 34-bit little-endian fields to u64, and 24-bit little-endian to u32.
+///
+/// # Arguments
+/// - `blk`: Packed block data
+/// - `num_gates`: How many gates to decode (<= 256)
+/// - Output slices: Only the first `num_gates` entries are written
+///
+/// # Safety
+/// Requires AVX-512F CPU feature. Caller must ensure feature is available.
 #[target_feature(enable = "avx512f")]
 pub unsafe fn decode_block_v5a_avx512(
     blk: &BlockV5a,
@@ -85,9 +87,17 @@ pub struct BlockV5b {
     pub out_stream: [u8; 1512], // 504 × 24 bits
 }
 
-// Decode 3×24-bit streams into u32 outputs.
-// - num_gates: how many gates to decode (<= 504).
-// - Only the first num_gates entries of each destination slice are written.
+/// Decode a v5b block using AVX-512 SIMD instructions
+///
+/// Decodes 3×24-bit streams into u32 outputs.
+///
+/// # Arguments
+/// - `blk`: Packed block data with three 24-bit streams
+/// - `num_gates`: How many gates to decode (<= 504)
+/// - Output slices: Only the first `num_gates` entries are written
+///
+/// # Safety
+/// Requires AVX-512F CPU feature. Caller must ensure feature is available.
 #[target_feature(enable = "avx512f")]
 pub unsafe fn decode_block_v5b_avx512(
     blk: &BlockV5b,

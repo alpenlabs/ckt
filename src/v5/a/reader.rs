@@ -9,10 +9,9 @@ use monoio::{FusionDriver, select};
 
 use crate::GateType;
 use crate::v5::a::{
-    BLOCK_SIZE_BYTES, CREDITS_OFFSET, CREDITS_SIZE, GATES_PER_BLOCK, GateV5a, HEADER_SIZE_V5A,
-    HeaderV5a, IN_STREAM_SIZE, IN1_OFFSET, IN2_OFFSET, OUT_OFFSET, TYPES_OFFSET, parse_header,
+    BLOCK_SIZE_BYTES, GATES_PER_BLOCK, GateV5a, HEADER_SIZE_V5A, HeaderV5a, parse_header,
 };
-use crate::v5::{avx512 as avx, scalar};
+use crate::v5::decode_block_v5a;
 use cynosure::site_d::triplebuffer::{
     AlignedBuffer, BUFFER_ALIGN, BufferStats, TripleBufReader, TripleBufWriter, triple_buffer,
 };
@@ -81,13 +80,12 @@ pub struct CircuitReaderV5a {
 
     // Staging and decode scratch
     block_staging: [u8; BLOCK_SIZE_BYTES],
-    avx_blk: avx::BlockV5a,
     in1: [u64; GATES_PER_BLOCK],
     in2: [u64; GATES_PER_BLOCK],
     out: [u64; GATES_PER_BLOCK],
     credits: [u32; GATES_PER_BLOCK],
-    gate_types_tmp: [bool; GATES_PER_BLOCK], // AVX/scalar decodes to bools
-    gate_types: [GateType; GATES_PER_BLOCK], // mapped to GateType
+    gate_types_tmp: [bool; GATES_PER_BLOCK],
+    gate_types: [GateType; GATES_PER_BLOCK],
     block_index: u64,
 }
 
@@ -166,13 +164,6 @@ impl CircuitReaderV5a {
             prefix_skip,
             first_chunk: prefix_skip > 0,
             block_staging: [0u8; BLOCK_SIZE_BYTES],
-            avx_blk: avx::BlockV5a {
-                in1_packed: [0u8; IN_STREAM_SIZE],
-                in2_packed: [0u8; IN_STREAM_SIZE],
-                out_packed: [0u8; IN_STREAM_SIZE],
-                credits_packed: [0u8; CREDITS_SIZE],
-                gate_types: [0u8; 32],
-            },
             in1: [0u64; GATES_PER_BLOCK],
             in2: [0u64; GATES_PER_BLOCK],
             out: [0u64; GATES_PER_BLOCK],
@@ -200,24 +191,6 @@ impl CircuitReaderV5a {
 
         self.fill_next_block_bytes().await?;
 
-        // Prepare AVX block storage
-        let block_bytes = &self.block_staging[..];
-        self.avx_blk
-            .in1_packed
-            .copy_from_slice(&block_bytes[IN1_OFFSET..IN1_OFFSET + IN_STREAM_SIZE]);
-        self.avx_blk
-            .in2_packed
-            .copy_from_slice(&block_bytes[IN2_OFFSET..IN2_OFFSET + IN_STREAM_SIZE]);
-        self.avx_blk
-            .out_packed
-            .copy_from_slice(&block_bytes[OUT_OFFSET..OUT_OFFSET + IN_STREAM_SIZE]);
-        self.avx_blk
-            .credits_packed
-            .copy_from_slice(&block_bytes[CREDITS_OFFSET..CREDITS_OFFSET + CREDITS_SIZE]);
-        self.avx_blk
-            .gate_types
-            .copy_from_slice(&block_bytes[TYPES_OFFSET..TYPES_OFFSET + 32]);
-
         // Determine valid gates in this block (last may be partial)
         let gates_in_block = if self.gates_remaining >= GATES_PER_BLOCK as u64 {
             GATES_PER_BLOCK
@@ -225,30 +198,16 @@ impl CircuitReaderV5a {
             self.gates_remaining as usize
         };
 
-        // Decode path: AVX-512 if available, else scalar fallback
-        if avx::is_x86_avx512f() {
-            unsafe {
-                avx::decode_block_v5a_avx512(
-                    &self.avx_blk,
-                    gates_in_block,
-                    &mut self.in1,
-                    &mut self.in2,
-                    &mut self.out,
-                    &mut self.credits,
-                    &mut self.gate_types_tmp,
-                );
-            }
-        } else {
-            scalar::decode_block_v5a_scalar(
-                block_bytes,
-                gates_in_block,
-                &mut self.in1,
-                &mut self.in2,
-                &mut self.out,
-                &mut self.credits,
-                &mut self.gate_types_tmp,
-            );
-        }
+        // Decode - automatically dispatches to AVX-512 or scalar
+        decode_block_v5a(
+            &self.block_staging,
+            gates_in_block,
+            &mut self.in1,
+            &mut self.in2,
+            &mut self.out,
+            &mut self.credits,
+            &mut self.gate_types_tmp,
+        );
 
         // Map bool -> GateType (false=XOR, true=AND)
         for i in 0..gates_in_block {
