@@ -1,21 +1,20 @@
 //! asdas
 
-use std::{
-    collections::HashSet,
-    time::{Duration, Instant},
-};
-
 use ckt::v5::a::reader::CircuitReaderV5a;
 use indicatif::ProgressBar;
-use roaring::{RoaringBitmap, RoaringTreemap};
+// use roaring::{RoaringBitmap, RoaringTreemap};
 
 #[monoio::main]
 async fn main() {
-    let mut reader = CircuitReaderV5a::open("/home/user/dev/alpen/g16/g16/g16.ckt").unwrap();
-    let now = Instant::now();
-    let mut gates = 0;
-    let mut seen_outputs = RoaringTreemap::new();
-    let mut max_seen = 0;
+    let mut reader = CircuitReaderV5a::open("/Users/user/g16.ckt").unwrap();
+
+    const NUM: usize = 100000;
+    let range = 100000u64..100000 + NUM as u64;
+    let mut claimed: [u32; NUM] = [0; NUM];
+    let mut actual: [u32; NUM] = [0; NUM];
+
+    let mut max_creds = 0;
+
     let pb = ProgressBar::new(reader.header().total_gates());
     loop {
         let block = match reader.next_block_soa().await.unwrap() {
@@ -23,20 +22,52 @@ async fn main() {
             None => break,
         };
         for i in 0..block.gates_in_block {
-            if i < 100 && gates == 0 {
-                println!("Gate {} {} -> {}", block.in1[i], block.in2[i], block.out[i]);
-            }
-            if seen_outputs.contains(block.out[i]) {
-                println!("Duplicate output found: {}", block.out[i]);
-            }
-            seen_outputs.insert(block.out[i]);
-            max_seen = max_seen.max(block.out[i]);
+            // if range.contains(&block.out[i]) {
+            //     let idx = block.out[i] as usize % NUM;
+            //     claimed[idx] = block.credits[i];
+            // }
+
+            // if range.contains(&block.in1[i]) {
+            //     let idx = block.in1[i] as usize % NUM;
+            //     actual[idx] += 1;
+            // }
+
+            // if range.contains(&block.in2[i]) {
+            //     let idx = block.in2[i] as usize % NUM;
+            //     actual[idx] += 1;
+            // }
+            max_creds = max_creds.max(block.credits[i]);
         }
-        gates += block.gates_in_block;
         pb.inc(block.gates_in_block as u64);
     }
-    let gates_per_second = gates as f64 / now.elapsed().as_millis() as f64 * 1000.0;
-    println!("Gates read: {}", gates);
-    println!("Gates per second: {:.2}", gates_per_second);
-    println!("Max seen output: {}", max_seen);
+    pb.finish();
+
+    dbg!(max_creds);
+
+    let mut mismatches = Vec::new();
+    for i in 0..NUM {
+        if claimed[i] != actual[i] {
+            let wire_id = 100000 + i as u64;
+            mismatches.push((wire_id, claimed[i], actual[i]));
+        }
+    }
+
+    if mismatches.is_empty() {
+        println!("✓ All gates match! Claimed credits equal actual usage.");
+    } else {
+        println!("\n✗ Found {} mismatches:\n", mismatches.len());
+        println!(
+            "{:<12} {:<12} {:<12} {:<12}",
+            "Wire ID", "Claimed", "Actual", "Difference"
+        );
+        println!("{}", "-".repeat(52));
+        for (wire_id, claimed_val, actual_val) in &mismatches {
+            let diff = *actual_val as i64 - *claimed_val as i64;
+            println!(
+                "{:<12} {:<12} {:<12} {:+<12}",
+                wire_id, claimed_val, actual_val, diff
+            );
+        }
+        println!("\nTotal mismatches: {}/{}", mismatches.len(), NUM);
+    }
 }

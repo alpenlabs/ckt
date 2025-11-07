@@ -7,8 +7,12 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+ahash = "0.8.12"
 ckt = { version = "0.1.0", path = ".." }
+indicatif = "0.18.2"
+lvl = { version = "0.1.0", path = "../lvl" }
 monoio = { version = "0.2.4", features = ["sync"] }
+
 
 [lints]
 workspace = true

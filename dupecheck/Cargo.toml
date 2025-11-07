@@ -10,7 +10,7 @@ repository.workspace = true
 ckt = { version = "0.1.0", path = ".." }
 indicatif = "0.18.0"
 monoio = { version = "0.2.4", features = ["sync"] }
-roaring = { version = "0.11.2", features = ["simd"] }
+# roaring = { version = "0.11.2", features = ["simd"] }
 
 [lints]
 workspace = true
