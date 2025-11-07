@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 
 mod cli;
 
-use cli::Cli;
-use lvl::Leveller;
+use cli::{Cli, Command};
+use lvl::{prealloc, Leveller};
 
 // Memory tracking wrapper around mimalloc
 struct TrackingAllocator {
@@ -110,9 +110,29 @@ fn get_max_memory_usage_mb() -> f64 {
 
 #[monoio::main(timer_enabled = true)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Parse command line arguments
     let args = Cli::parse_args();
 
+    match args.command {
+        Command::Level(level_args) => run_level(level_args).await,
+        Command::Prealloc(prealloc_args) => run_prealloc(prealloc_args).await,
+    }
+}
+
+async fn run_prealloc(args: cli::PreallocCommand) -> Result<(), Box<dyn std::error::Error>> {
+    println!("Circuit Preallocation - v5a to v5c Converter");
+    println!("=============================================");
+    println!("Input:  {}", args.input.display());
+    println!("Output: {}", args.output.display());
+    println!();
+
+    prealloc::prealloc(args.input.to_str().unwrap(), args.output.to_str().unwrap()).await;
+
+    println!();
+    println!("Conversion complete!");
+    Ok(())
+}
+
+async fn run_level(args: cli::LevelCommand) -> Result<(), Box<dyn std::error::Error>> {
     MEMORY_LIMIT
         .set(args.memory_limit_gb * 1024usize.pow(3))
         .unwrap();

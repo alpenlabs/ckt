@@ -19,6 +19,7 @@ clap = { version = "4.5", features = ["derive"] }
 roaring = "0.11.2"
 indexmap = "2.11.4"
 fixedbitset = "0.5.7"
+nohash-hasher = "0.2.0"
 
 [features]
 nightly = ["roaring/simd"]

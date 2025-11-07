@@ -1,16 +1,30 @@
-use clap::Parser;
+use clap::{Parser, Subcommand};
 use std::path::PathBuf;
 
-/// Circuit Level Organizer - Converts v3a circuits to v3b level-based format
+/// Circuit Level Organizer - Tools for circuit transformation
 #[derive(Parser, Debug)]
 #[command(name = "lvl")]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
-    /// Input v3a CKT file path
+    #[command(subcommand)]
+    pub command: Command,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum Command {
+    /// Convert v5a circuits to v5b level-based format
+    Level(LevelCommand),
+    /// Preallocate wires and convert v5a to v5c flat format
+    Prealloc(PreallocCommand),
+}
+
+#[derive(Parser, Debug)]
+pub struct LevelCommand {
+    /// Input v5a CKT file path
     #[arg(value_name = "INPUT")]
     pub input: PathBuf,
 
-    /// Output v3b CKT file path
+    /// Output v5b CKT file path
     #[arg(value_name = "OUTPUT")]
     pub output: PathBuf,
 
@@ -52,11 +66,22 @@ pub struct Cli {
     #[arg(
         short = 'm',
         long = "memory-limit",
-        default_value_t = 1,
+        default_value_t = 1000,
         value_name = "GB",
         help = "Maximum memory usage in gigabytes"
     )]
     pub memory_limit_gb: usize,
+}
+
+#[derive(Parser, Debug)]
+pub struct PreallocCommand {
+    /// Input v5a CKT file path
+    #[arg(value_name = "INPUT")]
+    pub input: PathBuf,
+
+    /// Output v5c CKT file path
+    #[arg(value_name = "OUTPUT")]
+    pub output: PathBuf,
 }
 
 impl Cli {

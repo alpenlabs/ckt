@@ -8,5 +8,12 @@ repository.workspace = true
 
 [dependencies]
 
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "garbling"
+harness = false
+
 [lints]
 workspace = true
