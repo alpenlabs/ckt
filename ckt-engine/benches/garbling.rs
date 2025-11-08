@@ -18,7 +18,6 @@ fn bench_garble_xor_gate(c: &mut Criterion) {
         }
 
         let mut instance = GarblingInstance {
-            rng_counter: 0,
             gate_ctr: 0,
             working_space,
             delta,
@@ -49,7 +48,6 @@ fn bench_garble_and_gate(c: &mut Criterion) {
         }
 
         let mut instance = GarblingInstance {
-            rng_counter: 0,
             gate_ctr: 0,
             working_space,
             delta,
@@ -80,7 +78,6 @@ fn bench_garble_mixed_gates(c: &mut Criterion) {
         }
 
         let mut instance = GarblingInstance {
-            rng_counter: 0,
             gate_ctr: 0,
             working_space,
             delta,
