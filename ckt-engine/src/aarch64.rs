@@ -54,7 +54,7 @@ impl GarblingInstance {
         let mut h_xor_in1_t = unsafe { aes_round(xor_in1, t) };
         let mut h_out = unsafe { aes_round(in1.0, t) };
 
-        for _ in 0..9 {
+        for _ in 0..8 {
             h_xor_in1_t = unsafe { aes_round(h_xor_in1_t, t) };
             h_out = unsafe { aes_round(h_out, t) };
         }
