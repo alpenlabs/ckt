@@ -103,6 +103,22 @@ impl GarblingInstance {
         self.rng_counter = self.rng_counter.wrapping_add(1);
 
         Ciphertext(ciphertext)
+
+        // // PSEUDOCODE FOR PFHG 
+
+        // // extract false input labels for both inputs
+        // let in1 = self.working_space[in1_addr];
+        // let in2 = self.working_space[in2_addr];
+
+        // // only need 1 tweak for this gate
+        // let t = unsafe { index_to_tweak(self.gate_ctr) };
+
+        // // compute false output label by Hash(false input label 1, tweak)
+        // let out = Hash(in1, t); 
+        // self.working_space[out_addr] = out;
+
+        // let ciphertext = Hash(in1, t) ^ Hash(in1^self.delta, t) ^ in2;
+        // Ciphertext(ciphertext);
     }
 }
 
