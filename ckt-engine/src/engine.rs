@@ -1,7 +1,7 @@
 use std::{
     sync::{
         Arc, Barrier,
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
     },
     thread::JoinHandle,
     time::Instant,
@@ -9,7 +9,7 @@ use std::{
 
 use ckt::{
     GateType,
-    v5::c::{Block, GATES_PER_BLOCK, reader::ReaderV5c},
+    v5::c::{BLOCK_SIZE, Block, GATES_PER_BLOCK, reader::ReaderV5c},
 };
 use cynosure::hints::unlikely;
 use indicatif::ProgressBar;
@@ -36,13 +36,17 @@ struct Engine {
     workers: Vec<JoinHandle<()>>,
 }
 
-/// Zero-copy work queue using raw pointers to reader's internal buffer
+/// True double-buffer work queue with overlapped I/O and compute
 struct WorkQueue {
-    // Raw pointer to current buffer (set by master, read by workers)
-    buffer_ptr: AtomicUsize, // *const u8 as usize
+    buffer_a: Box<[u8; BLOCK_SIZE * 16]>,
+    buffer_b: Box<[u8; BLOCK_SIZE * 16]>,
 
-    // Number of valid blocks (0 means shutdown)
-    num_blocks: AtomicUsize,
+    // Which buffer workers should read from (false = A, true = B)
+    active_buffer: AtomicBool,
+
+    // Number of valid blocks in each buffer (0 means shutdown)
+    blocks_in_a: AtomicUsize,
+    blocks_in_b: AtomicUsize,
 
     // Synchronization barrier
     barrier: Arc<Barrier>,
@@ -57,10 +61,17 @@ pub async fn master_thread() {
     let scratch_space = reader.header().scratch_space as u32;
     let mut gates_left = reader.header().total_gates() as usize;
 
+    // Pre-fill buffer A
+    let mut buf_a = Box::new([0u8; BLOCK_SIZE * 16]);
+    let blocks_in_a = reader.read_blocks(&mut buf_a[..]).await.unwrap();
+
     let queue = Arc::new(WorkQueue {
-        buffer_ptr: AtomicUsize::new(0),
-        num_blocks: AtomicUsize::new(0),
-        barrier: Arc::new(Barrier::new(2)), // Master + 1 worker
+        buffer_a: buf_a,
+        buffer_b: Box::new([0u8; BLOCK_SIZE * 16]),
+        active_buffer: AtomicBool::new(false), // Start with buffer A
+        blocks_in_a: AtomicUsize::new(blocks_in_a),
+        blocks_in_b: AtomicUsize::new(0),
+        barrier: Arc::new(Barrier::new(2)),
     });
 
     let queue_worker = queue.clone();
@@ -70,36 +81,59 @@ pub async fn master_thread() {
     let pb = ProgressBar::new(gates_left as u64);
     let start = Instant::now();
 
+    // Worker is now processing buffer A
+    // Master immediately starts filling buffer B (OVERLAP!)
+    let naughty_ptr = Arc::as_ptr(&queue) as *mut WorkQueue;
+    let mut next_blocks = unsafe {
+        let buf = &mut *(*naughty_ptr).buffer_b;
+        reader.read_blocks(&mut buf[..]).await.unwrap()
+    };
+    queue.blocks_in_b.store(next_blocks, Ordering::Release);
+
     loop {
-        // Get zero-copy reference to next buffer
-        let buffer_ref = reader.next_blocks_ref().await.unwrap();
+        // Wait for worker to finish processing current buffer
+        queue.barrier.wait();
 
-        match buffer_ref {
-            None => {
-                // Signal shutdown
-                queue.num_blocks.store(0, Ordering::Release);
-                queue.barrier.wait();
-                break;
-            }
-            Some((buffer, num_blocks)) => {
-                // Share buffer pointer with worker (safe because we wait at barrier)
-                let ptr = buffer.as_ptr() as usize;
-                queue.buffer_ptr.store(ptr, Ordering::Release);
-                queue.num_blocks.store(num_blocks, Ordering::Release);
+        // Update progress for buffer that just finished
+        let just_processed = if queue.active_buffer.load(Ordering::Relaxed) {
+            queue.blocks_in_b.load(Ordering::Relaxed)
+        } else {
+            queue.blocks_in_a.load(Ordering::Relaxed)
+        };
 
-                // Wait for worker to finish processing
-                queue.barrier.wait();
-
-                // Update progress
-                let mut num_gates_in_buf = 0;
-                for _ in 0..num_blocks {
-                    let gates_in_block = gates_left.min(GATES_PER_BLOCK);
-                    gates_left -= gates_in_block;
-                    num_gates_in_buf += gates_in_block;
-                }
-                pb.inc(num_gates_in_buf as u64);
-            }
+        for _ in 0..just_processed {
+            let gates_in_block = gates_left.min(GATES_PER_BLOCK);
+            gates_left -= gates_in_block;
+            pb.inc(gates_in_block as u64);
         }
+
+        // Swap buffers - worker will now process the buffer we just filled
+        // (Even if next_blocks == 0, we need to swap so worker sees the zero in correct atomic)
+        queue.active_buffer.fetch_xor(true, Ordering::Release);
+
+        // Check if we're done AFTER swapping
+        if next_blocks == 0 {
+            queue.barrier.wait();
+            break;
+        }
+
+        // Read into the buffer worker just finished (now inactive)
+        // This happens in PARALLEL with worker processing the other buffer!
+        let use_buffer_a = queue.active_buffer.load(Ordering::Relaxed);
+        let (buffer, atomic) = if use_buffer_a {
+            unsafe {
+                let buf = &mut *(*naughty_ptr).buffer_a;
+                (&mut buf[..], &queue.blocks_in_a)
+            }
+        } else {
+            unsafe {
+                let buf = &mut *(*naughty_ptr).buffer_b;
+                (&mut buf[..], &queue.blocks_in_b)
+            }
+        };
+
+        next_blocks = reader.read_blocks(buffer).await.unwrap();
+        atomic.store(next_blocks, Ordering::Release);
     }
 
     let elapsed = start.elapsed();
@@ -120,23 +154,31 @@ fn worker_thread(queue: Arc<WorkQueue>, mut gates_left: usize, scratch_space: u3
     );
 
     loop {
-        // Wait for master to provide next buffer
-        queue.barrier.wait();
+        // Determine which buffer to process
+        let use_buffer_a = !queue.active_buffer.load(Ordering::Acquire);
 
-        // Load buffer info
-        let num_blocks = queue.num_blocks.load(Ordering::Acquire);
+        let (buffer, num_blocks) = if use_buffer_a {
+            (
+                &queue.buffer_a[..],
+                queue.blocks_in_a.load(Ordering::Acquire),
+            )
+        } else {
+            (
+                &queue.buffer_b[..],
+                queue.blocks_in_b.load(Ordering::Acquire),
+            )
+        };
 
         // Shutdown signal
         if unlikely(num_blocks == 0) {
+            queue.barrier.wait();
             break;
         }
 
-        let buffer_ptr = queue.buffer_ptr.load(Ordering::Acquire) as *const u8;
+        // SAFETY: Buffer is valid and won't be modified while we process it
+        let blocks = unsafe { &*(buffer.as_ptr() as *const [Block; 16]) };
 
-        // SAFETY: Master guarantees this pointer is valid until next barrier
-        let blocks = unsafe { &*(buffer_ptr as *const [Block; 16]) };
-
-        // Process all blocks
+        // Process all blocks in this buffer
         for block_idx in 0..num_blocks {
             let block = &blocks[block_idx];
             let gates_in_this_block = gates_left.min(GATES_PER_BLOCK);
@@ -168,8 +210,10 @@ fn worker_thread(queue: Arc<WorkQueue>, mut gates_left: usize, scratch_space: u3
                     }
                 }
             }
-
             gates_left -= gates_in_this_block;
         }
+
+        // Wait for master to finish reading next buffer
+        queue.barrier.wait();
     }
 }

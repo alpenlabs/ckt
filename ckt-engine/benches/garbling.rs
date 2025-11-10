@@ -10,19 +10,7 @@ fn bench_garble_xor_gate(c: &mut Criterion) {
         let delta = vld1q_u8(&delta_bytes as *const u8);
         let round_key = vld1q_u8(&seed.to_le_bytes() as *const u8);
 
-        let mut working_space = WorkingSpace(Vec::new());
-        for i in 0..10 {
-            let label_bytes = (i as u128).to_le_bytes();
-            let label = Label(vld1q_u8(&label_bytes as *const u8));
-            working_space.push(label);
-        }
-
-        let mut instance = GarblingInstance {
-            gate_ctr: 0,
-            working_space,
-            delta,
-            round_key,
-        };
+        let mut instance = GarblingInstance::new(10, delta, round_key);
 
         // Measure: just the XOR gate garbling
         b.iter(|| {
@@ -40,19 +28,7 @@ fn bench_garble_and_gate(c: &mut Criterion) {
         let delta = vld1q_u8(&delta_bytes as *const u8);
         let round_key = vld1q_u8(&seed.to_le_bytes() as *const u8);
 
-        let mut working_space = WorkingSpace(Vec::new());
-        for i in 0..10 {
-            let label_bytes = (i as u128).to_le_bytes();
-            let label = Label(vld1q_u8(&label_bytes as *const u8));
-            working_space.push(label);
-        }
-
-        let mut instance = GarblingInstance {
-            gate_ctr: 0,
-            working_space,
-            delta,
-            round_key,
-        };
+        let mut instance = GarblingInstance::new(10, delta, round_key);
 
         // Measure: just the AND gate garbling
         b.iter(|| {
@@ -70,19 +46,7 @@ fn bench_garble_mixed_gates(c: &mut Criterion) {
         let delta = vld1q_u8(&delta_bytes as *const u8);
         let round_key = vld1q_u8(&seed.to_le_bytes() as *const u8);
 
-        let mut working_space = WorkingSpace(Vec::new());
-        for i in 0..200 {
-            let label_bytes = (i as u128).to_le_bytes();
-            let label = Label(vld1q_u8(&label_bytes as *const u8));
-            working_space.push(label);
-        }
-
-        let mut instance = GarblingInstance {
-            gate_ctr: 0,
-            working_space,
-            delta,
-            round_key,
-        };
+        let mut instance = GarblingInstance::new(200, delta, round_key);
 
         // Measure: 50 XOR + 50 AND gates
         b.iter(|| {

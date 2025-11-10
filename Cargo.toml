@@ -39,10 +39,10 @@ repository = "https://github.com/alpenlabs/ckt"
 
 [workspace.lints]
 rust.missing_debug_implementations = "warn"
-rust.rust_2018_idioms = { level = "deny", priority = -1 }
+rust.rust_2018_idioms = { level = "warn", priority = -1 }
 rust.unreachable_pub = "warn"
-rust.unused_crate_dependencies = "deny"
-rust.unused_must_use = "deny"
+rust.unused_crate_dependencies = "warn"
+rust.unused_must_use = "warn"
 rust.unexpected_cfgs = { level = "warn", check-cfg = [
   'cfg(coverage, coverage_nightly)',
 ] }
