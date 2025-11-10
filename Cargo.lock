@@ -221,7 +221,10 @@ checksum = "9555578bc9e57714c812a1f84e4fc5b4d21fcb063490c624de019f7464c91268"
 name = "checker"
 version = "0.1.0"
 dependencies = [
+ "blake3",
  "ckt",
+ "ckt-engine",
+ "cynosure 0.3.0",
  "indicatif",
  "monoio",
 ]
@@ -285,7 +288,10 @@ dependencies = [
 name = "ckt-engine"
 version = "0.1.0"
 dependencies = [
+ "ckt",
  "criterion",
+ "cynosure 0.3.0",
+ "indicatif",
 ]
 
 [[package]]

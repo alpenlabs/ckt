@@ -7,6 +7,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+ckt = { version = "0.1.0", path = ".." }
+cynosure = "0.3.0"
+indicatif = "0.18.2"
 
 [dev-dependencies]
 criterion = "0.5"

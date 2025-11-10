@@ -127,6 +127,61 @@ impl ReaderV5c {
         })
     }
 
+    /// Get a zero-copy reference to the next 4 MiB buffer from the triple-buffer reader
+    ///
+    /// Returns a reference to the internal aligned buffer along with the number of valid blocks.
+    /// The buffer remains valid until the next call to `next_blocks_ref()` or `read_blocks()`.
+    ///
+    /// # Returns
+    /// * `Ok(Some((&[u8], usize)))` - Buffer reference and number of valid blocks (1-16)
+    /// * `Ok(None)` - No more data
+    /// * `Err(_)` - I/O error
+    ///
+    /// # Example
+    /// ```ignore
+    /// while let Some((buffer, num_blocks)) = reader.next_blocks_ref().await? {
+    ///     let blocks = unsafe { &*(buffer.as_ptr() as *const [Block; 16]) };
+    ///     // Process blocks[0..num_blocks]
+    /// }
+    /// ```
+    pub async fn next_blocks_ref(&mut self) -> Result<Option<(&[u8], usize)>> {
+        if self.bytes_remaining == 0 {
+            return Ok(None);
+        }
+
+        // Get next buffer from triple-buffer reader
+        let prev_buf = self.cur_buf.take();
+        let aligned_buf = self.reader.next(prev_buf).await;
+
+        // Calculate number of valid blocks based on bytes_remaining
+        let blocks_in_buffer = 16;
+        let buffer_size = aligned_buf.len() as u64;
+        let valid_bytes = self.bytes_remaining.min(buffer_size);
+        let valid_blocks = (valid_bytes / BLOCK_SIZE as u64) as usize;
+
+        let num_blocks = valid_blocks.min(blocks_in_buffer);
+
+        // Update bytes_remaining
+        let bytes_consumed = (num_blocks as u64)
+            .checked_mul(BLOCK_SIZE as u64)
+            .ok_or_else(|| Error::new(ErrorKind::InvalidData, "bytes consumed overflow"))?;
+        self.bytes_remaining = self
+            .bytes_remaining
+            .checked_sub(bytes_consumed)
+            .ok_or_else(|| {
+                Error::new(
+                    ErrorKind::InvalidData,
+                    "bytes_consumed exceeds bytes_remaining",
+                )
+            })?;
+
+        // Store buffer and return reference
+        self.cur_buf = Some(aligned_buf);
+        let buf_ref = self.cur_buf.as_ref().unwrap().as_ref();
+
+        Ok(Some((buf_ref, num_blocks)))
+    }
+
     /// Read up to 4 MiB of blocks into the provided buffer
     ///
     /// Returns the number of valid blocks read (0 if no more data).

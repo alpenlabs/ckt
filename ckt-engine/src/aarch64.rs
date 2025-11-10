@@ -30,6 +30,19 @@ pub struct GarblingInstance {
 }
 
 impl GarblingInstance {
+    pub fn new(scratch_space: u32, delta: uint8x16_t, round_key: uint8x16_t) -> Self {
+        let mut bytes = [0u8; 16];
+        let empty_label = unsafe { std::mem::transmute(bytes) };
+        GarblingInstance {
+            gate_ctr: 0,
+            working_space: WorkingSpace(vec![empty_label; scratch_space as usize]),
+            delta,
+            round_key,
+        }
+    }
+}
+
+impl GarblingInstance {
     pub fn garble_xor_gate(&mut self, in1_addr: usize, in2_addr: usize, out_addr: usize) {
         let in1 = self.working_space[in1_addr];
         let in2 = self.working_space[in2_addr];
