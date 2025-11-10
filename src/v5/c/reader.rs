@@ -15,10 +15,7 @@ use cynosure::site_d::triplebuffer::{
 use kanal::{AsyncReceiver, AsyncSender, bounded_async};
 use monoio::{FusionDriver, select};
 
-use crate::v5::c::{
-    ALIGNMENT, BLOCK_SIZE, Block, GATE_SIZE, GATES_PER_BLOCK, GATES_SIZE, HEADER_SIZE, HeaderV5c,
-    TYPES_OFFSET, TYPES_SIZE, padded_size,
-};
+use crate::v5::c::{ALIGNMENT, BLOCK_SIZE, GATES_PER_BLOCK, HEADER_SIZE, HeaderV5c, padded_size};
 
 /// Reader for v5c format files with triple-buffered io_uring
 pub struct ReaderV5c {
@@ -130,44 +127,51 @@ impl ReaderV5c {
         })
     }
 
-    /// Get the next 4 MiB buffer as Box<[Block; 16]> for distribution to workers
+    /// Read up to 4 MiB of blocks into the provided buffer
     ///
-    /// # Safety
-    /// Casts copied buffer to Box<[Block; 16]>. Buffer must contain valid Block data.
+    /// Returns the number of valid blocks read (0 if no more data).
+    /// Buffer must be at least 4 MiB (16 × 256 KiB blocks).
     ///
-    /// Returns:
-    /// - Box<[Block; 16]>: Heap-allocated array of 16 blocks
-    /// - end_block: Index one past last valid block (exclusive, always starts from 0)
+    /// # Arguments
+    /// * `buffer` - Mutable slice to fill with block data (must be >= 4 MiB)
     ///
-    /// Caller can convert to Arc for sharing: `Arc::from(box)`
-    pub async unsafe fn next_blocks(&mut self) -> Result<Option<(Box<[Block; 16]>, usize)>> {
+    /// # Returns
+    /// * `Ok(n)` - Number of valid blocks read (0 means no more data)
+    /// * `Err(_)` - I/O error or buffer too small
+    pub async fn read_blocks(&mut self, buffer: &mut [u8]) -> Result<usize> {
         if self.bytes_remaining == 0 {
-            return Ok(None);
+            return Ok(0);
+        }
+
+        // Buffer should be at least 4 MiB for optimal performance
+        if buffer.len() < BLOCK_SIZE * 16 {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                "buffer must be at least 4 MiB (16 blocks)",
+            ));
         }
 
         // Get next buffer from triple-buffer reader
         let prev_buf = self.cur_buf.take();
         let aligned_buf = self.reader.next(prev_buf).await;
 
-        // Calculate end_block based on bytes_remaining
-        // We always allocate 16 blocks (4 MiB), so blocks_in_buffer is always 16
+        // Calculate number of valid blocks based on bytes_remaining
         let blocks_in_buffer = 16;
         let buffer_size = aligned_buf.len() as u64;
         let valid_bytes = self.bytes_remaining.min(buffer_size);
         let valid_blocks = (valid_bytes / BLOCK_SIZE as u64) as usize;
 
-        let end_block = valid_blocks.min(blocks_in_buffer);
+        let num_blocks = valid_blocks.min(blocks_in_buffer);
 
-        // Always allocate exactly 4 MiB (16 × 256 KiB blocks) and copy what we have
-        let mut heap_buf = vec![0u8; BLOCK_SIZE * 16].into_boxed_slice();
-        let copy_len = aligned_buf.len().min(heap_buf.len());
-        heap_buf[..copy_len].copy_from_slice(&aligned_buf[..copy_len]);
+        // Copy data into provided buffer
+        let copy_len = aligned_buf.len().min(buffer.len());
+        buffer[..copy_len].copy_from_slice(&aligned_buf[..copy_len]);
 
         // Return AlignedBuffer back to triple buffer
         self.cur_buf = Some(aligned_buf);
 
         // Update bytes_remaining
-        let bytes_consumed = (end_block as u64)
+        let bytes_consumed = (num_blocks as u64)
             .checked_mul(BLOCK_SIZE as u64)
             .ok_or_else(|| Error::new(ErrorKind::InvalidData, "bytes consumed overflow"))?;
         self.bytes_remaining = self
@@ -180,37 +184,7 @@ impl ReaderV5c {
                 )
             })?;
 
-        // Cast Box<[u8]> to Box<[Block; 16]>
-        // Verify size and alignment invariants
-        if heap_buf.len() != BLOCK_SIZE * 16 {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                format!(
-                    "Buffer size mismatch: expected {}, got {}",
-                    BLOCK_SIZE * 16,
-                    heap_buf.len()
-                ),
-            ));
-        }
-        if heap_buf.as_ptr() as usize % std::mem::align_of::<Block>() != 0 {
-            return Err(Error::new(
-                ErrorKind::InvalidData,
-                "Buffer is not aligned to Block alignment",
-            ));
-        }
-
-        let blocks: Box<[Block; 16]> = unsafe {
-            // SAFETY:
-            // - Size is exactly BLOCK_SIZE * 16 bytes (checked above)
-            // - Alignment matches Block requirements (checked above)
-            // - Block is repr(C) with well-defined layout
-            // - Buffer contains valid block data from triple buffer
-            let raw = Box::into_raw(heap_buf);
-            let ptr = raw as *mut [Block; 16];
-            Box::from_raw(ptr)
-        };
-
-        Ok(Some((blocks, end_block)))
+        Ok(num_blocks)
     }
 
     /// Get the header

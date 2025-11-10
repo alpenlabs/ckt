@@ -46,9 +46,7 @@ pub async fn prealloc(input: &str, output: &str) {
                 header.primary_inputs,
             )
             .unwrap();
-            if block.out[i] == 321695 {
-                println!("{} {} -> {}", block.in1[i], block.in2[i], block.out[i]);
-            }
+
             let out_wire_id = slab.allocate();
             wire_map.insert(
                 block.out[i],
@@ -77,18 +75,8 @@ pub async fn prealloc(input: &str, output: &str) {
         }
     }
     pb.finish();
-    // for (k, v) in wire_map.iter() {
-    //     dbg!(k, v);
-    // }
-    let total_outputs = reader.outputs().iter().count();
+
     let mut total_found = 0;
-    let outputs = reader.outputs().iter().for_each(|o| {
-        let v = wire_map.get(o);
-        if v.is_some() {
-            total_found += 1;
-        }
-    });
-    println!("total_found: {}", total_found);
     let outputs = reader
         .outputs()
         .iter()
@@ -97,8 +85,6 @@ pub async fn prealloc(input: &str, output: &str) {
             if v.is_some() {
                 total_found += 1;
             }
-            println!("output wire {} {:?}", o, v);
-            println!("{}/{}", total_found, total_outputs,);
             v.unwrap().slab_idx as u32
         })
         .collect();
@@ -138,7 +124,6 @@ fn lookup_wire(
         1 => {
             entry.remove();
             slab.deallocate(idx);
-            println!("dropping wire {wire}");
         }
         _ => entry.get_mut().credits_remaining -= 1,
     }

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use crate::GateType;
 use crate::v5::c::reader::ReaderV5c;
 use crate::v5::c::writer::WriterV5c;
-use crate::v5::c::{Block, GATES_PER_BLOCK, GateV5c};
+use crate::v5::c::{BLOCK_SIZE, Block, GATES_PER_BLOCK, GateV5c};
 
 #[monoio::test]
 async fn test_round_trip_small_circuit() {
@@ -40,11 +40,13 @@ async fn test_round_trip_small_circuit() {
     assert_eq!(reader.header().total_gates(), 4);
     assert_eq!(reader.outputs(), &[7]);
 
-    // Get blocks (should be first buffer with start=2, end=3 for one partial block)
-    let (blocks, end) = unsafe { reader.next_blocks().await.unwrap().unwrap() };
-    assert_eq!(end, 1); // Only 1 block of gates (blocks[0])
+    // Get blocks (should be first buffer with 1 partial block)
+    let mut buffer = vec![0u8; BLOCK_SIZE * 16];
+    let num_blocks = reader.read_blocks(&mut buffer).await.unwrap();
+    assert_eq!(num_blocks, 1); // Only 1 block of gates
 
-    // Verify gates in block
+    // Verify gates in block (cast buffer to blocks)
+    let blocks = unsafe { &*(buffer.as_ptr() as *const [Block; 16]) };
     let block = &blocks[0];
     assert_eq!(block.gates[0].in1, 2);
     assert_eq!(block.gates[0].in2, 3);
@@ -67,7 +69,8 @@ async fn test_round_trip_small_circuit() {
     assert_eq!(block.gate_type(3), true); // AND
 
     // No more blocks
-    assert!(unsafe { reader.next_blocks().await.unwrap().is_none() });
+    let num_blocks = reader.read_blocks(&mut buffer).await.unwrap();
+    assert_eq!(num_blocks, 0);
 
     std::fs::remove_file(path).unwrap();
 }
@@ -105,17 +108,19 @@ async fn test_round_trip_multiple_blocks() {
     assert_eq!(reader.outputs(), &outputs[..]);
 
     // 2 full blocks + 1 partial = 3 blocks
-    let (blocks1, end1) = unsafe { reader.next_blocks().await.unwrap().unwrap() };
-    assert_eq!(end1, 3);
+    let mut buffer = vec![0u8; BLOCK_SIZE * 16];
+    let num_blocks = reader.read_blocks(&mut buffer).await.unwrap();
+    assert_eq!(num_blocks, 3);
 
     // Verify first block has correct gates
-    let first_block = &blocks1[0];
+    let blocks = unsafe { &*(buffer.as_ptr() as *const [Block; 16]) };
+    let first_block = &blocks[0];
     assert_eq!(first_block.gates[0].in1, 100);
     assert_eq!(first_block.gates[0].out, 102);
 
     // 3 blocks total, should all fit in first buffer
-    let next = unsafe { reader.next_blocks().await.unwrap() };
-    assert!(next.is_none());
+    let num_blocks = reader.read_blocks(&mut buffer).await.unwrap();
+    assert_eq!(num_blocks, 0);
 
     std::fs::remove_file(path).unwrap();
 }
@@ -137,16 +142,18 @@ async fn test_arc_sharing_pattern() {
     // Read and simulate Arc-sharing to workers
     let mut reader = ReaderV5c::open(path).unwrap();
 
-    let (blocks, end) = unsafe { reader.next_blocks().await.unwrap().unwrap() };
-    assert_eq!(end, 1); // One block at blocks[0]
+    let mut buffer = vec![0u8; BLOCK_SIZE * 16];
+    let num_blocks = reader.read_blocks(&mut buffer).await.unwrap();
+    assert_eq!(num_blocks, 1); // One block
 
-    // Simulate master thread distributing to workers
-    let shared: Arc<Box<[Block; 16]>> = Arc::from(blocks);
+    // Simulate master thread distributing to workers via Arc
+    let shared = Arc::new(buffer);
 
     // Simulate 4 workers processing their assigned blocks
+    let blocks = unsafe { &*(shared.as_ptr() as *const [Block; 16]) };
     let mut total_processed = 0;
-    for block_idx in 0..end {
-        let block = &shared[block_idx];
+    for block_idx in 0..num_blocks {
+        let _block = &blocks[block_idx];
         // Each worker would process gates from this block
         total_processed += GATES_PER_BLOCK;
     }
@@ -239,10 +246,12 @@ async fn test_partial_last_block() {
     let mut reader = ReaderV5c::open(path).unwrap();
     let header = reader.header().clone();
 
-    let (blocks, end) = unsafe { reader.next_blocks().await.unwrap().unwrap() };
-    assert_eq!(end, 2); // blocks[0] and blocks[1]
+    let mut buffer = vec![0u8; BLOCK_SIZE * 16];
+    let num_blocks = reader.read_blocks(&mut buffer).await.unwrap();
+    assert_eq!(num_blocks, 2); // 2 blocks
 
     // Verify first block has full GATES_PER_BLOCK gates
+    let blocks = unsafe { &*(buffer.as_ptr() as *const [Block; 16]) };
     let block1 = &blocks[0];
     let gates_in_block1 = block1.num_gates(header.total_gates(), 0);
     assert_eq!(gates_in_block1, GATES_PER_BLOCK);

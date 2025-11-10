@@ -37,6 +37,18 @@ impl GarblingInstance {
         self.gate_ctr += 1;
     }
 
+    /// ```
+    /// let t = self.gate_ctr;
+    /// fn H(x, i) -> uint8x16_t {
+    ///     let mut h = unsafe { aes_round(x, i) };
+    ///     for _ in 0..8 {
+    ///         h = unsafe { aes_round(h, i) };
+    ///     }
+    ///     h
+    /// }
+    /// self.working_space[out_addr] = H(in1, t);
+    /// let ciphertext = H(in1, t) ^ H(in1^self.delta, t) ^ in2;
+    /// ```
     pub fn garble_and_gate(
         &mut self,
         in1_addr: usize,
