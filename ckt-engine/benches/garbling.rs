@@ -10,7 +10,7 @@ fn bench_garble_xor_gate(c: &mut Criterion) {
         let delta = vld1q_u8(&delta_bytes as *const u8);
         let round_key = vld1q_u8(&seed.to_le_bytes() as *const u8);
 
-        let mut instance = GarblingInstance::new(10, delta, round_key);
+        let mut instance = GarblingInstance::new(10, delta);
 
         // Measure: just the XOR gate garbling
         b.iter(|| {
@@ -28,7 +28,7 @@ fn bench_garble_and_gate(c: &mut Criterion) {
         let delta = vld1q_u8(&delta_bytes as *const u8);
         let round_key = vld1q_u8(&seed.to_le_bytes() as *const u8);
 
-        let mut instance = GarblingInstance::new(10, delta, round_key);
+        let mut instance = GarblingInstance::new(10, delta);
 
         // Measure: just the AND gate garbling
         b.iter(|| {
@@ -46,7 +46,7 @@ fn bench_garble_mixed_gates(c: &mut Criterion) {
         let delta = vld1q_u8(&delta_bytes as *const u8);
         let round_key = vld1q_u8(&seed.to_le_bytes() as *const u8);
 
-        let mut instance = GarblingInstance::new(200, delta, round_key);
+        let mut instance = GarblingInstance::new(200, delta);
 
         // Measure: 50 XOR + 50 AND gates
         b.iter(|| {

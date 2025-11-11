@@ -1,4 +1,5 @@
-use std::arch::aarch64::*;
+use std::{arch::aarch64::*, ptr};
+use hex_literal::hex;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Label(pub uint8x16_t);
@@ -26,52 +27,39 @@ pub struct GarblingInstance {
     pub gate_ctr: u64,
     pub working_space: WorkingSpace,
     pub delta: uint8x16_t,
-    pub round_keys: [uint8x16_t; 11],
 }
 
-const KEYS: [uint8x16_t; 11] = [
-    unsafe { std::mem::transmute([0x00u8; 16]) },
-    unsafe { std::mem::transmute([0x01u8; 16]) },
-    unsafe { std::mem::transmute([0x02u8; 16]) },
-    unsafe { std::mem::transmute([0x03u8; 16]) },
-    unsafe { std::mem::transmute([0x04u8; 16]) },
-    unsafe { std::mem::transmute([0x05u8; 16]) },
-    unsafe { std::mem::transmute([0x06u8; 16]) },
-    unsafe { std::mem::transmute([0x07u8; 16]) },
-    unsafe { std::mem::transmute([0x08u8; 16]) },
-    unsafe { std::mem::transmute([0x09u8; 16]) },
-    unsafe { std::mem::transmute([0x0Au8; 16]) },
+// Taken from https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/armv8/test_expand.rs
+// Corresponding to FIPS 197 Appendix A.1
+const AES128_KEY_BYTES: [u8; 16] = hex!("2b7e151628aed2a6abf7158809cf4f3c");
+const AES128_KEY: uint8x16_t = unsafe { std::mem::transmute(AES128_KEY_BYTES) };
+const AES128_ROUND_KEYS: [uint8x16_t; 11] = [
+    AES128_KEY,
+    unsafe { std::mem::transmute(hex!("a0fafe1788542cb123a339392a6c7605")) },
+    unsafe { std::mem::transmute(hex!("f2c295f27a96b9435935807a7359f67f")) },
+    unsafe { std::mem::transmute(hex!("3d80477d4716fe3e1e237e446d7a883b")) },
+    unsafe { std::mem::transmute(hex!("ef44a541a8525b7fb671253bdb0bad00")) },
+    unsafe { std::mem::transmute(hex!("d4d1c6f87c839d87caf2b8bc11f915bc")) },
+    unsafe { std::mem::transmute(hex!("6d88a37a110b3efddbf98641ca0093fd")) },
+    unsafe { std::mem::transmute(hex!("4e54f70e5f5fc9f384a64fb24ea6dc4f")) },
+    unsafe { std::mem::transmute(hex!("ead27321b58dbad2312bf5607f8d292f")) },
+    unsafe { std::mem::transmute(hex!("ac7766f319fadc2128d12941575c006e")) },
+    unsafe { std::mem::transmute(hex!("d014f9a8c9ee2589e13f0cc8b6630ca6")) },
 ];
 
 impl GarblingInstance {
-    pub fn new(scratch_space: u32, delta: uint8x16_t, round_key: uint8x16_t) -> Self {
-        let mut bytes = [0u8; 16];
+    pub fn new(scratch_space: u32, delta: uint8x16_t) -> Self {
+        let bytes = [0u8; 16];
         let empty_label = unsafe { std::mem::transmute(bytes) };
-
-        let key1 = round_key;
-        let key2 = unsafe { xor128(key1, empty_label) };
-        let key3 = unsafe { xor128(key2, empty_label) };
-        let key4 = unsafe { xor128(key3, empty_label) };
-        let key5 = unsafe { xor128(key4, empty_label) };
-        let key6 = unsafe { xor128(key5, empty_label) };
-        let key7 = unsafe { xor128(key6, empty_label) };
-        let key8 = unsafe { xor128(key7, empty_label) };
-        let key9 = unsafe { xor128(key8, empty_label) };
-        let key10 = unsafe { xor128(key9, empty_label) };
-        let key11 = unsafe { xor128(key10, empty_label) };
 
         GarblingInstance {
             gate_ctr: 0,
             working_space: WorkingSpace(vec![Label(empty_label); scratch_space as usize]),
             delta,
-            round_keys: [
-                key1, key2, key3, key4, key5, key6, key7, key8, key9, key10, key11,
-            ],
         }
     }
-}
 
-impl GarblingInstance {
+    #[inline]
     pub fn garble_xor_gate(&mut self, in1_addr: usize, in2_addr: usize, out_addr: usize) {
         let in1 = self.working_space[in1_addr];
         let in2 = self.working_space[in2_addr];
@@ -86,6 +74,7 @@ impl GarblingInstance {
     /// self.working_space[out_addr] = H(in1, t);
     /// let ciphertext = H(in1, t) ^ H(in1^self.delta, t) ^ in2;
     /// ```
+    #[inline]
     pub fn garble_and_gate(
         &mut self,
         in1_addr: usize,
@@ -100,51 +89,11 @@ impl GarblingInstance {
         let xor_in1_delta = unsafe { xor128(in1.0, self.delta) };
 
         let h_in1_t = unsafe {
-            // AES(in1)
-            let mut aes_in1 = aes_round(in1.0, KEYS[0]);
-            for i in 1..9 {
-                aes_in1 = aes_round(aes_in1, KEYS[i]);
-            }
-            aes_in1 = vaeseq_u8(aes_in1, KEYS[9]);
-            aes_in1 = xor128(aes_in1, KEYS[10]);
-
-            // AES(in1) ⊕ t
-            let xor_aes_in1_t = xor128(aes_in1, t);
-
-            // AES(AES(in1) ⊕ t)
-            let mut aes_xor_aes_in1_t = aes_round(xor_aes_in1_t, KEYS[0]);
-            for i in 1..9 {
-                aes_xor_aes_in1_t = aes_round(aes_xor_aes_in1_t, KEYS[i]);
-            }
-            aes_xor_aes_in1_t = vaeseq_u8(aes_xor_aes_in1_t, KEYS[9]);
-            aes_xor_aes_in1_t = xor128(aes_xor_aes_in1_t, KEYS[10]);
-
-            // AES(AES(in1) ⊕ t) ⊕ AES(in1)
-            xor128(aes_xor_aes_in1_t, aes_in1)
+            hash(in1.0, t)
         };
 
         let h_in1_delta_t = unsafe {
-            // AES(in1 ⊕ delta)
-            let mut aes_in1_delta = aes_round(xor_in1_delta, KEYS[0]);
-            for i in 1..9 {
-                aes_in1_delta = aes_round(aes_in1_delta, KEYS[i]);
-            }
-            aes_in1_delta = vaeseq_u8(aes_in1_delta, KEYS[9]);
-            aes_in1_delta = xor128(aes_in1_delta, KEYS[10]);
-
-            // AES(in1 ⊕ delta) ⊕ t
-            let xor_aes_in1_delta_t = xor128(aes_in1_delta, t);
-
-            // AES(AES(in1 ⊕ delta) ⊕ t)
-            let mut aes_xor_aes_in1_delta_t = aes_round(xor_aes_in1_delta_t, KEYS[0]);
-            for i in 1..9 {
-                aes_xor_aes_in1_delta_t = aes_round(aes_xor_aes_in1_delta_t, KEYS[i]);
-            }
-            aes_xor_aes_in1_delta_t = vaeseq_u8(aes_xor_aes_in1_delta_t, KEYS[9]);
-            aes_xor_aes_in1_delta_t = xor128(aes_xor_aes_in1_delta_t, KEYS[10]);
-
-            // AES(AES(in1 ⊕ delta) ⊕ t) ⊕ AES(in1 ⊕ delta)
-            xor128(aes_xor_aes_in1_delta_t, aes_in1_delta)
+            hash(xor_in1_delta, t)
         };
 
         let ciphertext = unsafe { xor128(xor128(h_in1_t, h_in1_delta_t), in2.0) };
@@ -180,16 +129,41 @@ pub unsafe fn index_to_tweak(index: u64) -> uint8x16_t {
     unsafe { std::mem::transmute(bytes) }
 }
 
-/// Convert u64 counter to uint8x16_t for RNG
-#[inline]
-unsafe fn counter_to_vec(counter: u64) -> uint8x16_t {
-    let mut bytes = [0u8; 16];
-    bytes[0..8].copy_from_slice(&counter.to_le_bytes());
-    unsafe { vld1q_u8(&bytes as *const u8) }
-}
-
+/// AES-128 encryption using ARM NEON crypto extensions
+/// 
+/// This follows the reference implementation pattern:
+/// - Rounds 0-8: AESE (SubBytes + ShiftRows + AddRoundKey) + AESMC (MixColumns)
+/// - Round 9: AESE only (no MixColumns)
+/// - Round 10: Final XOR with last round key
 #[target_feature(enable = "aes")]
 #[target_feature(enable = "neon")]
-unsafe fn aes_round(input: uint8x16_t, round_key: uint8x16_t) -> uint8x16_t {
-    vaesmcq_u8(vaeseq_u8(input, round_key))
+pub unsafe fn aes_encrypt(block: uint8x16_t) -> uint8x16_t {
+    let mut state = block;
+    
+    // Rounds 0-8: AES single round encryption + Mix columns
+    for i in 0..9 {
+        let key: uint8x16_t = AES128_ROUND_KEYS[i];
+        // AESE: SubBytes + ShiftRows + AddRoundKey
+        state = vaeseq_u8(state, key);
+        // AESMC: MixColumns
+        state = vaesmcq_u8(state);
+    }
+    
+    // Round 9: AES single round encryption (no MixColumns)
+    let key9: uint8x16_t = AES128_ROUND_KEYS[9];
+    state = vaeseq_u8(state, key9);
+    
+    // Round 10: Final add (bitwise XOR with last round key)
+    let key10: uint8x16_t = AES128_ROUND_KEYS[10];
+    state = veorq_u8(state, key10);
+    
+    state
+}
+
+/// H(x, tweak) = AES(AES(x) ⊕ tweak) ⊕ AES(x)
+#[target_feature(enable = "aes")]
+#[target_feature(enable = "neon")]
+pub unsafe fn hash(x: uint8x16_t, tweak: uint8x16_t) -> uint8x16_t {
+    let aes_x = unsafe { aes_encrypt(x) };
+    unsafe { xor128(aes_encrypt(xor128(aes_x, tweak)), aes_x) }
 }
