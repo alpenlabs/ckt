@@ -1,5 +1,8 @@
 use std::{arch::aarch64::*, ptr};
 use hex_literal::hex;
+use rand_chacha::ChaCha20Rng;
+use rand_chacha::rand_core::SeedableRng;
+use rand_chacha::rand_core::RngCore;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Label(pub uint8x16_t);
@@ -25,8 +28,10 @@ impl std::ops::Deref for WorkingSpace {
 
 pub struct GarblingInstance {
     pub gate_ctr: u64,
+    pub and_ctr: u64,
     pub working_space: WorkingSpace,
     pub delta: uint8x16_t,
+    pub table: Vec<Ciphertext>,
 }
 
 // Taken from https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/armv8/test_expand.rs
@@ -54,8 +59,11 @@ impl GarblingInstance {
 
         GarblingInstance {
             gate_ctr: 0,
+            and_ctr: 0,
+            // TODO: initialize the working space with input labels
             working_space: WorkingSpace(vec![Label(empty_label); scratch_space as usize]),
             delta,
+            table: vec![Ciphertext(unsafe { std::mem::transmute(bytes) }); scratch_space as usize],
         }
     }
 
@@ -74,7 +82,7 @@ impl GarblingInstance {
         in1_addr: usize,
         in2_addr: usize,
         out_addr: usize,
-    ) -> Ciphertext {
+    ) {
         // Retrieve input labels for in1_0 and in2_0
         let in1 = self.working_space[in1_addr];
         let in2 = self.working_space[in2_addr];
@@ -97,8 +105,9 @@ impl GarblingInstance {
 
         // Increment gate counter to enforce uniqueness
         self.gate_ctr += 1;
-
-        Ciphertext(ciphertext)
+        // TODO: stream this out
+        self.table[self.and_ctr as usize] = Ciphertext(ciphertext);
+        self.and_ctr += 1;
     }
 }
 
@@ -152,6 +161,101 @@ pub unsafe fn aes_encrypt(block: uint8x16_t) -> uint8x16_t {
     state = veorq_u8(state, key10);
     
     state
+}
+
+pub struct EvaluationInstance {
+    pub gate_ctr: u64,
+    pub and_ctr: u64,
+    pub working_space: WorkingSpace,
+    // todo use bitvec
+    pub working_space_bits: Vec<bool>,
+    pub table: Vec<Ciphertext>,
+}
+
+impl EvaluationInstance {
+    pub fn new(scratch_space: u32, selected_input_labels: Vec<Label>, table: Vec<Ciphertext>) -> Self {
+        let bytes = [0u8; 16];
+        let empty_label = unsafe { std::mem::transmute(bytes) };
+
+        EvaluationInstance {
+            gate_ctr: 0,
+            and_ctr: 0,
+            // TODO: initialize the working space with the selected input labels
+            working_space: WorkingSpace(vec![Label(empty_label); scratch_space as usize]),
+            working_space_bits: vec![false; scratch_space as usize],
+            table,
+        }
+    }
+
+    #[inline]
+    pub fn evaluate_xor_gate(&mut self, in1_addr: usize, in2_addr: usize, out_addr: usize) {
+        let in1 = self.working_space[in1_addr];
+        let in2 = self.working_space[in2_addr];
+        self.working_space[out_addr] = Label(unsafe { xor128(in1.0, in2.0) });
+        self.working_space_bits[out_addr] = self.working_space_bits[in1_addr] ^ self.working_space_bits[in2_addr];
+        self.gate_ctr += 1;
+    }
+
+    /// Garbles an AND gate.
+    #[inline]
+    pub fn evaluate_and_gate(
+        &mut self,
+        in1_addr: usize,
+        in2_addr: usize,
+        out_addr: usize,
+    ){
+        // Retrieve input labels for in1_0 and in2_0
+        let in1 = self.working_space[in1_addr];
+        let in2 = self.working_space[in2_addr];
+
+        let t = unsafe { index_to_tweak(self.gate_ctr) };
+        let permute_bit = self.working_space_bits[in1_addr];
+
+        // TODO: stream this in
+        let ciphertext = self.table[self.and_ctr as usize];
+
+        let mut out_label = unsafe { hash(in1.0, t) };
+        if permute_bit {
+            out_label = unsafe { xor128(out_label, xor128(ciphertext.0, in2.0)) };
+        }
+
+        // Write output label to working space
+        self.working_space[out_addr] = Label(out_label);
+        self.working_space_bits[out_addr] = self.working_space_bits[in1_addr] && self.working_space_bits[in2_addr];
+
+        // Increment gate counter to enforce uniqueness
+        self.gate_ctr += 1;
+        self.and_ctr += 1;
+    }
+}
+
+/// Expand a seed into a vector of labels and a delta label
+pub fn expand_seed(seed: [u8; 32], num_inputs: u32) -> (Vec<Label>, Label) {
+    let mut rng = ChaCha20Rng::from_seed(seed);
+    let mut delta = [0u8; 16];
+    rng.fill_bytes(&mut delta);
+    let delta = Label(unsafe { std::mem::transmute(delta) });
+    let mut labels = Vec::with_capacity(num_inputs as usize);
+    for _ in 0..num_inputs {
+        let mut input = [0u8; 16];
+        rng.fill_bytes(&mut input);
+        labels.push(Label(unsafe { std::mem::transmute(input) }));
+    }
+    (labels, delta)
+}
+
+/// Select input labels based on the input bits
+pub fn encode(input: Vec<bool>, false_input_labels: Vec<Label>, delta: Label) -> Vec<Label> {
+    let mut selected_input_labels: Vec<Label> = Vec::with_capacity(input.len());
+    for (i, bit) in input.iter().enumerate() {
+        if *bit {
+            selected_input_labels.push(unsafe { Label(xor128(false_input_labels[i].0, delta.0)) });
+        }
+        else {
+            selected_input_labels.push(false_input_labels[i]);
+        }
+    }
+    selected_input_labels
 }
 
 /// H(x, tweak) = AES(AES(x) ⊕ tweak) ⊕ AES(x)
