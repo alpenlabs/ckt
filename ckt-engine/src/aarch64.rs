@@ -67,13 +67,7 @@ impl GarblingInstance {
         self.gate_ctr += 1;
     }
 
-    /// ```
-    /// let t = self.gate_ctr;
-    /// // H(x,i) -> XOR(AES(XOR(AES(x), i)), AES(x))
-    /// // AES(x) -> 10 rounds of AES with fixed keys
-    /// self.working_space[out_addr] = H(in1, t);
-    /// let ciphertext = H(in1, t) ^ H(in1^self.delta, t) ^ in2;
-    /// ```
+    /// Garbles an AND gate.
     #[inline]
     pub fn garble_and_gate(
         &mut self,
@@ -166,4 +160,30 @@ pub unsafe fn aes_encrypt(block: uint8x16_t) -> uint8x16_t {
 pub unsafe fn hash(x: uint8x16_t, tweak: uint8x16_t) -> uint8x16_t {
     let aes_x = unsafe { aes_encrypt(x) };
     unsafe { xor128(aes_encrypt(xor128(aes_x, tweak)), aes_x) }
+}
+
+mod tests {
+    // Test custom AES encryption against the reference implementation from the aes crate
+    #[test]
+    fn test_aes_encrypt() {
+        use super::*;
+        use aes::Aes128;
+        use aes::cipher::{BlockEncrypt, KeyInit};
+        use rand::RngCore;
+        
+        let num_tests = 1000;
+        for i in 0..num_tests {
+            let mut plaintext = [0u8; 16];
+            let mut rng = rand::rng();
+            rng.fill_bytes(&mut plaintext);
+
+            let ciphertext: [u8; 16] = unsafe { std::mem::transmute(aes_encrypt(std::mem::transmute(plaintext) ))};
+
+            let cipher = Aes128::new(&AES128_KEY_BYTES.into());
+            let mut expected_ciphertext = plaintext.into();
+            cipher.encrypt_block(&mut expected_ciphertext);
+
+            assert_eq!(ciphertext, &expected_ciphertext[..], "failed at test {}", i);
+        }
+    }
 }
