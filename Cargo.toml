@@ -19,16 +19,12 @@ monoio = { version = "0.2.4", features = ["sync"] }
 tempfile = "3.0"
 
 [features]
-default = ["high-performance", "v3", "v4", "v5"]
+default = ["high-performance", "v5"]
 high-performance = ["dep:monoio", "dep:cynosure"]
-v1 = []
-v2 = []
-v3 = []
-v4 = []
 v5 = ["dep:kanal"]
 
 [workspace]
-members = [ "bench","cli", "lvl", "dupecheck", "ckt-engine", "exectest", "checker"]
+members = [ "bench","cli", "lvl", "dupecheck", "gobble", "exectest"]
 resolver = "3"
 
 [workspace.package]

@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-ckt = { path = "..", features = ["v1", "v3"] }
+ckt = { path = ".." }
 clap = { version = "4.5", features = ["derive"] }
 indicatif = "0.18.0"
 kanal = "0.1.1"

@@ -4,6 +4,8 @@ use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::rand_core::RngCore;
 
+use crate::traits::GarblingInstance;
+
 #[derive(Debug, Clone, Copy)]
 pub struct Label(pub uint8x16_t);
 
@@ -26,7 +28,7 @@ impl std::ops::Deref for WorkingSpace {
     }
 }
 
-pub struct GarblingInstance {
+pub struct Aarch64GarblingInstance {
     pub gate_ctr: u64,
     pub and_ctr: u64,
     pub working_space: WorkingSpace,
@@ -52,6 +54,7 @@ const AES128_ROUND_KEYS: [uint8x16_t; 11] = [
     unsafe { std::mem::transmute(hex!("d014f9a8c9ee2589e13f0cc8b6630ca6")) },
 ];
 
+<<<<<<< Updated upstream:ckt-engine/src/aarch64.rs
 impl GarblingInstance {
     pub fn new(scratch_space: u32, delta: uint8x16_t) -> Self {
         let bytes = [0u8; 16];
@@ -66,23 +69,34 @@ impl GarblingInstance {
             table: vec![Ciphertext(unsafe { std::mem::transmute(bytes) }); scratch_space as usize],
         }
     }
+=======
+impl GarblingInstance for Aarch64GarblingInstance {
+    type Ciphertext = Ciphertext;
+>>>>>>> Stashed changes:gobble/src/aarch64.rs
 
-    #[inline]
-    pub fn garble_xor_gate(&mut self, in1_addr: usize, in2_addr: usize, out_addr: usize) {
+    fn feed_xor_gate(&mut self, in1_addr: usize, in2_addr: usize, out_addr: usize) {
         let in1 = self.working_space[in1_addr];
         let in2 = self.working_space[in2_addr];
         self.working_space[out_addr] = Label(unsafe { xor128(in1.0, in2.0) });
         self.gate_ctr += 1;
     }
 
+<<<<<<< Updated upstream:ckt-engine/src/aarch64.rs
     /// Garbles an AND gate.
     #[inline]
     pub fn garble_and_gate(
+=======
+    fn feed_and_gate(
+>>>>>>> Stashed changes:gobble/src/aarch64.rs
         &mut self,
         in1_addr: usize,
         in2_addr: usize,
         out_addr: usize,
+<<<<<<< Updated upstream:ckt-engine/src/aarch64.rs
     ) {
+=======
+    ) -> Self::Ciphertext {
+>>>>>>> Stashed changes:gobble/src/aarch64.rs
         // Retrieve input labels for in1_0 and in2_0
         let in1 = self.working_space[in1_addr];
         let in2 = self.working_space[in2_addr];
@@ -108,6 +122,26 @@ impl GarblingInstance {
         // TODO: stream this out
         self.table[self.and_ctr as usize] = Ciphertext(ciphertext);
         self.and_ctr += 1;
+    }
+
+    fn finish(self, output_wires: &[u64], output_labels: &mut [[u8; 16]]) {
+        for (i, wire) in output_wires.iter().enumerate() {
+            let label = unsafe { std::mem::transmute(self.working_space[(*wire) as usize].0) };
+            output_labels[i] = label;
+        }
+    }
+}
+
+impl Aarch64GarblingInstance {
+    pub fn new(scratch_space: u32, delta: uint8x16_t) -> Self {
+        let bytes = [0u8; 16];
+        let empty_label = unsafe { std::mem::transmute(bytes) };
+
+        Aarch64GarblingInstance {
+            gate_ctr: 0,
+            working_space: WorkingSpace(vec![Label(empty_label); scratch_space as usize]),
+            delta,
+        }
     }
 }
 

@@ -1,5 +1,9 @@
-use ckt_engine::aarch64::*;
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use gobble::{
+    aarch64::{get_permute_bit, index_to_tweak, xor128},
+    traits::GarblingInstance,
+    *,
+};
 use std::arch::aarch64::*;
 
 fn bench_garble_xor_gate(c: &mut Criterion) {
@@ -8,13 +12,12 @@ fn bench_garble_xor_gate(c: &mut Criterion) {
         let seed = 0x0123456789ABCDEF_FEDCBA9876543210u128;
         let delta_bytes = [0xFFu8; 16];
         let delta = vld1q_u8(&delta_bytes as *const u8);
-        let round_key = vld1q_u8(&seed.to_le_bytes() as *const u8);
 
-        let mut instance = GarblingInstance::new(10, delta);
+        let mut instance = GarbEngine::new(10, delta);
 
         // Measure: just the XOR gate garbling
         b.iter(|| {
-            instance.garble_xor_gate(black_box(0), black_box(1), black_box(2));
+            instance.feed_xor_gate(black_box(0), black_box(1), black_box(2));
             black_box(&instance);
         });
     });
@@ -26,13 +29,12 @@ fn bench_garble_and_gate(c: &mut Criterion) {
         let seed = 0x0123456789ABCDEF_FEDCBA9876543210u128;
         let delta_bytes = [0xFFu8; 16];
         let delta = vld1q_u8(&delta_bytes as *const u8);
-        let round_key = vld1q_u8(&seed.to_le_bytes() as *const u8);
 
-        let mut instance = GarblingInstance::new(10, delta);
+        let mut instance = GarbEngine::new(10, delta);
 
         // Measure: just the AND gate garbling
         b.iter(|| {
-            let ciphertext = instance.garble_and_gate(black_box(0), black_box(1), black_box(2));
+            let ciphertext = instance.feed_and_gate(black_box(0), black_box(1), black_box(2));
             black_box(ciphertext);
         });
     });
@@ -46,7 +48,7 @@ fn bench_garble_mixed_gates(c: &mut Criterion) {
         let delta = vld1q_u8(&delta_bytes as *const u8);
         let round_key = vld1q_u8(&seed.to_le_bytes() as *const u8);
 
-        let mut instance = GarblingInstance::new(200, delta);
+        let mut instance = GarbEngine::new(200, delta);
 
         // Measure: 50 XOR + 50 AND gates
         b.iter(|| {
@@ -58,10 +60,10 @@ fn bench_garble_mixed_gates(c: &mut Criterion) {
                 let out = black_box(100 + i);
 
                 // XOR gate
-                instance.garble_xor_gate(in1, in2, out);
+                instance.feed_xor_gate(in1, in2, out);
 
                 // AND gate
-                let ct = instance.garble_and_gate(in1, in2, out + 50);
+                let ct = instance.feed_and_gate(in1, in2, out + 50);
                 ciphertexts.push(ct);
             }
 

@@ -1,12 +1,14 @@
 //!
 
 pub mod aarch64;
-pub mod engine;
 pub mod traits;
 
 pub fn add(left: u64, right: u64) -> u64 {
     left + right
 }
+
+#[cfg(target_arch = "aarch64")]
+pub type GarbEngine = aarch64::Aarch64GarblingInstance;
 
 #[cfg(test)]
 mod tests {
