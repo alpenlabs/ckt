@@ -1,8 +1,8 @@
-use std::{arch::aarch64::*, ptr};
 use hex_literal::hex;
 use rand_chacha::ChaCha20Rng;
-use rand_chacha::rand_core::SeedableRng;
 use rand_chacha::rand_core::RngCore;
+use rand_chacha::rand_core::SeedableRng;
+use std::{arch::aarch64::*, ptr};
 
 use crate::traits::GarblingInstance;
 
@@ -33,7 +33,6 @@ pub struct Aarch64GarblingInstance {
     pub and_ctr: u64,
     pub working_space: WorkingSpace,
     pub delta: uint8x16_t,
-    pub table: Vec<Ciphertext>,
 }
 
 // Taken from https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/armv8/test_expand.rs
@@ -54,25 +53,8 @@ const AES128_ROUND_KEYS: [uint8x16_t; 11] = [
     unsafe { std::mem::transmute(hex!("d014f9a8c9ee2589e13f0cc8b6630ca6")) },
 ];
 
-<<<<<<< Updated upstream:ckt-engine/src/aarch64.rs
-impl GarblingInstance {
-    pub fn new(scratch_space: u32, delta: uint8x16_t) -> Self {
-        let bytes = [0u8; 16];
-        let empty_label = unsafe { std::mem::transmute(bytes) };
-
-        GarblingInstance {
-            gate_ctr: 0,
-            and_ctr: 0,
-            // TODO: initialize the working space with input labels
-            working_space: WorkingSpace(vec![Label(empty_label); scratch_space as usize]),
-            delta,
-            table: vec![Ciphertext(unsafe { std::mem::transmute(bytes) }); scratch_space as usize],
-        }
-    }
-=======
 impl GarblingInstance for Aarch64GarblingInstance {
     type Ciphertext = Ciphertext;
->>>>>>> Stashed changes:gobble/src/aarch64.rs
 
     fn feed_xor_gate(&mut self, in1_addr: usize, in2_addr: usize, out_addr: usize) {
         let in1 = self.working_space[in1_addr];
@@ -81,22 +63,12 @@ impl GarblingInstance for Aarch64GarblingInstance {
         self.gate_ctr += 1;
     }
 
-<<<<<<< Updated upstream:ckt-engine/src/aarch64.rs
-    /// Garbles an AND gate.
-    #[inline]
-    pub fn garble_and_gate(
-=======
     fn feed_and_gate(
->>>>>>> Stashed changes:gobble/src/aarch64.rs
         &mut self,
         in1_addr: usize,
         in2_addr: usize,
         out_addr: usize,
-<<<<<<< Updated upstream:ckt-engine/src/aarch64.rs
-    ) {
-=======
     ) -> Self::Ciphertext {
->>>>>>> Stashed changes:gobble/src/aarch64.rs
         // Retrieve input labels for in1_0 and in2_0
         let in1 = self.working_space[in1_addr];
         let in2 = self.working_space[in2_addr];
@@ -104,13 +76,9 @@ impl GarblingInstance for Aarch64GarblingInstance {
         let t = unsafe { index_to_tweak(self.gate_ctr) };
         let xor_in1_delta = unsafe { xor128(in1.0, self.delta) };
 
-        let h_in1_t = unsafe {
-            hash(in1.0, t)
-        };
+        let h_in1_t = unsafe { hash(in1.0, t) };
 
-        let h_in1_delta_t = unsafe {
-            hash(xor_in1_delta, t)
-        };
+        let h_in1_delta_t = unsafe { hash(xor_in1_delta, t) };
 
         let ciphertext = unsafe { xor128(xor128(h_in1_t, h_in1_delta_t), in2.0) };
 
@@ -119,9 +87,8 @@ impl GarblingInstance for Aarch64GarblingInstance {
 
         // Increment gate counter to enforce uniqueness
         self.gate_ctr += 1;
-        // TODO: stream this out
-        self.table[self.and_ctr as usize] = Ciphertext(ciphertext);
         self.and_ctr += 1;
+        Ciphertext(ciphertext)
     }
 
     fn finish(self, output_wires: &[u64], output_labels: &mut [[u8; 16]]) {
@@ -141,6 +108,7 @@ impl Aarch64GarblingInstance {
             gate_ctr: 0,
             working_space: WorkingSpace(vec![Label(empty_label); scratch_space as usize]),
             delta,
+            and_ctr: 0,
         }
     }
 }
@@ -167,7 +135,7 @@ pub unsafe fn index_to_tweak(index: u64) -> uint8x16_t {
 }
 
 /// AES-128 encryption using ARM NEON crypto extensions
-/// 
+///
 /// This follows the reference implementation pattern:
 /// - Rounds 0-8: AESE (SubBytes + ShiftRows + AddRoundKey) + AESMC (MixColumns)
 /// - Round 9: AESE only (no MixColumns)
@@ -176,7 +144,7 @@ pub unsafe fn index_to_tweak(index: u64) -> uint8x16_t {
 #[target_feature(enable = "neon")]
 pub unsafe fn aes_encrypt(block: uint8x16_t) -> uint8x16_t {
     let mut state = block;
-    
+
     // Rounds 0-8: AES single round encryption + Mix columns
     for i in 0..9 {
         let key: uint8x16_t = AES128_ROUND_KEYS[i];
@@ -185,15 +153,15 @@ pub unsafe fn aes_encrypt(block: uint8x16_t) -> uint8x16_t {
         // AESMC: MixColumns
         state = vaesmcq_u8(state);
     }
-    
+
     // Round 9: AES single round encryption (no MixColumns)
     let key9: uint8x16_t = AES128_ROUND_KEYS[9];
     state = vaeseq_u8(state, key9);
-    
+
     // Round 10: Final add (bitwise XOR with last round key)
     let key10: uint8x16_t = AES128_ROUND_KEYS[10];
     state = veorq_u8(state, key10);
-    
+
     state
 }
 
@@ -207,7 +175,11 @@ pub struct EvaluationInstance {
 }
 
 impl EvaluationInstance {
-    pub fn new(scratch_space: u32, selected_input_labels: Vec<Label>, table: Vec<Ciphertext>) -> Self {
+    pub fn new(
+        scratch_space: u32,
+        selected_input_labels: Vec<Label>,
+        table: Vec<Ciphertext>,
+    ) -> Self {
         let bytes = [0u8; 16];
         let empty_label = unsafe { std::mem::transmute(bytes) };
 
@@ -226,18 +198,14 @@ impl EvaluationInstance {
         let in1 = self.working_space[in1_addr];
         let in2 = self.working_space[in2_addr];
         self.working_space[out_addr] = Label(unsafe { xor128(in1.0, in2.0) });
-        self.working_space_bits[out_addr] = self.working_space_bits[in1_addr] ^ self.working_space_bits[in2_addr];
+        self.working_space_bits[out_addr] =
+            self.working_space_bits[in1_addr] ^ self.working_space_bits[in2_addr];
         self.gate_ctr += 1;
     }
 
     /// Garbles an AND gate.
     #[inline]
-    pub fn evaluate_and_gate(
-        &mut self,
-        in1_addr: usize,
-        in2_addr: usize,
-        out_addr: usize,
-    ){
+    pub fn evaluate_and_gate(&mut self, in1_addr: usize, in2_addr: usize, out_addr: usize) {
         // Retrieve input labels for in1_0 and in2_0
         let in1 = self.working_space[in1_addr];
         let in2 = self.working_space[in2_addr];
@@ -255,7 +223,8 @@ impl EvaluationInstance {
 
         // Write output label to working space
         self.working_space[out_addr] = Label(out_label);
-        self.working_space_bits[out_addr] = self.working_space_bits[in1_addr] && self.working_space_bits[in2_addr];
+        self.working_space_bits[out_addr] =
+            self.working_space_bits[in1_addr] && self.working_space_bits[in2_addr];
 
         // Increment gate counter to enforce uniqueness
         self.gate_ctr += 1;
@@ -284,8 +253,7 @@ pub fn encode(input: Vec<bool>, false_input_labels: Vec<Label>, delta: Label) ->
     for (i, bit) in input.iter().enumerate() {
         if *bit {
             selected_input_labels.push(unsafe { Label(xor128(false_input_labels[i].0, delta.0)) });
-        }
-        else {
+        } else {
             selected_input_labels.push(false_input_labels[i]);
         }
     }
@@ -308,14 +276,15 @@ mod tests {
         use aes::Aes128;
         use aes::cipher::{BlockEncrypt, KeyInit};
         use rand::RngCore;
-        
+
         let num_tests = 1000;
         for i in 0..num_tests {
             let mut plaintext = [0u8; 16];
             let mut rng = rand::rng();
             rng.fill_bytes(&mut plaintext);
 
-            let ciphertext: [u8; 16] = unsafe { std::mem::transmute(aes_encrypt(std::mem::transmute(plaintext) ))};
+            let ciphertext: [u8; 16] =
+                unsafe { std::mem::transmute(aes_encrypt(std::mem::transmute(plaintext))) };
 
             let cipher = Aes128::new(&AES128_KEY_BYTES.into());
             let mut expected_ciphertext = plaintext.into();
