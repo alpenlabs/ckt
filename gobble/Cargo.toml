@@ -7,16 +7,14 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-ckt = { version = "0.1.0", path = ".." }
-cynosure = "0.3.0"
+bitvec = "1.0.1"
 hex-literal = "1.1.0"
-indicatif = "0.18.2"
 rand_chacha = "0.9.0"
 
 [dev-dependencies]
 aes = "0.8.4"
-criterion = "0.5"
 rand = "0.9.2"
+criterion = "0.5"
 
 [[bench]]
 name = "garbling"

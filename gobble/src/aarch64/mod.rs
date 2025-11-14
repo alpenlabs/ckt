@@ -1,38 +1,66 @@
+//! Aarch64-specific implementation of the GobbleEngine trait.
+
+pub mod eval;
+pub mod exec;
+pub mod garb;
+
 use hex_literal::hex;
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::RngCore;
 use rand_chacha::rand_core::SeedableRng;
-use std::{arch::aarch64::*, ptr};
+use std::arch::aarch64::*;
 
-use crate::traits::GarblingInstance;
+use crate::aarch64::eval::Aarch64EvaluationInstance;
+use crate::aarch64::exec::Aarch64ExecutionInstance;
+use crate::aarch64::garb::Aarch64GarblingInstance;
+use crate::traits::EvaluationInstanceConfig;
+use crate::traits::ExecutionInstanceConfig;
+use crate::traits::GarblingInstanceConfig;
+use crate::traits::GobbleEngine;
 
+/// Aarch64-specific label type.
 #[derive(Debug, Clone, Copy)]
 pub struct Label(pub uint8x16_t);
 
+/// Aarch64-specific ciphertext type.
 #[derive(Debug, Clone, Copy)]
 pub struct Ciphertext(pub uint8x16_t);
 
-pub struct WorkingSpace(pub Vec<Label>);
+/// Aarch64-specific implementation of the GobbleEngine trait.
+#[derive(Debug)]
+pub struct Aarch64GobbleEngine;
 
-impl std::ops::DerefMut for WorkingSpace {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+impl GobbleEngine for Aarch64GobbleEngine {
+    fn new() -> Self {
+        Self
     }
-}
 
-impl std::ops::Deref for WorkingSpace {
-    type Target = Vec<Label>;
+    type GarblingInstance = Aarch64GarblingInstance;
 
-    fn deref(&self) -> &Self::Target {
-        &self.0
+    type EvaluationInstance = Aarch64EvaluationInstance;
+
+    type ExecutionInstance = Aarch64ExecutionInstance;
+
+    fn new_garbling_instance<'labels>(
+        &self,
+        config: GarblingInstanceConfig<'labels>,
+    ) -> Self::GarblingInstance {
+        Aarch64GarblingInstance::new(config)
     }
-}
 
-pub struct Aarch64GarblingInstance {
-    pub gate_ctr: u64,
-    pub and_ctr: u64,
-    pub working_space: WorkingSpace,
-    pub delta: uint8x16_t,
+    fn new_execution_instance<'labels>(
+        &self,
+        config: ExecutionInstanceConfig<'labels>,
+    ) -> Self::ExecutionInstance {
+        Aarch64ExecutionInstance::new(config)
+    }
+
+    fn new_evaluation_instance<'labels>(
+        &self,
+        config: EvaluationInstanceConfig<'labels>,
+    ) -> Self::EvaluationInstance {
+        Aarch64EvaluationInstance::new(config)
+    }
 }
 
 // Taken from https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/armv8/test_expand.rs
@@ -52,66 +80,6 @@ const AES128_ROUND_KEYS: [uint8x16_t; 11] = [
     unsafe { std::mem::transmute(hex!("ac7766f319fadc2128d12941575c006e")) },
     unsafe { std::mem::transmute(hex!("d014f9a8c9ee2589e13f0cc8b6630ca6")) },
 ];
-
-impl GarblingInstance for Aarch64GarblingInstance {
-    type Ciphertext = Ciphertext;
-
-    fn feed_xor_gate(&mut self, in1_addr: usize, in2_addr: usize, out_addr: usize) {
-        let in1 = self.working_space[in1_addr];
-        let in2 = self.working_space[in2_addr];
-        self.working_space[out_addr] = Label(unsafe { xor128(in1.0, in2.0) });
-        self.gate_ctr += 1;
-    }
-
-    fn feed_and_gate(
-        &mut self,
-        in1_addr: usize,
-        in2_addr: usize,
-        out_addr: usize,
-    ) -> Self::Ciphertext {
-        // Retrieve input labels for in1_0 and in2_0
-        let in1 = self.working_space[in1_addr];
-        let in2 = self.working_space[in2_addr];
-
-        let t = unsafe { index_to_tweak(self.gate_ctr) };
-        let xor_in1_delta = unsafe { xor128(in1.0, self.delta) };
-
-        let h_in1_t = unsafe { hash(in1.0, t) };
-
-        let h_in1_delta_t = unsafe { hash(xor_in1_delta, t) };
-
-        let ciphertext = unsafe { xor128(xor128(h_in1_t, h_in1_delta_t), in2.0) };
-
-        // Write output label to working space
-        self.working_space[out_addr] = Label(h_in1_t);
-
-        // Increment gate counter to enforce uniqueness
-        self.gate_ctr += 1;
-        self.and_ctr += 1;
-        Ciphertext(ciphertext)
-    }
-
-    fn finish(self, output_wires: &[u64], output_labels: &mut [[u8; 16]]) {
-        for (i, wire) in output_wires.iter().enumerate() {
-            let label = unsafe { std::mem::transmute(self.working_space[(*wire) as usize].0) };
-            output_labels[i] = label;
-        }
-    }
-}
-
-impl Aarch64GarblingInstance {
-    pub fn new(scratch_space: u32, delta: uint8x16_t) -> Self {
-        let bytes = [0u8; 16];
-        let empty_label = unsafe { std::mem::transmute(bytes) };
-
-        Aarch64GarblingInstance {
-            gate_ctr: 0,
-            working_space: WorkingSpace(vec![Label(empty_label); scratch_space as usize]),
-            delta,
-            and_ctr: 0,
-        }
-    }
-}
 
 /// Extract the point-and-permute bit (LSB) from a label
 #[inline]
@@ -163,73 +131,6 @@ pub unsafe fn aes_encrypt(block: uint8x16_t) -> uint8x16_t {
     state = veorq_u8(state, key10);
 
     state
-}
-
-pub struct EvaluationInstance {
-    pub gate_ctr: u64,
-    pub and_ctr: u64,
-    pub working_space: WorkingSpace,
-    // todo use bitvec
-    pub working_space_bits: Vec<bool>,
-    pub table: Vec<Ciphertext>,
-}
-
-impl EvaluationInstance {
-    pub fn new(
-        scratch_space: u32,
-        selected_input_labels: Vec<Label>,
-        table: Vec<Ciphertext>,
-    ) -> Self {
-        let bytes = [0u8; 16];
-        let empty_label = unsafe { std::mem::transmute(bytes) };
-
-        EvaluationInstance {
-            gate_ctr: 0,
-            and_ctr: 0,
-            // TODO: initialize the working space with the selected input labels
-            working_space: WorkingSpace(vec![Label(empty_label); scratch_space as usize]),
-            working_space_bits: vec![false; scratch_space as usize],
-            table,
-        }
-    }
-
-    #[inline]
-    pub fn evaluate_xor_gate(&mut self, in1_addr: usize, in2_addr: usize, out_addr: usize) {
-        let in1 = self.working_space[in1_addr];
-        let in2 = self.working_space[in2_addr];
-        self.working_space[out_addr] = Label(unsafe { xor128(in1.0, in2.0) });
-        self.working_space_bits[out_addr] =
-            self.working_space_bits[in1_addr] ^ self.working_space_bits[in2_addr];
-        self.gate_ctr += 1;
-    }
-
-    /// Garbles an AND gate.
-    #[inline]
-    pub fn evaluate_and_gate(&mut self, in1_addr: usize, in2_addr: usize, out_addr: usize) {
-        // Retrieve input labels for in1_0 and in2_0
-        let in1 = self.working_space[in1_addr];
-        let in2 = self.working_space[in2_addr];
-
-        let t = unsafe { index_to_tweak(self.gate_ctr) };
-        let permute_bit = self.working_space_bits[in1_addr];
-
-        // TODO: stream this in
-        let ciphertext = self.table[self.and_ctr as usize];
-
-        let mut out_label = unsafe { hash(in1.0, t) };
-        if permute_bit {
-            out_label = unsafe { xor128(out_label, xor128(ciphertext.0, in2.0)) };
-        }
-
-        // Write output label to working space
-        self.working_space[out_addr] = Label(out_label);
-        self.working_space_bits[out_addr] =
-            self.working_space_bits[in1_addr] && self.working_space_bits[in2_addr];
-
-        // Increment gate counter to enforce uniqueness
-        self.gate_ctr += 1;
-        self.and_ctr += 1;
-    }
 }
 
 /// Expand a seed into a vector of labels and a delta label

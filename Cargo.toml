@@ -24,7 +24,7 @@ high-performance = ["dep:monoio", "dep:cynosure"]
 v5 = ["dep:kanal"]
 
 [workspace]
-members = [ "bench","cli", "lvl", "dupecheck", "gobble", "exectest"]
+members = [ "util/bench", "lvl", "util/dupecheck", "gobble", "util/exectest", "util/adder"]
 resolver = "3"
 
 [workspace.package]

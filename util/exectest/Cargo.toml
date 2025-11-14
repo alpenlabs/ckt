@@ -1,0 +1,17 @@
+[package]
+name = "exectest"
+version = "0.1.0"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ckt = { version = "0.1.0", path = "../.." }
+crossbeam-channel = "0.5"
+indicatif = "0.18.0"
+mimalloc = { version = "0.1.48", features = ["v3"] }
+monoio = { version = "0.2.4", features = ["sync"] }
+
+[lints]
+workspace = true

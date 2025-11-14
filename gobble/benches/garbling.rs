@@ -1,19 +1,29 @@
+//! Benchmarks for gobble garbling operations
+#![expect(missing_docs)]
+#![allow(unused_crate_dependencies)]
+
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use gobble::{
+    Engine,
     aarch64::{get_permute_bit, index_to_tweak, xor128},
-    traits::GarblingInstance,
-    *,
+    traits::{GarblingInstance, GarblingInstanceConfig, GobbleEngine},
 };
 use std::arch::aarch64::*;
 
 fn bench_garble_xor_gate(c: &mut Criterion) {
-    c.bench_function("garble_xor_gate", |b| unsafe {
+    c.bench_function("garble_xor_gate", |b| {
         // Setup once: create instance and working space
-        let seed = 0x0123456789ABCDEF_FEDCBA9876543210u128;
         let delta_bytes = [0xFFu8; 16];
-        let delta = vld1q_u8(&delta_bytes as *const u8);
+        let primary_input_false_labels = vec![];
 
-        let mut instance = GarbEngine::new(10, delta);
+        let config = GarblingInstanceConfig {
+            scratch_space: 10,
+            delta: delta_bytes,
+            primary_input_false_labels: &primary_input_false_labels,
+        };
+
+        let engine = Engine::new();
+        let mut instance = engine.new_garbling_instance(config);
 
         // Measure: just the XOR gate garbling
         b.iter(|| {
@@ -24,13 +34,19 @@ fn bench_garble_xor_gate(c: &mut Criterion) {
 }
 
 fn bench_garble_and_gate(c: &mut Criterion) {
-    c.bench_function("garble_and_gate", |b| unsafe {
+    c.bench_function("garble_and_gate", |b| {
         // Setup once: create instance and working space
-        let seed = 0x0123456789ABCDEF_FEDCBA9876543210u128;
         let delta_bytes = [0xFFu8; 16];
-        let delta = vld1q_u8(&delta_bytes as *const u8);
+        let primary_input_false_labels = vec![];
 
-        let mut instance = GarbEngine::new(10, delta);
+        let config = GarblingInstanceConfig {
+            scratch_space: 10,
+            delta: delta_bytes,
+            primary_input_false_labels: &primary_input_false_labels,
+        };
+
+        let engine = Engine::new();
+        let mut instance = engine.new_garbling_instance(config);
 
         // Measure: just the AND gate garbling
         b.iter(|| {
@@ -41,14 +57,19 @@ fn bench_garble_and_gate(c: &mut Criterion) {
 }
 
 fn bench_garble_mixed_gates(c: &mut Criterion) {
-    c.bench_function("garble_mixed_100_gates", |b| unsafe {
+    c.bench_function("garble_mixed_100_gates", |b| {
         // Setup once: create instance with enough space for 100 gates
-        let seed = 0x0123456789ABCDEF_FEDCBA9876543210u128;
         let delta_bytes = [0xFFu8; 16];
-        let delta = vld1q_u8(&delta_bytes as *const u8);
-        let round_key = vld1q_u8(&seed.to_le_bytes() as *const u8);
+        let primary_input_false_labels = vec![];
 
-        let mut instance = GarbEngine::new(200, delta);
+        let config = GarblingInstanceConfig {
+            scratch_space: 200,
+            delta: delta_bytes,
+            primary_input_false_labels: &primary_input_false_labels,
+        };
+
+        let engine = Engine::new();
+        let mut instance = engine.new_garbling_instance(config);
 
         // Measure: 50 XOR + 50 AND gates
         b.iter(|| {

@@ -1,22 +1,15 @@
-//!
+//! Core crate for garbling, executing and evaluating garbled/boolean circuits.
 
+#[cfg(target_arch = "aarch64")]
 pub mod aarch64;
 pub mod traits;
 
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
-
+/// Dynamically switching type alias that changes between architecture specific
+/// [`GobbleEngine`] implementations.
 #[cfg(target_arch = "aarch64")]
-pub type GarbEngine = aarch64::Aarch64GarblingInstance;
+pub type Engine = aarch64::Aarch64GobbleEngine;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
+    use criterion as _;
 }
