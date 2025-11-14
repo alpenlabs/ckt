@@ -626,6 +626,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "garbletest"
+version = "0.1.0"
+dependencies = [
+ "blake3",
+ "ckt",
+ "gobble",
+ "monoio",
+]
+
+[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"

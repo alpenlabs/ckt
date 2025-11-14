@@ -51,22 +51,22 @@ async fn test_round_trip_small_circuit() {
     assert_eq!(block.gates[0].in1, 2);
     assert_eq!(block.gates[0].in2, 3);
     assert_eq!(block.gates[0].out, 4);
-    assert_eq!(block.gate_type(0), false); // XOR
+    assert_eq!(block.gate_type(0), GateType::XOR);
 
     assert_eq!(block.gates[1].in1, 4);
     assert_eq!(block.gates[1].in2, 3);
     assert_eq!(block.gates[1].out, 5);
-    assert_eq!(block.gate_type(1), false); // XOR
+    assert_eq!(block.gate_type(1), GateType::XOR);
 
     assert_eq!(block.gates[2].in1, 2);
     assert_eq!(block.gates[2].in2, 4);
     assert_eq!(block.gates[2].out, 6);
-    assert_eq!(block.gate_type(2), true); // AND
+    assert_eq!(block.gate_type(2), GateType::AND);
 
     assert_eq!(block.gates[3].in1, 5);
     assert_eq!(block.gates[3].in2, 6);
     assert_eq!(block.gates[3].out, 7);
-    assert_eq!(block.gate_type(3), true); // AND
+    assert_eq!(block.gate_type(3), GateType::AND);
 
     // No more blocks
     let num_blocks = reader.read_blocks(&mut buffer).await.unwrap();

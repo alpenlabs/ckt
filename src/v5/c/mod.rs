@@ -13,6 +13,9 @@
 
 use std::io::{self, Error, ErrorKind};
 
+use crate::GateType;
+
+#[cfg(test)]
 pub mod integration;
 pub mod reader;
 pub mod writer;
@@ -464,9 +467,13 @@ impl Block {
     ///
     /// Returns true for AND gate, false for XOR gate
     #[inline]
-    pub fn gate_type(&self, index: usize) -> bool {
+    pub fn gate_type(&self, index: usize) -> GateType {
         debug_assert!(index < GATES_PER_BLOCK);
-        get_gate_type(&self.types, index)
+        if get_gate_type(&self.types, index) {
+            GateType::AND
+        } else {
+            GateType::XOR
+        }
     }
 
     /// Get the number of valid gates in this block
