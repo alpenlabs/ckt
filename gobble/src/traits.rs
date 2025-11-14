@@ -107,6 +107,8 @@ pub struct EvaluationInstanceConfig<'labels> {
     /// Selected labels (each wire has two, one for true, one for false) for
     /// the primary inputs.
     pub selected_primary_input_labels: &'labels [[u8; 16]],
+    /// Selected values for each wire (1 bit per wire, boolean)
+    pub selected_primary_input_values: &'labels BitVec,
 }
 
 /// GobbleEngine is the primary interface of `gobble`. It

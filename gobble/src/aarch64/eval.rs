@@ -81,11 +81,14 @@ impl Aarch64EvaluationInstance {
         let bytes = [0u8; 16];
         let empty_label = unsafe { std::mem::transmute(bytes) };
         let mut working_space = vec![Label(empty_label); config.scratch_space as usize];
-        let mut working_space_bits = BitVec::repeat(false, config.scratch_space as usize);
 
         for (label, i) in config.selected_primary_input_labels.iter().zip(2..) {
             working_space[i] = Label(unsafe { std::mem::transmute(*label) });
-            working_space_bits.set(i, true);
+        }
+
+        let mut working_space_bits = BitVec::repeat(false, config.scratch_space as usize);
+        for (value, i) in config.selected_primary_input_values.iter().zip(2..) {
+            working_space_bits.set(i, *value);
         }
 
         Aarch64EvaluationInstance {
