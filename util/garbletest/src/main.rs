@@ -7,6 +7,9 @@ use gobble::{
     Engine,
     traits::{GarblingInstance, GarblingInstanceConfig, GobbleEngine},
 };
+use indicatif::ProgressBar;
+use indicatif::ProgressStyle;
+use std::time::Instant;
 
 #[monoio::main]
 async fn main() {
@@ -32,6 +35,15 @@ async fn main() {
     let mut hasher = Hasher::new();
 
     let mut block_idx = 0;
+    let mut total_gates_processed = 0u64;
+    let pb = ProgressBar::new(total_gates);
+    pb.set_style(
+        ProgressStyle::default_bar()
+            .template("🦃 [{bar:50.cyan/blue}] {percent:>3}% | {msg} | {elapsed_precise}")
+            .unwrap()
+            .progress_chars("█░")
+    );
+    let start = Instant::now();
     while let Some((block, num_blocks)) = reader.next_blocks_ref().await.unwrap() {
         let blocks = unsafe { &*(block.as_ptr() as *const [Block; 16]) };
         for block in blocks.iter().take(num_blocks) {
@@ -59,9 +71,22 @@ async fn main() {
                     ),
                 }
             }
+            
+            total_gates_processed += gates_in_block as u64;
+            pb.inc(gates_in_block as u64);
+        }
+        
+        let elapsed = start.elapsed();
+        if elapsed.as_secs_f64() > 0.0 {
+            let rate_m = (total_gates_processed as f64 / elapsed.as_secs_f64()) / 1_000_000.0;
+            let processed_b = total_gates_processed as f64 / 1_000_000_000.0;
+            let total_b = total_gates as f64 / 1_000_000_000.0;
+            pb.set_message(format!("{:.2}B / {:.2}B gates @ {:.0} M/s", processed_b, total_b, rate_m));
         }
     }
-
+    
+    pb.finish();
+    
     let hash = hasher.finalize();
-    println!("Hash: {:?}", hash);
+    println!("\n🔐 Hash: {}", hash.to_hex());
 }
