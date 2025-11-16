@@ -7,8 +7,9 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-blake3 = "1.8.2"
+bitvec = "1.0.1"
 ckt = { version = "0.1.0", path = "../.." }
 gobble = { version = "0.1.0", path = "../../gobble" }
 indicatif = "0.18.3"
 monoio = "0.2.4"
+rand_chacha = "0.9.0"
