@@ -68,7 +68,7 @@ impl<'a> AvailableGuard<'a> {
 ///
 /// The dependency is read into `tmp` on creation and written back to the
 /// slot on drop, allowing safe mutation of the packed bytes.
-struct InlineGuard<'a> {
+pub struct InlineGuard<'a> {
     slot_ptr: *mut Wire,
     tmp: CompactDependency,
     _l: PhantomData<&'a mut SlottedValue>,
@@ -97,7 +97,7 @@ impl<'a> Drop for InlineGuard<'a> {
 /// Takes ownership of the Box by setting the slot pointer to null (as a "lock").
 /// The Box is restored to the slot on drop. If the pointer is already null when
 /// accessed, it means another guard is active (prevented by borrow checker in safe code).
-struct WaitingSetGuard<'a> {
+pub struct WaitingSetGuard<'a> {
     slot_ptr: *mut Wire,
     set: Option<Box<DepSet>>,
     _l: PhantomData<&'a mut SlottedValue>,

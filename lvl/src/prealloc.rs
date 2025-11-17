@@ -6,7 +6,6 @@ use ckt::v5::{
     c::{writer::WriterV5c, GateV5c},
 };
 use indicatif::ProgressBar;
-use nohash_hasher::IntMap;
 
 use crate::slab::FakeSlabAllocator;
 
@@ -32,14 +31,14 @@ pub async fn prealloc(input: &str, output: &str) {
 
     while let Some(block) = reader.next_block_soa().await.unwrap() {
         for i in 0..block.gates_in_block {
-            let in1 = lookup_wire(
+            let in1 = lookup_wire::<false>(
                 &mut wire_map,
                 &mut slab,
                 block.in1[i],
                 header.primary_inputs,
             )
             .unwrap();
-            let in2 = lookup_wire(
+            let in2 = lookup_wire::<false>(
                 &mut wire_map,
                 &mut slab,
                 block.in2[i],
@@ -76,18 +75,16 @@ pub async fn prealloc(input: &str, output: &str) {
     }
     pb.finish();
 
-    let mut total_found = 0;
     let outputs = reader
         .outputs()
         .iter()
         .map(|o| {
-            let v = wire_map.get(o);
-            if v.is_some() {
-                total_found += 1;
-            }
-            v.unwrap().slab_idx as u32
+            lookup_wire::<true>(&mut wire_map, &mut slab, *o, header.primary_inputs)
+                .expect("output wire to be produced by a gate or passed from inputs")
+                as u32
         })
         .collect();
+
     writer
         .finalize(slab.max_allocated_concurrently() as u64, outputs)
         .await
@@ -104,7 +101,7 @@ struct WireEntry {
 
 type WireMap = HashMap<AbsoluteWireId, WireEntry>;
 
-fn lookup_wire(
+fn lookup_wire<const IGNORE_CREDS: bool>(
     map: &mut WireMap,
     slab: &mut FakeSlabAllocator,
     wire: AbsoluteWireId,
@@ -119,13 +116,14 @@ fn lookup_wire(
     };
 
     let idx = entry.get().slab_idx;
-
-    match entry.get().credits_remaining {
-        1 => {
-            entry.remove();
-            slab.deallocate(idx);
+    if IGNORE_CREDS == false {
+        match entry.get().credits_remaining {
+            1 => {
+                entry.remove();
+                slab.deallocate(idx);
+            }
+            _ => entry.get_mut().credits_remaining -= 1,
         }
-        _ => entry.get_mut().credits_remaining -= 1,
     }
     Some(idx)
 }
