@@ -8,6 +8,8 @@ repository.workspace = true
 
 [dependencies]
 bitvec = "1.0.1"
+
+[target.'cfg(target_arch = "aarch64")'.dependencies]
 hex-literal = "1.1.0"
 rand_chacha = "0.9.0"
 
