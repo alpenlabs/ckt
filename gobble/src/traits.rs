@@ -22,9 +22,8 @@ pub trait GarblingInstance {
         out_addr: usize,
     ) -> Self::Ciphertext;
 
-    /// Extract wires with IDs `output_wires` to `output_labels`. Panics if the
-    /// number of output wires does not match the number of output labels.
-    fn finish(&self, output_wires: &[u64], output_labels: &mut [[u8; 16]]);
+    /// Return selected labels for the given wires and values.
+    fn get_selected_labels(&self, wires: &[u64], values: &BitVec, labels: &mut [[u8; 16]]);
 }
 
 /// A generic trait for describing an instance used for evaluating a garbled boolean circuit.
@@ -46,15 +45,13 @@ pub trait EvaluationInstance {
         ciphertext: Ciphertext,
     );
 
-    /// Extract wires with IDs `output_wires` to `output_labels` and
-    /// `output_values`. Panics if the number of output wires does not match the
-    /// number of output labels/values.
-    fn finish(
-        &self,
-        output_wires: &[u64],
-        output_labels: &mut [[u8; 16]],
-        output_values: &mut [bool],
-    );
+    /// Extract wires with IDs `wires` to `labels`. Panics if the number of wires does not match the
+    /// number of labels.
+    fn get_labels(&self, wires: &[u64], labels: &mut [[u8; 16]]);
+
+    /// Return values for the given wires. Panics if the number of wires does not match the
+    /// number of values.
+    fn get_values(&self, wires: &[u64], values: &mut [bool]);
 }
 
 /// A generic trait for describing an instance used for executing a boolean circuit.
@@ -67,9 +64,9 @@ pub trait ExecutionInstance {
     /// This AND's the value of the inputs and stores the result in the output address.
     fn feed_and_gate(&mut self, in1_addr: usize, in2_addr: usize, out_addr: usize);
 
-    /// Extract wires with IDs `output_wires` to `output_labels`. Panics if the
-    /// number of output wires does not match the number of output labels.
-    fn finish(&self, output_wires: &[u64], output_labels: &mut [bool]);
+    /// Extract wires with IDs `wires` to `values`. Panics if the number of wires does not match the
+    /// number of values.
+    fn get_values(&self, wires: &[u64], values: &mut [bool]);
 }
 
 /// Configuration for garbling a boolean circuit
@@ -101,9 +98,6 @@ pub struct EvaluationInstanceConfig<'labels> {
     /// Max live wires used at any point in the circuit. See ckt v5 architecture
     /// for additional details.
     pub scratch_space: u32,
-    /// The delta is a global offset constant used for garbling a circuit.
-    /// This is carried from the garbler to the evaluator for recomputation.
-    pub delta: [u8; 16],
     /// Selected labels (each wire has two, one for true, one for false) for
     /// the primary inputs.
     pub selected_primary_input_labels: &'labels [[u8; 16]],

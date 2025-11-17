@@ -18,9 +18,26 @@ use crate::traits::ExecutionInstanceConfig;
 use crate::traits::GarblingInstanceConfig;
 use crate::traits::GobbleEngine;
 
+const LABEL_ZERO_BYTES: [u8; 16] = [98u8; 16];
+const LABEL_ZERO: Label = Label(unsafe { std::mem::transmute(LABEL_ZERO_BYTES) });
+
+const LABEL_ONE_BYTES: [u8; 16] = [25u8; 16];
+const LABEL_ONE: Label = Label(unsafe { std::mem::transmute(LABEL_ONE_BYTES) });
+
 /// Aarch64-specific label type.
 #[derive(Debug, Clone, Copy)]
 pub struct Label(pub uint8x16_t);
+
+impl Label {
+    /// Returns public constant label for zero
+    pub const fn zero() -> Self {
+        LABEL_ZERO
+    }
+    /// Returns public constant label for one
+    pub const fn one() -> Self {
+        LABEL_ONE
+    }
+}
 
 /// Aarch64-specific ciphertext type.
 #[derive(Debug, Clone, Copy)]

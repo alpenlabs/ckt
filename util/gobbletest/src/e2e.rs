@@ -1,8 +1,8 @@
 use rand_chacha::ChaCha20Rng;
 use crate::{garble, eval, exec};
 
-pub async fn test_end_to_end(circuit_file: &str, input_file: &str, rng: &mut ChaCha20Rng) {
-    let garbled_file = "gc.bin";
+pub async fn test_end_to_end(circuit_file: &str, input_file: &str, rng: &mut ChaCha20Rng, garbled_file: Option<&str>) {
+    let garbled_file = garbled_file.unwrap_or("gc.bin");
     
     println!("🦃 Running end-to-end test: exec → garble → eval\n");
     

@@ -14,6 +14,9 @@ impl Aarch64ExecutionInstance {
     /// Creates a new Aarch64ExecutionInstance with the given configuration.
     pub fn new<'values>(config: ExecutionInstanceConfig<'values>) -> Self {
         let mut working_space = BitVec::repeat(false, config.scratch_space as usize);
+        working_space.set(0, false);
+        working_space.set(1, true);
+        // Set primary input wires starting at position 2
         for (value, i) in config.input_values.iter().zip(2..) {
             working_space.set(i, *value);
         }
@@ -32,9 +35,9 @@ impl ExecutionInstance for Aarch64ExecutionInstance {
         self.working_space.set(out_addr, val);
     }
 
-    fn finish(&self, output_wires: &[u64], output_labels: &mut [bool]) {
-        for wire_id in output_wires {
-            output_labels[*wire_id as usize] = self.working_space[*wire_id as usize];
+    fn get_values(&self, wires: &[u64], values: &mut [bool]) {
+        for (i, wire_id) in wires.iter().enumerate() {
+            values[i] = self.working_space[*wire_id as usize];
         }
     }
 }

@@ -53,7 +53,7 @@ impl EvaluationInstance for Aarch64EvaluationInstance {
 
         // Write output label to working space
         self.working_space[out_addr] = Label(out_label);
-        let value = self.working_space_bits[in1_addr] && self.working_space_bits[in2_addr];
+        let value = self.working_space_bits[in1_addr] & self.working_space_bits[in2_addr];
         self.working_space_bits.set(out_addr, value);
 
         // Increment gate counter to enforce uniqueness
@@ -61,16 +61,16 @@ impl EvaluationInstance for Aarch64EvaluationInstance {
         self.and_ctr += 1;
     }
 
-    fn finish(
-        &self,
-        output_wires: &[u64],
-        output_labels: &mut [[u8; 16]],
-        output_values: &mut [bool],
-    ) {
-        for wire_id in output_wires {
+    fn get_labels(&self, wires: &[u64], labels: &mut [[u8; 16]]) {
+        for (i, wire_id) in wires.iter().enumerate() {
             let wire_id = *wire_id as usize;
-            output_labels[wire_id] = unsafe { std::mem::transmute(self.working_space[wire_id].0) };
-            output_values[wire_id] = self.working_space_bits[wire_id];
+            labels[i] = unsafe { std::mem::transmute(self.working_space[wire_id].0) };
+        }
+    }
+
+    fn get_values(&self, wires: &[u64], values: &mut [bool]) {
+        for (i, wire_id) in wires.iter().enumerate() {
+            values[i] = self.working_space_bits[*wire_id as usize];
         }
     }
 }
@@ -82,11 +82,15 @@ impl Aarch64EvaluationInstance {
         let empty_label = unsafe { std::mem::transmute(bytes) };
         let mut working_space = vec![Label(empty_label); config.scratch_space as usize];
 
+        working_space[0] = Label::zero();
+        working_space[1] = Label::one();
         for (label, i) in config.selected_primary_input_labels.iter().zip(2..) {
             working_space[i] = Label(unsafe { std::mem::transmute(*label) });
         }
 
         let mut working_space_bits = BitVec::repeat(false, config.scratch_space as usize);
+        working_space_bits.set(0, false);
+        working_space_bits.set(1, true);
         for (value, i) in config.selected_primary_input_values.iter().zip(2..) {
             working_space_bits.set(i, *value);
         }
