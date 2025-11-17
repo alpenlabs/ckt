@@ -349,7 +349,7 @@ mod tests {
         header.format_type = 0x01;
 
         // Test scratch space overflow
-        header.scratch_space = MAX_MEMORY_ADDRESS as u64 + 1;
+        header.scratch_space = MAX_MEMORY_ADDRESS + 1;
         assert!(header.validate().is_err());
     }
 
@@ -371,10 +371,8 @@ mod tests {
         assert_eq!(std::mem::align_of::<GateV5b>(), 4);
 
         // Test that we can safely cast bytes to gates
-        let gates = vec![
-            GateV5b::new(10, 20, 30).unwrap(),
-            GateV5b::new(40, 50, 60).unwrap(),
-        ];
+        let gates = [GateV5b::new(10, 20, 30).unwrap(),
+            GateV5b::new(40, 50, 60).unwrap()];
 
         // Convert to bytes
         let bytes: &[u8] = unsafe {

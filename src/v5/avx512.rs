@@ -306,7 +306,7 @@ mod tests {
     fn pack_stream_34(vals: &[u64]) -> [u8; 1088] {
         let mut buf = [0u8; 1088];
         for (i, &v) in vals.iter().enumerate() {
-            pack_bits_le(&mut buf, i * 34, 34, v & 0x3FFFF_FFFF);
+            pack_bits_le(&mut buf, i * 34, 34, v & 0x0003_FFFF_FFFF);
         }
         buf
     }
@@ -387,12 +387,12 @@ mod tests {
             assert!(out.iter().all(|&v| v == 0));
 
             // Max values
-            let max = [0x3FFFF_FFFFu64; 256];
+            let max = [0x0003_FFFF_FFFFu64; 256];
             let packed = pack_stream_34(&max);
             let padded = pad8_bytes(&packed);
             let mut out = [0u64; 256];
             unpack_bits_34_to_u64_gather(&padded, 256, &mut out);
-            assert!(out.iter().all(|&v| v == 0x3FFFF_FFFF));
+            assert!(out.iter().all(|&v| v == 0x0003_FFFF_FFFF));
         }
     }
 
@@ -434,7 +434,7 @@ mod tests {
             ];
             let mut vals = [0u64; 256];
             for i in 0..256 {
-                vals[i] = ((i as u64) * 0x1F_0003) & 0x3FFFF_FFFF;
+                vals[i] = ((i as u64) * 0x1F_0003) & 0x0003_FFFF_FFFF;
             }
             let packed = pack_stream_34(&vals);
             let padded = pad8_bytes(&packed);
@@ -485,7 +485,7 @@ mod tests {
         unsafe {
             let mut vals = [0u64; 256];
             vals.fill(0);
-            vals[255] = 0x0123_4567u64 & 0x3FFFF_FFFF;
+            vals[255] = 0x0123_4567u64 & 0x0003_FFFF_FFFF;
             let packed = pack_stream_34(&vals);
             let padded = pad8_bytes(&packed);
 
@@ -535,7 +535,7 @@ mod tests {
 
                 let mut v34 = [0u64; 256];
                 for i in 0..256 {
-                    v34[i] = rng.next_u64() & 0x3FFFF_FFFF;
+                    v34[i] = rng.next_u64() & 0x0003_FFFF_FFFF;
                 }
                 let mut v24 = [0u32; 256];
                 for i in 0..256 {
@@ -590,9 +590,9 @@ mod tests {
             let mut types = [false; 256];
 
             for i in 0..256 {
-                in1[i] = ((i as u64) * 7 + 2) & 0x3FFFF_FFFF;
-                in2[i] = ((i as u64) * 5 + 3) & 0x3FFFF_FFFF;
-                out_vals[i] = ((i as u64) * 11 + 1) & 0x3FFFF_FFFF;
+                in1[i] = ((i as u64) * 7 + 2) & 0x0003_FFFF_FFFF;
+                in2[i] = ((i as u64) * 5 + 3) & 0x0003_FFFF_FFFF;
+                out_vals[i] = ((i as u64) * 11 + 1) & 0x0003_FFFF_FFFF;
                 credits[i] = (((i as u32) * 3 + 1) % 1_000_000) & 0x00FF_FFFF;
                 types[i] = (i % 3) == 1;
             }
@@ -642,16 +642,16 @@ mod tests {
 
             for i in 0..256 {
                 in1[i] = if i % 2 == 0 {
-                    0x3FFFF_FFFF
+                    0x0003_FFFF_FFFF
                 } else {
-                    (i as u64) & 0x3FFFF_FFFF
+                    (i as u64) & 0x0003_FFFF_FFFF
                 };
                 in2[i] = if i % 3 == 0 {
-                    (i as u64) * 0x1_0001 & 0x3FFFF_FFFF
+                    ((i as u64) * 0x1_0001) & 0x0003_FFFF_FFFF
                 } else {
                     0
                 };
-                out_vals[i] = (0x3AA55AA5u64.wrapping_mul(i as u64)) & 0x3FFFF_FFFF;
+                out_vals[i] = (0x3AA55AA5u64.wrapping_mul(i as u64)) & 0x0003_FFFF_FFFF;
                 credits[i] = if i % 5 == 0 {
                     0x00FF_FFFF
                 } else {
@@ -695,7 +695,7 @@ mod tests {
             return;
         }
         unsafe {
-            let mut rng = Rng::new(0xCAFEBABE_D00D_F00D);
+            let mut rng = Rng::new(0xCAFE_BABE_D00D_F00D);
             for iter in 0..100 {
                 let n = (rng.next_u32() as usize % 257).min(256);
 
@@ -706,9 +706,9 @@ mod tests {
                 let mut types = [false; 256];
 
                 for i in 0..256 {
-                    in1[i] = rng.next_u64() & 0x3FFFF_FFFF;
-                    in2[i] = rng.next_u64() & 0x3FFFF_FFFF;
-                    out_vals[i] = rng.next_u64() & 0x3FFFF_FFFF;
+                    in1[i] = rng.next_u64() & 0x0003_FFFF_FFFF;
+                    in2[i] = rng.next_u64() & 0x0003_FFFF_FFFF;
+                    out_vals[i] = rng.next_u64() & 0x0003_FFFF_FFFF;
                     credits[i] = rng.next_u32() & 0x00FF_FFFF;
                     types[i] = (rng.next_u32() & 1) != 0;
                 }
@@ -800,7 +800,7 @@ mod tests {
         let mut v34 = [0u64; 256];
         let mut v24 = [0u32; 256];
         for i in 0..256 {
-            v34[i] = rng.next_u64() & 0x3FFFF_FFFF;
+            v34[i] = rng.next_u64() & 0x0003_FFFF_FFFF;
             v24[i] = rng.next_u32() & 0x00FF_FFFF;
         }
         let p34 = pack_stream_34(&v34);
@@ -934,16 +934,16 @@ mod tests {
         let n = 256;
 
         // Build randomized block
-        let mut rng = Rng::new(0xF00D_BABE_C0FFEE01);
+        let mut rng = Rng::new(0xF00D_BABE_C0FF_EE01);
         let mut in1 = [0u64; 256];
         let mut in2 = [0u64; 256];
         let mut out_vals = [0u64; 256];
         let mut credits = [0u32; 256];
         let mut types = [false; 256];
         for i in 0..256 {
-            in1[i] = rng.next_u64() & 0x3FFFF_FFFF;
-            in2[i] = rng.next_u64() & 0x3FFFF_FFFF;
-            out_vals[i] = rng.next_u64() & 0x3FFFF_FFFF;
+            in1[i] = rng.next_u64() & 0x0003_FFFF_FFFF;
+            in2[i] = rng.next_u64() & 0x0003_FFFF_FFFF;
+            out_vals[i] = rng.next_u64() & 0x0003_FFFF_FFFF;
             credits[i] = rng.next_u32() & 0x00FF_FFFF;
             types[i] = (rng.next_u32() & 1) != 0;
         }
@@ -1088,9 +1088,9 @@ mod tests {
         let mut credits = [0u32; 256];
         let mut types = [false; 256];
         for i in 0..256 {
-            in1[i] = rng.next_u64() & 0x3FFFF_FFFF;
-            in2[i] = rng.next_u64() & 0x3FFFF_FFFF;
-            out_vals[i] = rng.next_u64() & 0x3FFFF_FFFF;
+            in1[i] = rng.next_u64() & 0x0003_FFFF_FFFF;
+            in2[i] = rng.next_u64() & 0x0003_FFFF_FFFF;
+            out_vals[i] = rng.next_u64() & 0x0003_FFFF_FFFF;
             credits[i] = rng.next_u32() & 0x00FF_FFFF;
             types[i] = (rng.next_u32() & 1) != 0;
         }

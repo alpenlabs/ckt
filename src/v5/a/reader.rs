@@ -541,7 +541,7 @@ mod tests {
             in2: (20 + i) & MAX_WIRE_ID,
             out: (30 + i) & MAX_WIRE_ID,
             credits: ((i as u32) * 3) & MAX_CREDITS,
-            gate_type: if i % 2 == 0 {
+            gate_type: if i.is_multiple_of(2) {
                 GateType::XOR
             } else {
                 GateType::AND
@@ -599,7 +599,7 @@ mod tests {
             assert_eq!(blk.in2[i], (20 + i as u64) & MAX_WIRE_ID);
             assert_eq!(blk.out[i], (30 + i as u64) & MAX_WIRE_ID);
             assert_eq!(blk.credits[i], ((i as u32) * 3) & MAX_CREDITS);
-            let want = if (i as u64) % 2 == 0 {
+            let want = if (i as u64).is_multiple_of(2) {
                 GateType::XOR
             } else {
                 GateType::AND
@@ -627,7 +627,7 @@ mod tests {
         let b0 = r.next_block_soa().await.unwrap().expect("block 0");
         assert_eq!(b0.gates_in_block, GATES_PER_BLOCK);
         for i in 0..GATES_PER_BLOCK {
-            let want = if (i as u64) % 2 == 0 {
+            let want = if (i as u64).is_multiple_of(2) {
                 GateType::XOR
             } else {
                 GateType::AND
@@ -644,7 +644,7 @@ mod tests {
             assert_eq!(b1.in2[i], (20 + idx as u64) & MAX_WIRE_ID);
             assert_eq!(b1.out[i], (30 + idx as u64) & MAX_WIRE_ID);
             assert_eq!(b1.credits[i], ((idx as u32) * 3) & MAX_CREDITS);
-            let want = if (idx as u64) % 2 == 0 {
+            let want = if (idx as u64).is_multiple_of(2) {
                 GateType::XOR
             } else {
                 GateType::AND
@@ -720,7 +720,7 @@ mod tests {
                 assert_eq!(b.in2[i], (20 + idx as u64) & MAX_WIRE_ID);
                 assert_eq!(b.out[i], (30 + idx as u64) & MAX_WIRE_ID);
                 assert_eq!(b.credits[i], ((idx as u32) * 3) & MAX_CREDITS);
-                let want = if (idx as u64) % 2 == 0 {
+                let want = if (idx as u64).is_multiple_of(2) {
                     GateType::XOR
                 } else {
                     GateType::AND

@@ -648,11 +648,11 @@ mod tests {
         set_gate_type(&mut types, 21619, true); // AND (last gate)
 
         // Verify
-        assert_eq!(get_gate_type(&types, 0), false);
-        assert_eq!(get_gate_type(&types, 1), true);
-        assert_eq!(get_gate_type(&types, 7), true);
-        assert_eq!(get_gate_type(&types, 8), false);
-        assert_eq!(get_gate_type(&types, 21619), true);
+        assert!(!get_gate_type(&types, 0));
+        assert!(get_gate_type(&types, 1));
+        assert!(get_gate_type(&types, 7));
+        assert!(!get_gate_type(&types, 8));
+        assert!(get_gate_type(&types, 21619));
     }
 
     #[test]

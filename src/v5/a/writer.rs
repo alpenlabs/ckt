@@ -487,13 +487,13 @@ mod tests {
             bytes[..to_copy].copy_from_slice(&data[byte_offset..byte_offset + to_copy]);
         }
         let val = u32::from_le_bytes(bytes);
-        ((val >> bit_shift) & 0xFF_FFFF) as u32
+        (val >> bit_shift) & 0xFF_FFFF
     }
 
     #[test]
     fn test_pack_34_bits_basic() {
         let vals = vec![0, 1, 2, 3, MAX_WIRE_ID, 0x123456789 & MAX_WIRE_ID];
-        let need = (vals.len() * 34 + 7) / 8;
+        let need = (vals.len() * 34).div_ceil(8);
         let mut out = vec![0u8; need];
         pack_34_bits(&vals, &mut out);
 
@@ -505,7 +505,7 @@ mod tests {
     #[test]
     fn test_pack_24_bits_basic() {
         let vals = vec![0, 1, 2, 3, MAX_CREDITS, 0x00BBCCDD & MAX_CREDITS];
-        let need = (vals.len() * 24 + 7) / 8;
+        let need = (vals.len() * 24).div_ceil(8);
         let mut out = vec![0u8; need];
         pack_24_bits(&vals, &mut out);
 
