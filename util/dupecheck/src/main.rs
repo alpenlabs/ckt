@@ -14,7 +14,7 @@ async fn main() {
     let mut claimed: [u32; NUM] = [0; NUM];
     let mut actual: [u32; NUM] = [0; NUM];
 
-    let mut max_creds = 0;
+    let max_creds = 0;
 
     let pb = ProgressBar::new(reader.header().total_gates());
     loop {

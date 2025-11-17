@@ -1,7 +1,6 @@
 //! Circuit level size histogram analyzer
 
-use std::io::Write;
-use std::{collections::hash_map::Entry, fs::File};
+use std::collections::hash_map::Entry;
 
 use ahash::{HashMap, HashMapExt};
 use ckt::v5::a::reader::CircuitReaderV5a;

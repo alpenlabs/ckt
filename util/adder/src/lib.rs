@@ -6,6 +6,9 @@
 use ckt::GateType;
 use ckt::v5::a::{CREDITS_OUTPUT, GateV5a, MAX_CREDITS, MAX_WIRE_ID};
 
+// monoio is used by the binary and examples, not the library
+use monoio as _;
+
 /// Generate an n-bit ripple-carry adder circuit.
 ///
 /// # Circuit Design
