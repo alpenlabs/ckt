@@ -255,7 +255,7 @@ impl CompactDependency {
     }
 
     /// Unpacks the compact dependency into a full structure.
-    pub(crate) fn to_dependency(&self) -> Dependency {
+    pub(crate) fn to_dependency(self) -> Dependency {
         // Unpack other_in
         let other_in_u64 = self.bytes[0] as u64
             | ((self.bytes[1] as u64) << 8)
