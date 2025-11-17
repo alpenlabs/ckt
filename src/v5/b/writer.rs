@@ -47,7 +47,7 @@ impl GateV5b {
     }
 
     /// Convert gate to bytes (12 bytes: 3 × u32 LE)
-    fn to_bytes(&self) -> [u8; GATE_SIZE] {
+    fn to_bytes(self) -> [u8; GATE_SIZE] {
         let mut bytes = [0u8; GATE_SIZE];
         bytes[0..4].copy_from_slice(&self.in1.to_le_bytes());
         bytes[4..8].copy_from_slice(&self.in2.to_le_bytes());
@@ -270,7 +270,7 @@ impl CircuitWriterV5b {
         self.num_levels = self
             .num_levels
             .checked_add(1)
-            .ok_or_else(|| Error::new(ErrorKind::Other, "num_levels overflow"))?;
+            .ok_or_else(|| Error::other("num_levels overflow"))?;
         self.max_addr_seen = self.max_addr_seen.max(self.level.max_addr_seen);
 
         // Write LevelHeader (num_xor, num_and) as 8 bytes LE and hash it now

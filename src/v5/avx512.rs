@@ -75,12 +75,13 @@ pub unsafe fn decode_block_v5a_avx512(
     }
 
     // Gate types (scalar, bit-per-gate)
-    for i in 0..n {
+    for (i, item) in gate_types_out.iter_mut().enumerate().take(n) {
         let b = blk.gate_types[i >> 3];
-        gate_types_out[i] = ((b >> (i & 7)) & 1) != 0;
+        *item = ((b >> (i & 7)) & 1) != 0;
     }
 }
 
+#[allow(dead_code)]
 pub struct BlockV5b {
     pub in1_stream: [u8; 1512], // 504 × 24 bits
     pub in2_stream: [u8; 1512], // 504 × 24 bits
@@ -98,6 +99,7 @@ pub struct BlockV5b {
 ///
 /// # Safety
 /// Requires AVX-512F CPU feature. Caller must ensure feature is available.
+#[allow(dead_code)]
 #[target_feature(enable = "avx512f")]
 pub unsafe fn decode_block_v5b_avx512(
     blk: &BlockV5b,

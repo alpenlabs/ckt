@@ -60,6 +60,12 @@ pub struct HeaderV5b {
     pub reserved2: u32,      // Reserved for alignment
 }
 
+impl Default for HeaderV5b {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HeaderV5b {
     /// Create a new header with default values
     pub fn new() -> Self {
@@ -138,7 +144,7 @@ impl HeaderV5b {
         // Safe: read_unaligned for packed struct field access using raw pointer
         let scratch_space =
             unsafe { std::ptr::read_unaligned(std::ptr::addr_of!(self.scratch_space)) };
-        if scratch_space > MAX_MEMORY_ADDRESS as u64 {
+        if scratch_space > MAX_MEMORY_ADDRESS {
             return Err(format!(
                 "Scratch space {} exceeds maximum addressable memory {}",
                 scratch_space, MAX_MEMORY_ADDRESS

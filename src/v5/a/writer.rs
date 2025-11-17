@@ -44,6 +44,12 @@ pub struct BlockBuilder {
     gate_types: [GateType; GATES_PER_BLOCK], // 0 = XOR, 1 = AND
 }
 
+impl Default for BlockBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BlockBuilder {
     pub fn new() -> Self {
         Self {
@@ -70,8 +76,7 @@ impl BlockBuilder {
 
     pub fn push(&mut self, gate: GateV5a) -> Result<()> {
         if self.is_full() {
-            return Err(Error::new(
-                ErrorKind::Other,
+            return Err(Error::other(
                 "internal error: push into full block",
             ));
         }
@@ -439,7 +444,7 @@ fn pack_24_bits(values: &[u32], output: &mut [u8]) {
             output[byte_offset + 2] = (v >> 16) as u8;
         } else {
             // unaligned: up to 4 bytes spanned
-            let shifted = (v as u32) << bit_shift;
+            let shifted = v << bit_shift;
             output[byte_offset] |= shifted as u8;
             output[byte_offset + 1] |= (shifted >> 8) as u8;
             output[byte_offset + 2] |= (shifted >> 16) as u8;

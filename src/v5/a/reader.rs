@@ -19,7 +19,7 @@ use cynosure::site_d::triplebuffer::{
 // Outputs are 5-byte little-endian entries that must fit in 34 bits.
 // We store them as u64 for convenience.
 fn decode_outputs_le40(bytes: &[u8]) -> Result<Vec<u64>> {
-    if bytes.len() % 5 != 0 {
+    if !bytes.len().is_multiple_of(5) {
         return Err(Error::new(
             ErrorKind::InvalidData,
             "outputs length not multiple of 5",
@@ -113,7 +113,7 @@ impl CircuitReaderV5a {
 
         // Stream boundaries for gate region (blocks area)
         let total_gates = header.total_gates();
-        let blocks_total = (total_gates + (GATES_PER_BLOCK as u64 - 1)) / (GATES_PER_BLOCK as u64);
+        let blocks_total = total_gates.div_ceil(GATES_PER_BLOCK as u64);
         let gate_region_bytes = (blocks_total as usize)
             .checked_mul(BLOCK_SIZE_BYTES)
             .ok_or_else(|| Error::new(ErrorKind::InvalidData, "gate region bytes overflow"))?
@@ -324,7 +324,7 @@ impl Drop for CircuitReaderV5a {
     fn drop(&mut self) {
         // Signal IO thread to stop and join
         if let Some(tx) = self.stop_tx.take() {
-            let _ = tx.send(());
+            drop(tx.send(()));
         }
         if let Some(jh) = self.io_jh.take() {
             let _ = jh.join();
@@ -491,7 +491,7 @@ pub async fn verify_v5a_checksum(path: impl AsRef<Path>) -> Result<bool> {
 
     // 1. Blocks region
     let total_gates = hdr.total_gates();
-    let blocks_total = (total_gates + (GATES_PER_BLOCK as u64 - 1)) / (GATES_PER_BLOCK as u64);
+    let blocks_total = total_gates.div_ceil(GATES_PER_BLOCK as u64);
     let blocks_bytes = (blocks_total as usize)
         .checked_mul(BLOCK_SIZE_BYTES)
         .ok_or_else(|| Error::new(ErrorKind::InvalidData, "blocks bytes overflow"))?;
