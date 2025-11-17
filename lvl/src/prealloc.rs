@@ -6,7 +6,6 @@ use ckt::v5::{
     c::{writer::WriterV5c, GateV5c},
 };
 use indicatif::ProgressBar;
-use nohash_hasher::IntMap;
 
 use crate::slab::FakeSlabAllocator;
 

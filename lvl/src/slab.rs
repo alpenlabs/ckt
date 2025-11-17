@@ -6,6 +6,12 @@ pub struct FakeSlabAllocator {
     max_allocated: usize, // Track peak allocation count
 }
 
+impl Default for FakeSlabAllocator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FakeSlabAllocator {
     /// Create a new allocator starting from index 0
     pub fn new() -> Self {

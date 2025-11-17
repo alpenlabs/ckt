@@ -38,7 +38,7 @@ pub mod types;
 
 use crate::state_map::WireStateMap;
 use crate::types::{
-    CompactDependency, CompactWireId, Credits, IntermediateGate, Level, PendingLevel,
+    CompactDependency, CompactWireId, IntermediateGate, Level, PendingLevel,
     WireAvailability,
 };
 
@@ -66,7 +66,7 @@ pub struct Leveller {
 }
 
 impl Leveller {
-    fn wire_used(&mut self, wire_id: CompactWireId) {
+    fn wire_used(&mut self, _wire_id: CompactWireId) {
         // use crate::state_map::SlotRef;
 
         // let Some(SlotRef::Available(mut guard)) = self.state.get_slot_mut(wire_id) else {
@@ -241,7 +241,7 @@ impl Leveller {
 
         let mut waiting_lists: Vec<(CompactWireId, HashSet<CompactDependency>)> = Vec::new();
         // mark newly available wires
-        for (wire_id, credits) in newly_available_wires {
+        for (wire_id, _credits) in newly_available_wires {
             match self.state.remove(wire_id) {
                 None => {
                     self.available.insert(wire_id.to_u64() as usize);
@@ -334,6 +334,7 @@ impl Leveller {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::Credits;
 
     #[test]
     fn test_simple_gate_with_primary_inputs() {

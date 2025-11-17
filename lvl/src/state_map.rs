@@ -68,7 +68,7 @@ impl<'a> AvailableGuard<'a> {
 ///
 /// The dependency is read into `tmp` on creation and written back to the
 /// slot on drop, allowing safe mutation of the packed bytes.
-struct InlineGuard<'a> {
+pub(crate) struct InlineGuard<'a> {
     slot_ptr: *mut Wire,
     tmp: CompactDependency,
     _l: PhantomData<&'a mut SlottedValue>,
@@ -97,7 +97,7 @@ impl<'a> Drop for InlineGuard<'a> {
 /// Takes ownership of the Box by setting the slot pointer to null (as a "lock").
 /// The Box is restored to the slot on drop. If the pointer is already null when
 /// accessed, it means another guard is active (prevented by borrow checker in safe code).
-struct WaitingSetGuard<'a> {
+pub(crate) struct WaitingSetGuard<'a> {
     slot_ptr: *mut Wire,
     set: Option<Box<DepSet>>,
     _l: PhantomData<&'a mut SlottedValue>,
@@ -134,7 +134,7 @@ impl<'a> Drop for WaitingSetGuard<'a> {
 ///
 /// Uses `#[repr(packed)]` to minimize memory overhead. All access must use
 /// unaligned reads/writes.
-#[repr(packed)]
+#[repr(C, packed)]
 union Wire {
     credits: u32,             // Credits (4 bytes) - only lower 24 bits used
     waiting_inline: [u8; 12], // Single CompactDependency (12 bytes)
@@ -155,7 +155,7 @@ union Wire {
 /// - `01` (1): Available (contains Credits)
 /// - `10` (2): Waiting with HashSet (contains pointer)
 /// - `11` (3): Waiting inline (contains CompactDependency bytes)
-#[repr(packed)]
+#[repr(C, packed)]
 struct SlottedValue {
     mask: u8,
     slots: [Wire; 4],
@@ -370,6 +370,12 @@ impl Drop for SlottedValue {
 /// - Keys are pruned when all four slots are empty to avoid map bloat.
 pub struct WireStateMap {
     inner: HashMap<u32, SlottedValue>,
+}
+
+impl Default for WireStateMap {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl WireStateMap {
