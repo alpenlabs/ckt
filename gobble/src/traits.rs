@@ -2,8 +2,6 @@
 
 use bitvec::vec::BitVec;
 
-use crate::aarch64::Ciphertext;
-
 /// A generic trait for describing an instance used for garbling a boolean circuit.
 pub trait GarblingInstance {
     /// The ciphertext type used by this implementation.
@@ -42,7 +40,7 @@ pub trait EvaluationInstance {
         in1_addr: usize,
         in2_addr: usize,
         out_addr: usize,
-        ciphertext: Ciphertext,
+        ciphertext: Self::Ciphertext,
     );
 
     /// Extract wires with IDs `wires` to `labels`. Panics if the number of wires does not match the
