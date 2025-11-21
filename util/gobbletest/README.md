@@ -112,3 +112,29 @@ The e2e mode provides detailed output for each step:
 - The garbled circuit binary can be quite large for complex circuits, hence the option to specify a custom storage location
 - For very large circuits, consider using a path on a drive with sufficient space
 
+## Cross-Architecture Testing with Rosetta 2
+
+On ARM Macs with Rosetta 2 installed, you can test the x86_64 implementation to verify it compiles and runs correctly.
+
+**Install the x86_64 target:**
+```bash
+rustup target add x86_64-apple-darwin
+```
+
+**Build for x86_64:**
+```bash
+cd util/gobbletest
+cargo build --release --target x86_64-apple-darwin
+```
+
+The binary will be located at `../../target/x86_64-apple-darwin/release/gobbletest`.
+
+**Run tests:**
+```bash
+# From project root
+./target/x86_64-apple-darwin/release/gobbletest garble my_circuit.ckt
+./target/x86_64-apple-darwin/release/gobbletest e2e my_circuit.ckt inputs.txt
+```
+
+Rosetta 2 will automatically emulate the x86_64 binary. Performance will be slower than native ARM execution, but this allows verification that the x86_64 implementation works correctly on Intel hardware.
+

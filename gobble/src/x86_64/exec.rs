@@ -32,9 +32,9 @@ impl ExecutionInstance for X86_64ExecutionInstance {
         self.working_space.set(out_addr, val);
     }
 
-    fn finish(&self, output_wires: &[u64], output_labels: &mut [bool]) {
-        for wire_id in output_wires {
-            output_labels[*wire_id as usize] = self.working_space[*wire_id as usize];
+    fn get_values(&self, wires: &[u64], values: &mut [bool]) {
+        for (i, wire_id) in wires.iter().enumerate() {
+            values[i] = self.working_space[*wire_id as usize];
         }
     }
 }
