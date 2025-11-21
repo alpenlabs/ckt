@@ -36,7 +36,7 @@ pub async fn exec(circuit_file: &str, input_file: &str) -> Vec<bool> {
         ProgressStyle::default_bar()
             .template("🦃 [{bar:50.cyan/blue}] {percent:>3}% | {msg} | {elapsed_precise}")
             .unwrap()
-            .progress_chars("█░")
+            .progress_chars("█░"),
     );
     let start = Instant::now();
     while let Some((block, num_blocks)) = reader.next_blocks_ref().await.unwrap() {
@@ -54,7 +54,6 @@ pub async fn exec(circuit_file: &str, input_file: &str) -> Vec<bool> {
                             gate.in2 as usize,
                             gate.out as usize,
                         );
-
                     }
                     GateType::XOR => exec_instance.feed_xor_gate(
                         gate.in1 as usize,
@@ -63,28 +62,34 @@ pub async fn exec(circuit_file: &str, input_file: &str) -> Vec<bool> {
                     ),
                 }
             }
-            
+
             total_gates_processed += gates_in_block as u64;
             pb.inc(gates_in_block as u64);
         }
-        
+
         let elapsed = start.elapsed();
         if elapsed.as_secs_f64() > 0.0 {
             let rate_m = (total_gates_processed as f64 / elapsed.as_secs_f64()) / 1_000_000.0;
             let processed_b = total_gates_processed as f64 / 1_000_000_000.0;
             let total_b = total_gates as f64 / 1_000_000_000.0;
-            pb.set_message(format!("{:.2}B / {:.2}B gates @ {:.0} M/s", processed_b, total_b, rate_m));
+            pb.set_message(format!(
+                "{:.2}B / {:.2}B gates @ {:.0} M/s",
+                processed_b, total_b, rate_m
+            ));
         }
     }
-    
+
     pb.finish();
-    
-    let output_wires = reader.outputs().iter().map(|w| *w as u64).collect::<Vec<_>>();
+
+    let output_wires = reader
+        .outputs()
+        .iter()
+        .map(|w| *w as u64)
+        .collect::<Vec<_>>();
     let mut output_values = vec![false; output_wires.len()];
     exec_instance.get_values(&output_wires, &mut output_values);
 
     println!("Output values: {:?}", output_values);
-    
+
     output_values
 }
-
