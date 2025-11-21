@@ -35,6 +35,7 @@ impl GarblingInstance for Aarch64GarblingInstance {
         let in1 = self.working_space[in1_addr];
         let in2 = self.working_space[in2_addr];
 
+        // PFHG garbling: ciphertext = H(in1, t) ⊕ H(in1 ⊕ delta, t) ⊕ in2
         let t = unsafe { index_to_tweak(self.gate_ctr) };
         let xor_in1_delta = unsafe { xor128(in1.0, self.delta) };
 
@@ -44,7 +45,7 @@ impl GarblingInstance for Aarch64GarblingInstance {
 
         let ciphertext = unsafe { xor128(xor128(h_in1_t, h_in1_delta_t), in2.0) };
 
-        // Write output label to working space
+        // Write output label to working space (H(in1, t))
         self.working_space[out_addr] = Label(h_in1_t);
 
         // Increment gate counter to enforce uniqueness
