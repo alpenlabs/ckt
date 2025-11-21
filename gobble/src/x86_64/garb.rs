@@ -5,6 +5,7 @@ use crate::{
     traits::{GarblingInstance, GarblingInstanceConfig},
     x86_64::{Ciphertext, Label, hash, index_to_tweak, xor128},
 };
+use bitvec::vec::BitVec;
 
 /// x86_64-specific garbling instance
 #[derive(Debug)]
@@ -53,10 +54,21 @@ impl GarblingInstance for X86_64GarblingInstance {
         Ciphertext(ciphertext)
     }
 
-    fn finish(&self, output_wires: &[u64], output_labels: &mut [[u8; 16]]) {
-        for (i, wire) in output_wires.iter().enumerate() {
-            let label = unsafe { std::mem::transmute(self.working_space[(*wire) as usize].0) };
-            output_labels[i] = label;
+    fn get_selected_labels(&self, wires: &[u64], values: &BitVec, labels: &mut [[u8; 16]]) {
+        for (i, wire_id) in wires.iter().enumerate() {
+            let wire_id = *wire_id as usize;
+            let false_label = self.working_space[wire_id];
+            let value = values[i];
+
+            let selected_label = if value {
+                // label = false_label XOR delta (when bit is 1)
+                Label(unsafe { xor128(false_label.0, self.delta) })
+            } else {
+                // label = false_label (when bit is 0)
+                false_label
+            };
+
+            labels[i] = unsafe { std::mem::transmute(selected_label.0) };
         }
     }
 }

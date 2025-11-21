@@ -61,16 +61,16 @@ impl EvaluationInstance for X86_64EvaluationInstance {
         self.and_ctr += 1;
     }
 
-    fn finish(
-        &self,
-        output_wires: &[u64],
-        output_labels: &mut [[u8; 16]],
-        output_values: &mut [bool],
-    ) {
-        for wire_id in output_wires {
+    fn get_labels(&self, wires: &[u64], labels: &mut [[u8; 16]]) {
+        for (i, wire_id) in wires.iter().enumerate() {
             let wire_id = *wire_id as usize;
-            output_labels[wire_id] = unsafe { std::mem::transmute(self.working_space[wire_id].0) };
-            output_values[wire_id] = self.working_space_bits[wire_id];
+            labels[i] = unsafe { std::mem::transmute(self.working_space[wire_id].0) };
+        }
+    }
+
+    fn get_values(&self, wires: &[u64], values: &mut [bool]) {
+        for (i, wire_id) in wires.iter().enumerate() {
+            values[i] = self.working_space_bits[*wire_id as usize];
         }
     }
 }
