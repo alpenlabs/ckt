@@ -14,7 +14,8 @@ async fn main() {
     if args.len() < 2 {
         eprintln!("Usage: {} <mode> [args...]", args[0]);
         eprintln!("Modes:");
-        eprintln!("  garble <circuit>                              - Run garble test");
+        eprintln!("  garble-discard <circuit>                      - Run garble test (discard ciphertext)");
+        eprintln!("  garble-hash <circuit>                         - Run garble test (hash ciphertext)");
         eprintln!("  e2e <circuit> <inputs> [garbled_circuit_path] - Run end-to-end test: exec → garble → eval");
         std::process::exit(1);
     }
@@ -23,13 +24,23 @@ async fn main() {
     let mut rng = ChaCha20Rng::from_seed([0u8; 32]);
 
     match mode.as_str() {
-        "garble" => {
+        "garble-discard" => {
             if args.len() != 3 {
-                eprintln!("Usage: {} garble <circuit>", args[0]);
+                eprintln!("Usage: {} garble-discard <circuit>", args[0]);
                 std::process::exit(1);
             }
             let circuit = &args[2];
             let garbler_output_labels = garble::garble_discard(circuit, &mut rng).await;
+            println!("{:?}", garbler_output_labels);
+        }
+        "garble-hash" => {
+            if args.len() != 3 {
+                eprintln!("Usage: {} garble-hash <circuit>", args[0]);
+                std::process::exit(1);
+            }
+            let circuit = &args[2];
+            let (garbler_output_labels, hash) = garble::garble_hash(circuit, &mut rng).await;
+            println!("{:?}", hash);
             println!("{:?}", garbler_output_labels);
         }
         "e2e" => {
@@ -44,7 +55,7 @@ async fn main() {
         }
         _ => {
             eprintln!("Unknown mode: {}", mode);
-            eprintln!("Valid modes: garble, e2e");
+            eprintln!("Valid modes: garble-discard, garble-hash, e2e");
             std::process::exit(1);
         }
     }
