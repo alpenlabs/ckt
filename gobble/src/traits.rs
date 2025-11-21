@@ -2,7 +2,7 @@
 
 use bitvec::vec::BitVec;
 
-/// A generic trait for describing an instance used for garbling a boolean circuit.
+/// A generic trait for describing an instance used for garbling a boolean circuit. The garbling instance stores labels of active wires during garbling.
 pub trait GarblingInstance {
     /// The ciphertext type used by this implementation.
     type Ciphertext;
@@ -12,7 +12,7 @@ pub trait GarblingInstance {
     fn feed_xor_gate(&mut self, in1_addr: usize, in2_addr: usize, out_addr: usize);
 
     /// Feed an AND gate into the instance. Accepts the memory addresses of the
-    /// inputs and output. Produces a single ciphertext according to PFHG.
+    /// inputs and output. Produces a single ciphertext by PFHG garbling.
     fn feed_and_gate(
         &mut self,
         in1_addr: usize,
@@ -24,7 +24,7 @@ pub trait GarblingInstance {
     fn get_selected_labels(&self, wires: &[u64], values: &BitVec, labels: &mut [[u8; 16]]);
 }
 
-/// A generic trait for describing an instance used for evaluating a garbled boolean circuit.
+/// A generic trait for describing an instance used for evaluating a garbled boolean circuit. The evaluation instance stores labels and values corresponding to active wires during evaluation.
 pub trait EvaluationInstance {
     /// The ciphertext type used by this implementation.
     type Ciphertext;
@@ -73,8 +73,7 @@ pub struct GarblingInstanceConfig<'labels> {
     /// Max live wires used at any point in the circuit. See ckt v5 architecture
     /// for additional details.
     pub scratch_space: u32,
-    /// The delta is a global offset constant used for garbling a circuit.
-    /// Carried over to the evaluator for recomputation.
+    /// The delta is a global offset constant used for garbling a circuit. This value must be kept secret from the evaluator.
     pub delta: [u8; 16],
     /// Input false labels for the circuit.
     pub primary_input_false_labels: &'labels [[u8; 16]],
@@ -96,7 +95,7 @@ pub struct EvaluationInstanceConfig<'labels> {
     /// Max live wires used at any point in the circuit. See ckt v5 architecture
     /// for additional details.
     pub scratch_space: u32,
-    /// Selected labels (each wire has two, one for true, one for false) for
+    /// Selected labels (each wire one corresponding to either true or false) for
     /// the primary inputs.
     pub selected_primary_input_labels: &'labels [[u8; 16]],
     /// Selected values for each wire (1 bit per wire, boolean)

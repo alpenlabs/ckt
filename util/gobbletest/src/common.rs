@@ -9,17 +9,17 @@ pub fn read_inputs(input_file: &str, expected_num_inputs: usize) -> BitVec {
         .unwrap_or_else(|_| panic!("Failed to open input file: {}", input_file));
     let mut reader = BufReader::new(file);
     reader.read_to_string(&mut input_string).unwrap();
-    
+
     let input_string = input_string.trim();
-    
+
     assert_eq!(
-        input_string.len(), 
-        expected_num_inputs, 
-        "Input file has {} bits but circuit expects {}", 
-        input_string.len(), 
+        input_string.len(),
+        expected_num_inputs,
+        "Input file has {} bits but circuit expects {}",
+        input_string.len(),
         expected_num_inputs
     );
-    
+
     let mut input_values_bits = BitVec::repeat(false, expected_num_inputs);
     for (idx, char) in input_string.chars().enumerate() {
         match char {
@@ -28,7 +28,6 @@ pub fn read_inputs(input_file: &str, expected_num_inputs: usize) -> BitVec {
             _ => panic!("Invalid input character '{}' at position {}", char, idx),
         }
     }
-    
+
     input_values_bits
 }
-
