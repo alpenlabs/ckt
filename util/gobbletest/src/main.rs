@@ -1,8 +1,8 @@
-mod garble;
-mod eval;
-mod exec;
 mod common;
 mod e2e;
+mod eval;
+mod exec;
+mod garble;
 
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::SeedableRng;
@@ -10,12 +10,14 @@ use rand_chacha::rand_core::SeedableRng;
 #[monoio::main]
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
-    
+
     if args.len() < 2 {
         eprintln!("Usage: {} <mode> [args...]", args[0]);
         eprintln!("Modes:");
         eprintln!("  garble <circuit>                              - Run garble test");
-        eprintln!("  e2e <circuit> <inputs> [garbled_circuit_path] - Run end-to-end test: exec → garble → eval");
+        eprintln!(
+            "  e2e <circuit> <inputs> [garbled_circuit_path] - Run end-to-end test: exec → garble → eval"
+        );
         std::process::exit(1);
     }
 
@@ -34,7 +36,10 @@ async fn main() {
         }
         "e2e" => {
             if args.len() != 4 && args.len() != 5 {
-                eprintln!("Usage: {} e2e <circuit> <inputs> [garbled_circuit_path]", args[0]);
+                eprintln!(
+                    "Usage: {} e2e <circuit> <inputs> [garbled_circuit_path]",
+                    args[0]
+                );
                 std::process::exit(1);
             }
             let circuit = &args[2];

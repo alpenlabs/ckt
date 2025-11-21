@@ -1,18 +1,18 @@
+use bitvec::vec::BitVec;
 use ckt::{
     GateType,
     v5::c::{Block, reader::ReaderV5c},
 };
+use gobble::aarch64::Ciphertext;
 use gobble::{
     Engine,
     traits::{EvaluationInstance, EvaluationInstanceConfig, GobbleEngine},
 };
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
-use std::time::Instant;
-use bitvec::vec::BitVec;
-use gobble::aarch64::Ciphertext;
 use std::fs::File;
 use std::io::{BufReader, Read};
+use std::time::Instant;
 
 pub async fn eval(
     circuit_file: &str,
@@ -45,7 +45,7 @@ pub async fn eval(
         ProgressStyle::default_bar()
             .template("🦃 [{bar:50.cyan/blue}] {percent:>3}% | {msg} | {elapsed_precise}")
             .unwrap()
-            .progress_chars("█░")
+            .progress_chars("█░"),
     );
     let start = Instant::now();
     while let Some((block, num_blocks)) = reader.next_blocks_ref().await.unwrap() {
@@ -61,7 +61,7 @@ pub async fn eval(
                         let mut ct_bytes = [0u8; 16];
                         ct_reader.read_exact(&mut ct_bytes).unwrap();
                         let ct = Ciphertext(unsafe { std::mem::transmute(ct_bytes) });
-                        
+
                         eval_instance.feed_and_gate(
                             gate.in1 as usize,
                             gate.in2 as usize,
@@ -76,23 +76,30 @@ pub async fn eval(
                     ),
                 }
             }
-            
+
             total_gates_processed += gates_in_block as u64;
             pb.inc(gates_in_block as u64);
         }
-        
+
         let elapsed = start.elapsed();
         if elapsed.as_secs_f64() > 0.0 {
             let rate_m = (total_gates_processed as f64 / elapsed.as_secs_f64()) / 1_000_000.0;
             let processed_b = total_gates_processed as f64 / 1_000_000_000.0;
             let total_b = total_gates as f64 / 1_000_000_000.0;
-            pb.set_message(format!("{:.2}B / {:.2}B gates @ {:.0} M/s", processed_b, total_b, rate_m));
+            pb.set_message(format!(
+                "{:.2}B / {:.2}B gates @ {:.0} M/s",
+                processed_b, total_b, rate_m
+            ));
         }
     }
-    
+
     pb.finish();
-    
-    let output_wires = reader.outputs().iter().map(|w| *w as u64).collect::<Vec<_>>();
+
+    let output_wires = reader
+        .outputs()
+        .iter()
+        .map(|w| *w as u64)
+        .collect::<Vec<_>>();
     let mut output_labels = vec![[0u8; 16]; output_wires.len()];
     let mut output_values = vec![false; output_wires.len()];
     eval_instance.get_labels(&output_wires, &mut output_labels);
@@ -100,7 +107,6 @@ pub async fn eval(
 
     println!("Output labels: {:?}", output_labels);
     println!("Output values: {:?}", output_values);
-    
+
     (output_labels, output_values)
 }
-
