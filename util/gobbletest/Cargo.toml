@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 bitvec = "1.0.1"
+blake3 = "1.8.2"
 ckt = { version = "0.1.0", path = "../.." }
 gobble = { version = "0.1.0", path = "../../gobble" }
 indicatif = "0.18.3"

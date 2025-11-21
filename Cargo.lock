@@ -684,6 +684,7 @@ name = "gobbletest"
 version = "0.1.0"
 dependencies = [
  "bitvec",
+ "blake3",
  "ckt",
  "gobble",
  "indicatif",

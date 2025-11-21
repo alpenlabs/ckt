@@ -4,10 +4,11 @@ A testing utility for garbled circuit generation, evaluation, and end-to-end ver
 
 ## Overview
 
-`gobbletest` provides two main modes for testing garbled circuits:
+`gobbletest` provides three main modes for testing garbled circuits:
 
-1. **Garble mode**: Tests circuit garbling in isolation
-2. **E2E mode**: Runs complete end-to-end tests (exec → garble → eval)
+1. **Garble-discard mode**: Tests circuit garbling with ciphertext discarded
+2. **Garble-hash mode**: Tests circuit garbling with ciphertext hashing
+3. **E2E mode**: Runs complete end-to-end tests (exec → garble → eval)
 
 ## Building
 
@@ -24,12 +25,12 @@ cd ../../target/release
 
 ## Usage
 
-### Garble Mode
+### Garble-Discard Mode
 
-Tests the garbling of a circuit and outputs the garbler's output labels.
+Tests the garbling of a circuit while discarding the ciphertext. This mode measures garbling performance without I/O overhead and outputs the garbler's output labels.
 
 ```bash
-./gobbletest garble <circuit>
+./gobbletest garble-discard <circuit>
 ```
 
 **Arguments:**
@@ -37,8 +38,30 @@ Tests the garbling of a circuit and outputs the garbler's output labels.
 
 **Example:**
 ```bash
-./gobbletest garble my_circuit.ckt
+./gobbletest garble-discard my_circuit.ckt
 ```
+
+**Output:** Garbler's output labels (as a debug-formatted vector)
+
+### Garble-Hash Mode
+
+Tests the garbling of a circuit while computing a BLAKE3 hash of the ciphertext. This mode measures garbling performance with hashing overhead and outputs both the hash and the garbler's output labels.
+
+```bash
+./gobbletest garble-hash <circuit>
+```
+
+**Arguments:**
+- `<circuit>`: Path to the circuit file
+
+**Example:**
+```bash
+./gobbletest garble-hash my_circuit.ckt
+```
+
+**Output:**
+- BLAKE3 hash of the ciphertext (32 bytes)
+- Garbler's output labels (as a debug-formatted vector)
 
 ### E2E Mode
 
