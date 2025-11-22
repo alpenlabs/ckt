@@ -3,6 +3,7 @@
 pub mod eval;
 pub mod exec;
 pub mod garb;
+pub mod label;
 
 use hex_literal::hex;
 use rand_chacha::ChaCha20Rng;
