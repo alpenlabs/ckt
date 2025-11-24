@@ -4,7 +4,6 @@ pub mod eval;
 pub mod exec;
 pub mod garb;
 
-use hex_literal::hex;
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::RngCore;
 use rand_chacha::rand_core::SeedableRng;
@@ -17,6 +16,8 @@ use crate::traits::EvaluationInstanceConfig;
 use crate::traits::ExecutionInstanceConfig;
 use crate::traits::GarblingInstanceConfig;
 use crate::traits::GobbleEngine;
+
+use crate::{AES128_KEY_BYTES, AES128_ROUND_KEY_BYTES};
 
 const LABEL_ZERO_BYTES: [u8; 16] = [98u8; 16];
 const LABEL_ZERO: Label = Label(unsafe { std::mem::transmute(LABEL_ZERO_BYTES) });
@@ -80,22 +81,19 @@ impl GobbleEngine for Aarch64GobbleEngine {
     }
 }
 
-// Taken from https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/armv8/test_expand.rs
-// Corresponding to FIPS 197 Appendix A.1
-const AES128_KEY_BYTES: [u8; 16] = hex!("2b7e151628aed2a6abf7158809cf4f3c");
 const AES128_KEY: uint8x16_t = unsafe { std::mem::transmute(AES128_KEY_BYTES) };
 const AES128_ROUND_KEYS: [uint8x16_t; 11] = [
     AES128_KEY,
-    unsafe { std::mem::transmute(hex!("a0fafe1788542cb123a339392a6c7605")) },
-    unsafe { std::mem::transmute(hex!("f2c295f27a96b9435935807a7359f67f")) },
-    unsafe { std::mem::transmute(hex!("3d80477d4716fe3e1e237e446d7a883b")) },
-    unsafe { std::mem::transmute(hex!("ef44a541a8525b7fb671253bdb0bad00")) },
-    unsafe { std::mem::transmute(hex!("d4d1c6f87c839d87caf2b8bc11f915bc")) },
-    unsafe { std::mem::transmute(hex!("6d88a37a110b3efddbf98641ca0093fd")) },
-    unsafe { std::mem::transmute(hex!("4e54f70e5f5fc9f384a64fb24ea6dc4f")) },
-    unsafe { std::mem::transmute(hex!("ead27321b58dbad2312bf5607f8d292f")) },
-    unsafe { std::mem::transmute(hex!("ac7766f319fadc2128d12941575c006e")) },
-    unsafe { std::mem::transmute(hex!("d014f9a8c9ee2589e13f0cc8b6630ca6")) },
+    unsafe { std::mem::transmute(AES128_ROUND_KEY_BYTES[0]) },
+    unsafe { std::mem::transmute(AES128_ROUND_KEY_BYTES[1]) },
+    unsafe { std::mem::transmute(AES128_ROUND_KEY_BYTES[2]) },
+    unsafe { std::mem::transmute(AES128_ROUND_KEY_BYTES[3]) },
+    unsafe { std::mem::transmute(AES128_ROUND_KEY_BYTES[4]) },
+    unsafe { std::mem::transmute(AES128_ROUND_KEY_BYTES[5]) },
+    unsafe { std::mem::transmute(AES128_ROUND_KEY_BYTES[6]) },
+    unsafe { std::mem::transmute(AES128_ROUND_KEY_BYTES[7]) },
+    unsafe { std::mem::transmute(AES128_ROUND_KEY_BYTES[8]) },
+    unsafe { std::mem::transmute(AES128_ROUND_KEY_BYTES[9]) },
 ];
 
 /// Extract the point-and-permute bit (LSB) from a label
