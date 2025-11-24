@@ -37,6 +37,7 @@ impl ByteLabel {
 }
 
 /// Expands hash to 8x width
+/// THIS IS CURRENTLY INSECURE. WE NEED TO ADD A TWEAK TO THE HASH FUNCTION.
 pub fn wide_hash(label: Label) -> [Label; 8] {
     let mut labels = [Label::zero(); 8];
     for i in 0..8 {
