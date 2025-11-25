@@ -4,19 +4,20 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-ckt = { path = "../.." }
-clap = { version = "4.5", features = ["derive"] }
-indicatif = "0.18.0"
-kanal = "0.1.1"
-mimalloc = "0.1.47"
-monoio = { version = "0.2.4", features = ["sync"] }
-rayon = "1.10"
+ckt-fmtv5-types.workspace = true
+
+clap.workspace = true
+indicatif.workspace = true
+kanal.workspace = true
+mimalloc.workspace = true
+monoio.workspace = true
+rayon.workspace = true
 
 [[bin]]
 name = "ckt"
 path = "src/main.rs"
 
 [dev-dependencies]
-assert_cmd = "2.0"
-predicates = "3.0"
-tempfile = "3.0"
+assert_cmd.workspace = true
+predicates.workspace = true
+tempfile.workspace = true
