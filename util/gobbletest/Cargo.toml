@@ -7,9 +7,10 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-bitvec.workspace = true
 ckt-fmtv5-types.workspace = true
-gobble = { version = "0.1.0", path = "../../gobble" }
+ckt-gobble.workspace = true
+
+bitvec.workspace = true
 indicatif.workspace = true
 monoio.workspace = true
 rand_chacha.workspace = true

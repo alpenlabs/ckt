@@ -272,6 +272,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "ckt-gobble"
+version = "0.1.0"
+dependencies = [
+ "aes",
+ "bitvec",
+ "criterion",
+ "hex-literal",
+ "rand",
+ "rand_chacha",
+]
+
+[[package]]
 name = "clap"
 version = "4.5.53"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -668,24 +680,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "gobble"
-version = "0.1.0"
-dependencies = [
- "aes",
- "bitvec",
- "criterion",
- "hex-literal",
- "rand",
- "rand_chacha",
-]
-
-[[package]]
 name = "gobbletest"
 version = "0.1.0"
 dependencies = [
  "bitvec",
  "ckt-fmtv5-types",
- "gobble",
+ "ckt-gobble",
  "indicatif",
  "monoio",
  "rand_chacha",
