@@ -1,13 +1,13 @@
 [workspace]
 members = [
+  "crates/fmtv5-types",
+  "crates/lvl",
   "util/bench",
-  "lvl",
   "util/dupecheck",
   "gobble",
   "util/exectest",
   "util/adder",
   "util/gobbletest",
-  "crates/fmtv5-types"
 ]
 resolver = "3"
 
@@ -40,14 +40,21 @@ debug = true
 
 [workspace.dependencies]
 ckt-fmtv5-types = { path = "crates/fmtv5-types" }
+lvl = { path = "crates/lvl" }
 
 ahash = "0.8.12"
 bitvec = "1.0.1"
 blake3 = "1.5"
+clap = { version = "4.5", features = ["derive"] }
 crossbeam-channel = "0.5"
+cynosure = "0.2.2"
+indexmap = "2.11.4"
 indicatif = "0.18.2"
+fixedbitset = "0.5.7"
 libc = "0.2"
 mimalloc = { version = "0.1.48", features = ["v3"] }
 monoio = { version = "0.2.4", features = ["sync"] }
+nohash-hasher = "0.2.0"
 rand_chacha = "0.9.0"
+roaring = "0.11.2"
 tempfile = "3.0"

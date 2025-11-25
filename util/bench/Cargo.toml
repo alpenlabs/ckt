@@ -7,10 +7,11 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-ahash.workspace = true
 ckt-fmtv5-types.workspace = true
+lvl.workspace = true
+
+ahash.workspace = true
 indicatif.workspace = true
-lvl = { version = "0.1.0", path = "../../lvl" }
 monoio.workspace = true
 
 [lints]
