@@ -9,17 +9,17 @@ codegen-units = 1
 opt-level = 3
 
 [dependencies]
-ckt-fmtv5-types = { workspace = true, features = ["v5"] }
-monoio.workspace = true
-indicatif.workspace = true
 ahash.workspace = true
-cynosure.workspace = true
-mimalloc.workspace = true
+ckt-fmtv5-types = { workspace = true, features = ["v5"] }
 clap.workspace = true
-roaring.workspace = true
-indexmap.workspace = true
+cynosure.workspace = true
 fixedbitset.workspace = true
+indexmap.workspace = true
+indicatif.workspace = true
+mimalloc.workspace = true
+monoio.workspace = true
 nohash-hasher.workspace = true
+roaring.workspace = true
 
 [features]
 nightly = ["roaring/simd"]

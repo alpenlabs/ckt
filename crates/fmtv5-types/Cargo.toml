@@ -8,7 +8,10 @@ repository.workspace = true
 
 [dependencies]
 blake3.workspace = true
-cynosure = { version = ">=0.3", optional = true, default-features = false, features = ["triplebuffer", "monoio-0_2"] }
+cynosure = { version = ">=0.3", optional = true, default-features = false, features = [
+  "triplebuffer",
+  "monoio-0_2",
+] }
 kanal = { version = "0.1.1", optional = true }
 libc.workspace = true
 monoio = { version = "0.2.4", features = ["sync"], optional = true }
