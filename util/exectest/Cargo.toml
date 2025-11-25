@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 ckt-fmtv5-types.workspace = true
+
 crossbeam-channel = "0.5"
 indicatif.workspace = true
 mimalloc.workspace = true
