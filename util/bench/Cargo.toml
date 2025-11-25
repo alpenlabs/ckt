@@ -8,7 +8,7 @@ repository.workspace = true
 
 [dependencies]
 ckt-fmtv5-types.workspace = true
-lvl.workspace = true
+ckt-lvl.workspace = true
 
 ahash.workspace = true
 indicatif.workspace = true

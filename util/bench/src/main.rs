@@ -5,7 +5,7 @@ use std::collections::hash_map::Entry;
 use ahash::{HashMap, HashMapExt};
 use ckt_fmtv5_types::v5::a::reader::CircuitReaderV5a;
 use indicatif::ProgressBar;
-use lvl::slab::FakeSlabAllocator;
+use ckt_lvl::slab::FakeSlabAllocator;
 
 #[monoio::main]
 async fn main() {
