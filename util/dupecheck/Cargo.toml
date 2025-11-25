@@ -8,7 +8,6 @@ repository.workspace = true
 
 [dependencies]
 ckt-fmtv5-types.workspace = true
-
 indicatif.workspace = true
 monoio.workspace = true
 # roaring = { version = "0.11.2", features = ["simd"] }
