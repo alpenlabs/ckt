@@ -7,8 +7,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-ckt = { version = "0.1.0", path = "../.." }
-monoio = { version = "0.2.4", features = ["sync"] }
+ckt-fmtv5-types.workspace = true
+monoio.workspace = true
 
 [[bin]]
 name = "adder"

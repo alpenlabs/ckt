@@ -4,7 +4,7 @@ use std::sync::{Arc, Barrier};
 use std::thread;
 use std::time::Instant;
 
-use ckt::v5::b::reader::{CircuitReaderV5b, Level};
+use ckt_fmtv5_types::v5::b::reader::{CircuitReaderV5b, Level};
 use crossbeam_channel::bounded;
 use indicatif::ProgressBar;
 use monoio::fs::File;

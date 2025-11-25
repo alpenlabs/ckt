@@ -1,7 +1,7 @@
 use ahash::{HashMap, HashMapExt};
-use ckt::v5::a::reader::CircuitReaderV5a;
-use ckt::v5::b::writer::CircuitWriterV5b;
-use ckt::{v5, GateType};
+use ckt_fmtv5_types::v5::a::reader::CircuitReaderV5a;
+use ckt_fmtv5_types::v5::b::writer::CircuitWriterV5b;
+use ckt_fmtv5_types::{v5, GateType};
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use lvl::slab::FakeSlabAllocator;
 use lvl::types::{CompactWireId, Credits, IntermediateGate};

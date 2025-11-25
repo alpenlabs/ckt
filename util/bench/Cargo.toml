@@ -7,12 +7,11 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-ahash = "0.8.12"
-ckt = { version = "0.1.0", path = "../.." }
-indicatif = "0.18.2"
+ahash.workspace = true
+ckt-fmtv5-types.workspace = true
+indicatif.workspace = true
 lvl = { version = "0.1.0", path = "../../lvl" }
-monoio = { version = "0.2.4", features = ["sync"] }
-
+monoio.workspace = true
 
 [lints]
 workspace = true

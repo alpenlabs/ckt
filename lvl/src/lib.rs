@@ -42,7 +42,7 @@ use crate::types::{
 };
 
 use ahash::{HashSet, HashSetExt};
-use ckt::GateType;
+use ckt_fmtv5_types::GateType;
 use cynosure::hints::{cold_and_empty, unlikely};
 use fixedbitset::FixedBitSet;
 
