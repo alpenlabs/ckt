@@ -134,8 +134,8 @@ version = "0.1.0"
 dependencies = [
  "ahash",
  "ckt-fmtv5-types",
+ "ckt-lvl",
  "indicatif",
- "lvl",
  "monoio",
 ]
 
@@ -281,6 +281,23 @@ dependencies = [
  "hex-literal",
  "rand",
  "rand_chacha",
+]
+
+[[package]]
+name = "ckt-lvl"
+version = "0.1.0"
+dependencies = [
+ "ahash",
+ "ckt-fmtv5-types",
+ "clap",
+ "cynosure 0.2.3",
+ "fixedbitset",
+ "indexmap",
+ "indicatif",
+ "mimalloc",
+ "monoio",
+ "nohash-hasher",
+ "roaring",
 ]
 
 [[package]]
@@ -856,23 +873,6 @@ name = "log"
 version = "0.4.28"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "34080505efa8e45a4b816c349525ebe327ceaa8559756f0356cba97ef3bf7432"
-
-[[package]]
-name = "lvl"
-version = "0.1.0"
-dependencies = [
- "ahash",
- "ckt-fmtv5-types",
- "clap",
- "cynosure 0.2.3",
- "fixedbitset",
- "indexmap",
- "indicatif",
- "mimalloc",
- "monoio",
- "nohash-hasher",
- "roaring",
-]
 
 [[package]]
 name = "memchr"

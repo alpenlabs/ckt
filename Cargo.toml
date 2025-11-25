@@ -43,7 +43,7 @@ debug = true
 [workspace.dependencies]
 ckt-fmtv5-types = { path = "crates/fmtv5-types" }
 ckt-gobble = { path = "crates/gobble" }
-lvl = { path = "crates/lvl" }
+ckt-lvl = { path = "crates/lvl" }
 
 aes = "0.8.4"
 ahash = "0.8.12"
