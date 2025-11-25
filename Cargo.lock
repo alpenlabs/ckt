@@ -6,7 +6,7 @@ version = 4
 name = "adder"
 version = "0.1.0"
 dependencies = [
- "ckt",
+ "ckt-fmtv5-types",
  "monoio",
 ]
 
@@ -133,7 +133,7 @@ name = "bench"
 version = "0.1.0"
 dependencies = [
  "ahash",
- "ckt",
+ "ckt-fmtv5-types",
  "indicatif",
  "lvl",
  "monoio",
@@ -260,7 +260,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "ckt"
+name = "ckt-fmtv5-types"
 version = "0.1.0"
 dependencies = [
  "blake3",
@@ -454,7 +454,7 @@ dependencies = [
 name = "dupecheck"
 version = "0.1.0"
 dependencies = [
- "ckt",
+ "ckt-fmtv5-types",
  "indicatif",
  "monoio",
 ]
@@ -491,7 +491,7 @@ dependencies = [
 name = "exectest"
 version = "0.1.0"
 dependencies = [
- "ckt",
+ "ckt-fmtv5-types",
  "crossbeam-channel",
  "indicatif",
  "mimalloc",
@@ -684,7 +684,7 @@ name = "gobbletest"
 version = "0.1.0"
 dependencies = [
  "bitvec",
- "ckt",
+ "ckt-fmtv5-types",
  "gobble",
  "indicatif",
  "monoio",
@@ -862,7 +862,7 @@ name = "lvl"
 version = "0.1.0"
 dependencies = [
  "ahash",
- "ckt",
+ "ckt-fmtv5-types",
  "clap",
  "cynosure 0.2.3",
  "fixedbitset",

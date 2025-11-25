@@ -9,8 +9,8 @@
 //! Run with: cargo run --example roundtrip
 
 use adder::generate_adder;
-use ckt::v5::a::reader::CircuitReaderV5a;
-use ckt::v5::a::writer::CircuitWriterV5a;
+use ckt_fmtv5_types::v5::a::reader::CircuitReaderV5a;
+use ckt_fmtv5_types::v5::a::writer::CircuitWriterV5a;
 use std::path::PathBuf;
 
 fn main() {

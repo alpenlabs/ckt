@@ -1,12 +1,12 @@
 mod stream;
 mod writer;
 
-use ckt::GateType;
-use ckt::v1::reader::CircuitReader as CircuitReaderV1;
-use ckt::v1::writer::CircuitWriter as CircuitWriterV1;
-use ckt::v1::{CompactGate, hp as hp_v1};
-use ckt::v4::a::hp::reader::verify_checksum_async as verify_checksum_v4a;
-use ckt::v4::b::hp::reader::verify_checksum_async as verify_checksum_v4b;
+use ckt_fmtv5_types::GateType;
+use ckt_fmtv5_types::v1::reader::CircuitReader as CircuitReaderV1;
+use ckt_fmtv5_types::v1::writer::CircuitWriter as CircuitWriterV1;
+use ckt_fmtv5_types::v1::{CompactGate, hp as hp_v1};
+use ckt_fmtv5_types::v4::a::hp::reader::verify_checksum_async as verify_checksum_v4a;
+use ckt_fmtv5_types::v4::b::hp::reader::verify_checksum_async as verify_checksum_v4b;
 use clap::{Parser, Subcommand};
 use indicatif::{ProgressBar, ProgressStyle};
 use kanal::unbounded_async;
