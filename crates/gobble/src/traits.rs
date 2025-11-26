@@ -68,7 +68,7 @@ pub trait ExecutionInstance {
 }
 
 /// Configuration for garbling a boolean circuit
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct GarblingInstanceConfig<'labels> {
     /// Max live wires used at any point in the circuit. See ckt v5 architecture
     /// for additional details.
@@ -82,7 +82,7 @@ pub struct GarblingInstanceConfig<'labels> {
 }
 
 /// Configuration for executing a boolean circuit
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct ExecutionInstanceConfig<'values> {
     /// Max live wires used at any point in the circuit. See ckt v5 architecture
     /// for additional details.
@@ -92,7 +92,7 @@ pub struct ExecutionInstanceConfig<'values> {
 }
 
 /// Configuration for evaluating a garbled circuit
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct EvaluationInstanceConfig<'labels> {
     /// Max live wires used at any point in the circuit. See ckt v5 architecture
     /// for additional details.

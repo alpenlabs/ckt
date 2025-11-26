@@ -309,6 +309,11 @@ dependencies = [
 [[package]]
 name = "ckt-runner-exec"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ckt-fmtv5-types",
+ "ckt-runner-types",
+]
 
 [[package]]
 name = "ckt-runner-types"
@@ -721,6 +726,8 @@ dependencies = [
  "bitvec",
  "ckt-fmtv5-types",
  "ckt-gobble",
+ "ckt-runner-exec",
+ "ckt-runner-types",
  "indicatif",
  "monoio",
  "rand_chacha",
