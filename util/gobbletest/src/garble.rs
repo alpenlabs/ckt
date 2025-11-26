@@ -1,3 +1,4 @@
+use bitvec::vec::BitVec;
 use ckt::{
     GateType,
     v5::c::{Block, reader::ReaderV5c},
@@ -8,10 +9,9 @@ use gobble::{
 };
 use indicatif::ProgressBar;
 use indicatif::ProgressStyle;
-use std::time::Instant;
 use std::fs::File;
 use std::io::{BufWriter, Write};
-use bitvec::vec::BitVec;
+use std::time::Instant;
 
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::RngCore;
@@ -31,11 +31,13 @@ pub async fn garble(
 
     let engine = Engine::new();
 
-    let labels: Vec<_> = (0..header.primary_inputs).map(|_| {
-        let mut label = [0u8; 16];
-        rng.fill_bytes(&mut label);
-        label
-    }).collect();
+    let labels: Vec<_> = (0..header.primary_inputs)
+        .map(|_| {
+            let mut label = [0u8; 16];
+            rng.fill_bytes(&mut label);
+            label
+        })
+        .collect();
 
     let mut delta = [0u8; 16];
     rng.fill_bytes(&mut delta);
@@ -58,7 +60,7 @@ pub async fn garble(
         ProgressStyle::default_bar()
             .template("🦃 [{bar:50.cyan/blue}] {percent:>3}% | {msg} | {elapsed_precise}")
             .unwrap()
-            .progress_chars("█░")
+            .progress_chars("█░"),
     );
     let start = Instant::now();
     while let Some((block, num_blocks)) = reader.next_blocks_ref().await.unwrap() {
@@ -88,25 +90,32 @@ pub async fn garble(
                     ),
                 }
             }
-            
+
             total_gates_processed += gates_in_block as u64;
             pb.inc(gates_in_block as u64);
         }
-        
+
         let elapsed = start.elapsed();
         if elapsed.as_secs_f64() > 0.0 {
             let rate_m = (total_gates_processed as f64 / elapsed.as_secs_f64()) / 1_000_000.0;
             let processed_b = total_gates_processed as f64 / 1_000_000_000.0;
             let total_b = total_gates as f64 / 1_000_000_000.0;
-            pb.set_message(format!("{:.2}B / {:.2}B gates @ {:.0} M/s", processed_b, total_b, rate_m));
+            pb.set_message(format!(
+                "{:.2}B / {:.2}B gates @ {:.0} M/s",
+                processed_b, total_b, rate_m
+            ));
         }
     }
-    
+
     pb.finish();
-    
+
     writer.flush().unwrap();
-    
-    let output_wires = reader.outputs().iter().map(|w| *w as u64).collect::<Vec<_>>();
+
+    let output_wires = reader
+        .outputs()
+        .iter()
+        .map(|w| *w as u64)
+        .collect::<Vec<_>>();
     let mut garbler_output_labels = vec![[0u8; 16]; output_wires.len()];
     let output_values = BitVec::repeat(false, output_wires.len());
     garb_instance.get_selected_labels(&output_wires, &output_values, &mut garbler_output_labels);
@@ -115,18 +124,20 @@ pub async fn garble(
 
     // Read inputs and encode them
     let input_values_bits = read_inputs(input_file, header.primary_inputs as usize);
-    let input_wires: Vec<u64> = (2..=header.primary_inputs+1).map(|w| w as u64).collect();
+    let input_wires: Vec<u64> = (2..=header.primary_inputs + 1).map(|w| w as u64).collect();
     let mut input_labels = vec![[0u8; 16]; input_wires.len()];
-    
+
     garb_instance.get_selected_labels(&input_wires, &input_values_bits, &mut input_labels);
 
-    (delta, input_values_bits, input_labels, garbler_output_labels)
+    (
+        delta,
+        input_values_bits,
+        input_labels,
+        garbler_output_labels,
+    )
 }
 
-pub async fn garble_discard(
-    circuit_file: &str,
-    rng: &mut ChaCha20Rng,
-) -> Vec<[u8; 16]> {
+pub async fn garble_discard(circuit_file: &str, rng: &mut ChaCha20Rng) -> Vec<[u8; 16]> {
     let mut reader = ReaderV5c::open(circuit_file).unwrap();
 
     let header = *reader.header();
@@ -134,11 +145,13 @@ pub async fn garble_discard(
 
     let engine = Engine::new();
 
-    let labels: Vec<_> = (0..header.primary_inputs).map(|_| {
-        let mut label = [0u8; 16];
-        rng.fill_bytes(&mut label);
-        label
-    }).collect();
+    let labels: Vec<_> = (0..header.primary_inputs)
+        .map(|_| {
+            let mut label = [0u8; 16];
+            rng.fill_bytes(&mut label);
+            label
+        })
+        .collect();
 
     let mut delta = [0u8; 16];
     rng.fill_bytes(&mut delta);
@@ -158,7 +171,7 @@ pub async fn garble_discard(
         ProgressStyle::default_bar()
             .template("🦃 [{bar:50.cyan/blue}] {percent:>3}% | {msg} | {elapsed_precise}")
             .unwrap()
-            .progress_chars("█░")
+            .progress_chars("█░"),
     );
     let start = Instant::now();
     while let Some((block, num_blocks)) = reader.next_blocks_ref().await.unwrap() {
@@ -176,7 +189,6 @@ pub async fn garble_discard(
                             gate.in2 as usize,
                             gate.out as usize,
                         );
-
                     }
                     GateType::XOR => garb_instance.feed_xor_gate(
                         gate.in1 as usize,
@@ -185,23 +197,30 @@ pub async fn garble_discard(
                     ),
                 }
             }
-            
+
             total_gates_processed += gates_in_block as u64;
             pb.inc(gates_in_block as u64);
         }
-        
+
         let elapsed = start.elapsed();
         if elapsed.as_secs_f64() > 0.0 {
             let rate_m = (total_gates_processed as f64 / elapsed.as_secs_f64()) / 1_000_000.0;
             let processed_b = total_gates_processed as f64 / 1_000_000_000.0;
             let total_b = total_gates as f64 / 1_000_000_000.0;
-            pb.set_message(format!("{:.2}B / {:.2}B gates @ {:.0} M/s", processed_b, total_b, rate_m));
+            pb.set_message(format!(
+                "{:.2}B / {:.2}B gates @ {:.0} M/s",
+                processed_b, total_b, rate_m
+            ));
         }
     }
-    
+
     pb.finish();
-    
-    let output_wires = reader.outputs().iter().map(|w| *w as u64).collect::<Vec<_>>();
+
+    let output_wires = reader
+        .outputs()
+        .iter()
+        .map(|w| *w as u64)
+        .collect::<Vec<_>>();
     let mut garbler_output_labels = vec![[0u8; 16]; output_wires.len()];
     let output_values = BitVec::repeat(false, output_wires.len());
     garb_instance.get_selected_labels(&output_wires, &output_values, &mut garbler_output_labels);

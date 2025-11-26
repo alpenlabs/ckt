@@ -1,14 +1,22 @@
-//! Benchmarks for gobble garbling operations
+//! Benchmarks for gobble garbling and evaluation operations
 #![expect(missing_docs)]
 #![allow(unused_crate_dependencies)]
 
+use bitvec::vec::BitVec;
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use gobble::{
     Engine,
-    aarch64::{get_permute_bit, index_to_tweak, xor128},
-    traits::{GarblingInstance, GarblingInstanceConfig, GobbleEngine},
+    traits::{
+        EvaluationInstance, EvaluationInstanceConfig, GarblingInstance, GarblingInstanceConfig,
+        GobbleEngine,
+    },
 };
-use std::arch::aarch64::*;
+
+#[cfg(target_arch = "aarch64")]
+use gobble::aarch64::{Ciphertext, get_permute_bit, index_to_tweak, xor128};
+
+#[cfg(target_arch = "x86_64")]
+use gobble::x86_64::{Ciphertext, get_permute_bit, index_to_tweak, xor128};
 
 fn bench_garble_xor_gate(c: &mut Criterion) {
     c.bench_function("garble_xor_gate", |b| {
@@ -93,12 +101,105 @@ fn bench_garble_mixed_gates(c: &mut Criterion) {
     });
 }
 
+fn bench_eval_xor_gate(c: &mut Criterion) {
+    c.bench_function("eval_xor_gate", |b| {
+        // Setup once: create instance with dummy labels
+        let selected_primary_input_labels = vec![];
+        let selected_primary_input_values = BitVec::repeat(false, 0);
+
+        let config = EvaluationInstanceConfig {
+            scratch_space: 10,
+            selected_primary_input_labels: &selected_primary_input_labels,
+            selected_primary_input_values: &selected_primary_input_values,
+        };
+
+        let engine = Engine::new();
+        let mut instance = engine.new_evaluation_instance(config);
+
+        // Measure: just the XOR gate evaluation
+        b.iter(|| {
+            instance.feed_xor_gate(black_box(0), black_box(1), black_box(2));
+            black_box(&instance);
+        });
+    });
+}
+
+fn bench_eval_and_gate(c: &mut Criterion) {
+    c.bench_function("eval_and_gate", |b| {
+        // Setup once: create instance with dummy labels
+        let selected_primary_input_labels = vec![];
+        let selected_primary_input_values = BitVec::repeat(false, 0);
+
+        let config = EvaluationInstanceConfig {
+            scratch_space: 10,
+            selected_primary_input_labels: &selected_primary_input_labels,
+            selected_primary_input_values: &selected_primary_input_values,
+        };
+
+        let engine = Engine::new();
+        let mut instance = engine.new_evaluation_instance(config);
+
+        // Create dummy ciphertext
+        let ct_bytes = [0xAAu8; 16];
+        let ciphertext = Ciphertext(unsafe { std::mem::transmute(ct_bytes) });
+
+        // Measure: just the AND gate evaluation
+        b.iter(|| {
+            instance.feed_and_gate(
+                black_box(0),
+                black_box(1),
+                black_box(2),
+                black_box(ciphertext),
+            );
+            black_box(&instance);
+        });
+    });
+}
+
+fn bench_eval_mixed_gates(c: &mut Criterion) {
+    c.bench_function("eval_mixed_100_gates", |b| {
+        // Setup once: create instance with enough space for 100 gates
+        let selected_primary_input_labels = vec![];
+        let selected_primary_input_values = BitVec::repeat(false, 0);
+
+        let config = EvaluationInstanceConfig {
+            scratch_space: 200,
+            selected_primary_input_labels: &selected_primary_input_labels,
+            selected_primary_input_values: &selected_primary_input_values,
+        };
+
+        let engine = Engine::new();
+        let mut instance = engine.new_evaluation_instance(config);
+
+        // Create dummy ciphertexts
+        let ct_bytes = [0xAAu8; 16];
+        let ciphertext = Ciphertext(unsafe { std::mem::transmute(ct_bytes) });
+
+        // Measure: 50 XOR + 50 AND gates
+        b.iter(|| {
+            for i in 0..50 {
+                let in1 = black_box(i * 2);
+                let in2 = black_box(i * 2 + 1);
+                let out = black_box(100 + i);
+
+                // XOR gate
+                instance.feed_xor_gate(in1, in2, out);
+
+                // AND gate
+                instance.feed_and_gate(in1, in2, out + 50, black_box(ciphertext));
+            }
+
+            black_box(&instance);
+        });
+    });
+}
+
 fn bench_xor128(c: &mut Criterion) {
     c.bench_function("xor128", |bencher| unsafe {
         let a_bytes = [0x42u8; 16];
         let b_bytes = [0x99u8; 16];
-        let a = vld1q_u8(&a_bytes as *const u8);
-        let b = vld1q_u8(&b_bytes as *const u8);
+        let a = std::mem::transmute(a_bytes);
+        let b = std::mem::transmute(b_bytes);
 
         bencher.iter(|| {
             let result = xor128(black_box(a), black_box(b));
@@ -110,7 +211,7 @@ fn bench_xor128(c: &mut Criterion) {
 fn bench_get_permute_bit(c: &mut Criterion) {
     c.bench_function("get_permute_bit", |b| unsafe {
         let label_bytes = [0x42u8; 16];
-        let label = vld1q_u8(&label_bytes as *const u8);
+        let label = std::mem::transmute(label_bytes);
 
         b.iter(|| {
             let result = get_permute_bit(black_box(label));
@@ -133,6 +234,9 @@ criterion_group!(
     bench_garble_xor_gate,
     bench_garble_and_gate,
     bench_garble_mixed_gates,
+    bench_eval_xor_gate,
+    bench_eval_and_gate,
+    bench_eval_mixed_gates,
     bench_xor128,
     bench_get_permute_bit,
     bench_index_to_tweak

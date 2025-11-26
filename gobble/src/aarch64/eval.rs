@@ -43,6 +43,7 @@ impl EvaluationInstance for Aarch64EvaluationInstance {
         let in1 = self.working_space[in1_addr];
         let in2 = self.working_space[in2_addr];
 
+        // PFHG evaluation: out = H(in1, t) ⊕ permute_bit * (in2 ⊕ ciphertext)
         let t = unsafe { index_to_tweak(self.gate_ctr) };
         let permute_bit = self.working_space_bits[in1_addr];
 
