@@ -1,10 +1,7 @@
 use std::collections::hash_map::Entry;
 
 use ahash::{HashMap, HashMapExt};
-use ckt_fmtv5_types::v5::{
-    a::reader::CircuitReaderV5a,
-    c::{writer::WriterV5c, GateV5c},
-};
+use ckt_fmtv5_types::v5::{a::reader::CircuitReaderV5a, c::*};
 use indicatif::ProgressBar;
 
 use crate::slab::FakeSlabAllocator;
