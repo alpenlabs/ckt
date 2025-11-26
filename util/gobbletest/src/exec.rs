@@ -1,7 +1,4 @@
-use ckt_fmtv5_types::{
-    GateType,
-    v5::c::{Block, reader::ReaderV5c},
-};
+use ckt_fmtv5_types::{GateType, v5::c::*};
 use ckt_gobble::{
     Engine,
     traits::{ExecutionInstance, ExecutionInstanceConfig, GobbleEngine},
@@ -39,10 +36,9 @@ pub async fn exec(circuit_file: &str, input_file: &str) -> Vec<bool> {
             .progress_chars("█░"),
     );
     let start = Instant::now();
-    while let Some((block, num_blocks)) = reader.next_blocks_ref().await.unwrap() {
-        let blocks = unsafe { &*(block.as_ptr() as *const [Block; 16]) };
-        for block in blocks.iter().take(num_blocks) {
-            let gates_in_block = block.num_gates(total_gates, block_idx);
+    while let Some(chunk) = reader.next_blocks_chunk().await.unwrap() {
+        for block in chunk.blocks_iter() {
+            let gates_in_block = get_block_num_gates(total_gates, block_idx);
             block_idx += 1;
             for i in 0..gates_in_block {
                 let gate = block.gates[i];
