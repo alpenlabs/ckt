@@ -1,5 +1,4 @@
 use bitvec::vec::BitVec;
-use ckt::{
 use ckt_fmtv5_types::{
     GateType,
     v5::c::{Block, reader::ReaderV5c},
