@@ -3,6 +3,8 @@ members = [
   "crates/fmtv5-types",
   "crates/gobble",
   "crates/lvl",
+  "crates/runner-exec",
+  "crates/runner-types",
   "util/bench",
   "util/dupecheck",
   "util/exectest",
@@ -47,6 +49,7 @@ ckt-lvl = { path = "crates/lvl" }
 
 aes = "0.8.4"
 ahash = "0.8.12"
+anyhow = "1.0"
 assert_cmd = "2.0"
 bitvec = "1.0.1"
 blake3 = "1.5"
