@@ -3,6 +3,7 @@
 pub mod eval;
 pub mod exec;
 pub mod garb;
+pub mod label;
 
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::RngCore;
