@@ -4,10 +4,10 @@ use ckt_fmtv5_types::{
     v5::c::{Block, reader::ReaderV5c},
 };
 #[cfg(target_arch = "aarch64")]
-use gobble::aarch64::Ciphertext;
+use ckt_gobble::aarch64::Ciphertext;
 #[cfg(target_arch = "x86_64")]
-use gobble::x86_64::Ciphertext;
-use gobble::{
+use ckt_gobble::x86_64::Ciphertext;
+use ckt_gobble::{
     Engine,
     traits::{EvaluationInstance, EvaluationInstanceConfig, GobbleEngine},
 };
