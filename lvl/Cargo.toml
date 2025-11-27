@@ -9,17 +9,17 @@ codegen-units = 1
 opt-level = 3
 
 [dependencies]
-ckt = { path = "..", version = "0.1.0", features = ["v5"] }
-monoio = { version = "0.2.4", features = ["sync"] }
-indicatif = "0.18"
 ahash = "0.8.12"
-cynosure = "0.2.2"
-mimalloc = { version = "0.1.48", features = ["v3"] }
+ckt = { path = "..", version = "0.1.0", features = ["v5"] }
 clap = { version = "4.5", features = ["derive"] }
-roaring = "0.11.2"
-indexmap = "2.11.4"
+cynosure = "0.2.2"
 fixedbitset = "0.5.7"
+indexmap = "2.11.4"
+indicatif = "0.18"
+mimalloc = { version = "0.1.48", features = ["v3"] }
+monoio = { version = "0.2.4", features = ["sync"] }
 nohash-hasher = "0.2.0"
+roaring = "0.11.2"
 
 
 [[bin]]
