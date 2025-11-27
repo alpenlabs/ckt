@@ -1,3 +1,4 @@
+#![allow(unused_crate_dependencies)]
 //! N-bit adder circuit generator for v5a format
 //!
 //! This module provides utilities for generating ripple-carry adder circuits

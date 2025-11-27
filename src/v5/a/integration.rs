@@ -13,7 +13,7 @@ fn mk_gate(i: u64) -> GateV5a {
         in2: (i * 11 + 2) & MAX_WIRE_ID,
         out: (i * 13 + 3) & MAX_WIRE_ID,
         credits: (((i as u32) * 5 + 1) & MAX_CREDITS),
-        gate_type: if i % 3 == 0 {
+        gate_type: if i.is_multiple_of(3) {
             GateType::AND
         } else {
             GateType::XOR

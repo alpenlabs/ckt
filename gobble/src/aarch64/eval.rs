@@ -1,5 +1,7 @@
 //! Implements Aarch64-specific evaluation instance.
 
+use std::{arch::aarch64::uint8x16_t, mem::transmute};
+
 use bitvec::vec::BitVec;
 
 use crate::{
@@ -65,7 +67,7 @@ impl EvaluationInstance for Aarch64EvaluationInstance {
     fn get_labels(&self, wires: &[u64], labels: &mut [[u8; 16]]) {
         for (i, wire_id) in wires.iter().enumerate() {
             let wire_id = *wire_id as usize;
-            labels[i] = unsafe { std::mem::transmute(self.working_space[wire_id].0) };
+            labels[i] = unsafe { transmute::<uint8x16_t, [u8; 16]>(self.working_space[wire_id].0) };
         }
     }
 
@@ -80,13 +82,13 @@ impl Aarch64EvaluationInstance {
     /// Initialize a new evaluation instance with the given configuration.
     pub fn new<'labels>(config: EvaluationInstanceConfig<'labels>) -> Self {
         let bytes = [0u8; 16];
-        let empty_label = unsafe { std::mem::transmute(bytes) };
+        let empty_label = unsafe { transmute::<[u8; 16], uint8x16_t>(bytes) };
         let mut working_space = vec![Label(empty_label); config.scratch_space as usize];
 
         working_space[0] = Label::zero();
         working_space[1] = Label::one();
         for (label, i) in config.selected_primary_input_labels.iter().zip(2..) {
-            working_space[i] = Label(unsafe { std::mem::transmute(*label) });
+            working_space[i] = Label(unsafe { transmute::<[u8; 16], uint8x16_t>(*label) });
         }
 
         let mut working_space_bits = BitVec::repeat(false, config.scratch_space as usize);

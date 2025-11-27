@@ -4,7 +4,7 @@ use crate::{
     traits::{GarblingInstance, GarblingInstanceConfig},
 };
 use bitvec::vec::BitVec;
-use std::arch::aarch64::uint8x16_t;
+use std::{arch::aarch64::uint8x16_t, mem::transmute};
 
 /// Aarch64-specific garbling instance
 #[derive(Debug)]
@@ -68,7 +68,7 @@ impl GarblingInstance for Aarch64GarblingInstance {
                 false_label
             };
 
-            labels[i] = unsafe { std::mem::transmute(selected_label.0) };
+            labels[i] = unsafe { transmute::<uint8x16_t, [u8; 16]>(selected_label.0) };
         }
     }
 }
@@ -77,19 +77,23 @@ impl Aarch64GarblingInstance {
     /// Creates a new Aarch64GarblingInstance with the given configuration.
     pub fn new<'a>(config: GarblingInstanceConfig<'a>) -> Self {
         let bytes = [0u8; 16];
-        let empty_label = unsafe { std::mem::transmute(bytes) };
+        let empty_label = unsafe { transmute::<[u8; 16], uint8x16_t>(bytes) };
         let mut working_space = vec![Label(empty_label); config.scratch_space as usize];
         working_space[0] = Label::zero();
-        working_space[1] =
-            Label(unsafe { xor128(Label::one().0, std::mem::transmute(config.delta)) });
+        working_space[1] = Label(unsafe {
+            xor128(
+                Label::one().0,
+                transmute::<[u8; 16], uint8x16_t>(config.delta),
+            )
+        });
         for (label, i) in config.primary_input_false_labels.iter().zip(2..) {
-            working_space[i] = Label(unsafe { std::mem::transmute(*label) });
+            working_space[i] = Label(unsafe { transmute::<[u8; 16], uint8x16_t>(*label) });
         }
 
         Aarch64GarblingInstance {
             gate_ctr: 0,
             working_space,
-            delta: unsafe { std::mem::transmute(config.delta) },
+            delta: unsafe { transmute::<[u8; 16], uint8x16_t>(config.delta) },
             and_ctr: 0,
         }
     }

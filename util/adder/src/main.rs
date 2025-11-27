@@ -2,6 +2,7 @@
 
 use adder::generate_adder;
 use ckt::v5::a::writer::CircuitWriterV5a;
+use monoio::{FusionDriver, RuntimeBuilder};
 use std::path::PathBuf;
 
 fn main() {
@@ -68,7 +69,7 @@ fn main() {
     println!("Writing to {}...", output_file.display());
 
     // Write the circuit using monoio runtime
-    let mut rt = monoio::RuntimeBuilder::<monoio::FusionDriver>::new()
+    let mut rt = RuntimeBuilder::<FusionDriver>::new()
         .build()
         .expect("Failed to create monoio runtime");
 

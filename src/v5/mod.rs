@@ -14,7 +14,7 @@ pub mod c;
 pub mod scalar;
 
 // Decoder module is private - callers use dispatch functions
-#[cfg(all(target_arch = "x86_64"))]
+#[cfg(target_arch = "x86_64")]
 mod avx512;
 
 /// Magic bytes for v5 format: "Zk2u" in ASCII
@@ -109,7 +109,7 @@ pub fn decode_block_v5a(
     credits_out: &mut [u32],
     gate_types_out: &mut [bool],
 ) {
-    #[cfg(all(target_arch = "x86_64"))]
+    #[cfg(target_arch = "x86_64")]
     {
         if is_x86_feature_detected!("avx512f") {
             use a::{

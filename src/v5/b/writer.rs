@@ -47,7 +47,7 @@ impl GateV5b {
     }
 
     /// Convert gate to bytes (12 bytes: 3 × u32 LE)
-    fn to_bytes(&self) -> [u8; GATE_SIZE] {
+    fn as_bytes(&self) -> [u8; GATE_SIZE] {
         let mut bytes = [0u8; GATE_SIZE];
         bytes[0..4].copy_from_slice(&self.in1.to_le_bytes());
         bytes[4..8].copy_from_slice(&self.in2.to_le_bytes());
@@ -270,7 +270,7 @@ impl CircuitWriterV5b {
         self.num_levels = self
             .num_levels
             .checked_add(1)
-            .ok_or_else(|| Error::new(ErrorKind::Other, "num_levels overflow"))?;
+            .ok_or_else(|| Error::other("num_levels overflow"))?;
         self.max_addr_seen = self.max_addr_seen.max(self.level.max_addr_seen);
 
         // Write LevelHeader (num_xor, num_and) as 8 bytes LE and hash it now
@@ -414,14 +414,14 @@ impl CircuitWriterV5b {
     async fn write_and_hash_gates(&mut self, xors: &[GateV5b], ands: &[GateV5b]) -> Result<()> {
         // Write XOR gates
         for gate in xors {
-            let gate_bytes = gate.to_bytes();
+            let gate_bytes = gate.as_bytes();
             self.enqueue_bytes(&gate_bytes).await?;
             self.hasher.update(&gate_bytes);
         }
 
         // Write AND gates
         for gate in ands {
-            let gate_bytes = gate.to_bytes();
+            let gate_bytes = gate.as_bytes();
             self.enqueue_bytes(&gate_bytes).await?;
             self.hasher.update(&gate_bytes);
         }

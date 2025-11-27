@@ -2,6 +2,8 @@
 #![expect(missing_docs)]
 #![allow(unused_crate_dependencies)]
 
+use std::{arch::aarch64::uint8x16_t, mem::transmute};
+
 use bitvec::vec::BitVec;
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use gobble::{
@@ -141,7 +143,7 @@ fn bench_eval_and_gate(c: &mut Criterion) {
 
         // Create dummy ciphertext
         let ct_bytes = [0xAAu8; 16];
-        let ciphertext = Ciphertext(unsafe { std::mem::transmute(ct_bytes) });
+        let ciphertext = Ciphertext(unsafe { transmute::<[u8; 16], uint8x16_t>(ct_bytes) });
 
         // Measure: just the AND gate evaluation
         b.iter(|| {
@@ -173,7 +175,7 @@ fn bench_eval_mixed_gates(c: &mut Criterion) {
 
         // Create dummy ciphertexts
         let ct_bytes = [0xAAu8; 16];
-        let ciphertext = Ciphertext(unsafe { std::mem::transmute(ct_bytes) });
+        let ciphertext = Ciphertext(unsafe { transmute::<[u8; 16], uint8x16_t>(ct_bytes) });
 
         // Measure: 50 XOR + 50 AND gates
         b.iter(|| {
@@ -198,8 +200,8 @@ fn bench_xor128(c: &mut Criterion) {
     c.bench_function("xor128", |bencher| unsafe {
         let a_bytes = [0x42u8; 16];
         let b_bytes = [0x99u8; 16];
-        let a = std::mem::transmute(a_bytes);
-        let b = std::mem::transmute(b_bytes);
+        let a = transmute::<[u8; 16], uint8x16_t>(a_bytes);
+        let b = transmute::<[u8; 16], uint8x16_t>(b_bytes);
 
         bencher.iter(|| {
             let result = xor128(black_box(a), black_box(b));
@@ -211,7 +213,7 @@ fn bench_xor128(c: &mut Criterion) {
 fn bench_get_permute_bit(c: &mut Criterion) {
     c.bench_function("get_permute_bit", |b| unsafe {
         let label_bytes = [0x42u8; 16];
-        let label = std::mem::transmute(label_bytes);
+        let label = transmute::<[u8; 16], uint8x16_t>(label_bytes);
 
         b.iter(|| {
             let result = get_permute_bit(black_box(label));

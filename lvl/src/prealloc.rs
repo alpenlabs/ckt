@@ -116,7 +116,7 @@ fn lookup_wire<const IGNORE_CREDS: bool>(
     };
 
     let idx = entry.get().slab_idx;
-    if IGNORE_CREDS == false {
+    if !IGNORE_CREDS {
         match entry.get().credits_remaining {
             1 => {
                 entry.remove();

@@ -63,7 +63,7 @@ pub async fn eval(
                     GateType::AND => {
                         let mut ct_bytes = [0u8; 16];
                         ct_reader.read_exact(&mut ct_bytes).unwrap();
-                        let ct = Ciphertext(unsafe { std::mem::transmute(ct_bytes) });
+                        let ct = Ciphertext::from(ct_bytes);
 
                         eval_instance.feed_and_gate(
                             gate.in1 as usize,

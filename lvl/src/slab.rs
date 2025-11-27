@@ -82,6 +82,12 @@ impl FakeSlabAllocator {
     }
 }
 
+impl Default for FakeSlabAllocator {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // Example usage
 #[cfg(test)]
 mod tests {

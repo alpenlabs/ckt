@@ -84,7 +84,7 @@ impl ReaderV5c {
         let gate_region_bytes = gate_region_end - gate_region_start;
 
         // Validate that gate region is multiple of BLOCK_SIZE
-        if gate_region_bytes % BLOCK_SIZE as u64 != 0 {
+        if !gate_region_bytes.is_multiple_of(BLOCK_SIZE as u64) {
             return Err(Error::new(
                 ErrorKind::InvalidData,
                 "gate region size is not a multiple of 256 KiB",
@@ -266,7 +266,7 @@ impl Drop for ReaderV5c {
 
 /// Decode outputs from 4-byte little-endian u32 entries
 fn decode_outputs_le32(bytes: &[u8]) -> Result<Vec<u32>> {
-    if bytes.len() % 4 != 0 {
+    if !bytes.len().is_multiple_of(4) {
         return Err(Error::new(
             ErrorKind::InvalidData,
             "outputs length not multiple of 4",

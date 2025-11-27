@@ -42,8 +42,8 @@ pub const IN2_OFFSET: usize = IN1_OFFSET + IN_STREAM_SIZE; // 1088
 pub const OUT_OFFSET: usize = IN2_OFFSET + IN_STREAM_SIZE; // 2176
 pub const CREDITS_OFFSET: usize = OUT_OFFSET + IN_STREAM_SIZE; // 3264
 pub const TYPES_OFFSET: usize = CREDITS_OFFSET + CREDITS_SIZE; // 4032
-pub const IN_STREAM_SIZE: usize = (GATES_PER_BLOCK * BITS_WIRE + 7) / 8; // 1088
-pub const CREDITS_SIZE: usize = (GATES_PER_BLOCK * BITS_CREDITS + 7) / 8; // 768
+pub const IN_STREAM_SIZE: usize = (GATES_PER_BLOCK * BITS_WIRE).div_ceil(8); // 1088
+pub const CREDITS_SIZE: usize = (GATES_PER_BLOCK * BITS_CREDITS).div_ceil(8); // 768
 
 /// Gate record for v5a writer
 #[derive(Debug, Clone, Copy)]
@@ -75,7 +75,7 @@ impl HeaderV5a {
 }
 
 fn parse_header(bytes: &[u8; HEADER_SIZE_V5A]) -> io::Result<HeaderV5a> {
-    if &bytes[0..4] != &MAGIC {
+    if bytes[0..4] != MAGIC {
         return Err(Error::new(ErrorKind::InvalidData, "bad magic"));
     }
     if bytes[4] != VERSION {

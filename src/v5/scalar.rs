@@ -34,7 +34,7 @@ pub fn decode_block_v5a_scalar(
 
 #[inline]
 pub fn unpack_bits_24_into_u32(src: &[u8], n: usize, dst: &mut [u32; GATES_PER_BLOCK]) {
-    for i in 0..n {
+    for (i, unpacked) in dst.iter_mut().enumerate().take(n) {
         let bit = i * 24;
         let byte = bit >> 3;
         let shift = bit & 7;
@@ -43,13 +43,13 @@ pub fn unpack_bits_24_into_u32(src: &[u8], n: usize, dst: &mut [u32; GATES_PER_B
         let len = end - byte;
         buf[..len].copy_from_slice(&src[byte..end]);
         let v = u32::from_le_bytes(buf) >> shift;
-        dst[i] = v & 0x00FF_FFFF;
+        *unpacked = v & 0x00FF_FFFF;
     }
 }
 
 #[inline]
 pub fn unpack_bits_34_into_u64(src: &[u8], n: usize, dst: &mut [u64; GATES_PER_BLOCK]) {
-    for i in 0..n {
+    for (i, unpacked) in dst.iter_mut().enumerate().take(n) {
         let bit = i * 34;
         let byte = bit >> 3;
         let shift = bit & 7;
@@ -58,6 +58,6 @@ pub fn unpack_bits_34_into_u64(src: &[u8], n: usize, dst: &mut [u64; GATES_PER_B
         let len = end - byte;
         buf[..len].copy_from_slice(&src[byte..end]);
         let v = u64::from_le_bytes(buf) >> shift;
-        dst[i] = v & 0x3_FFFF_FFFF;
+        *unpacked = v & 0x3_FFFF_FFFF;
     }
 }
