@@ -5,7 +5,7 @@ pub mod aarch64;
 pub mod traits;
 #[cfg(target_arch = "x86_64")]
 /// Dynamically switching type alias that changes between architecture specific
-     /// [`GobbleEngine`] implementations.
+/// [`GobbleEngine`] implementations.
 pub mod x86_64;
 
 use hex_literal::hex;
@@ -37,7 +37,7 @@ pub const AES128_ROUND_KEY_BYTES: [[u8; 16]; 10] = [
 ];
 #[cfg(target_arch = "x86_64")]
 /// Dynamically switching type alias that changes between architecture specific
-     /// [`GobbleEngine`] implementations.
+/// [`GobbleEngine`] implementations.
 pub type Engine = x86_64::X86_64GobbleEngine;
 
 #[cfg(test)]

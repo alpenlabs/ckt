@@ -113,8 +113,8 @@ pub fn decode_block_v5a(
     {
         if is_x86_feature_detected!("avx512f") {
             use a::{
-                CREDITS_OFFSET, CREDITS_SIZE, IN_STREAM_SIZE, IN1_OFFSET,
-                IN2_OFFSET, OUT_OFFSET, TYPES_OFFSET,
+                CREDITS_OFFSET, CREDITS_SIZE, IN_STREAM_SIZE, IN1_OFFSET, IN2_OFFSET, OUT_OFFSET,
+                TYPES_OFFSET,
             };
 
             // Create AVX block on-stack (only when AVX path is taken)

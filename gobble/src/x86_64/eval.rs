@@ -64,7 +64,11 @@ impl EvaluationInstance for X86_64EvaluationInstance {
     fn get_labels(&self, wires: &[u64], labels: &mut [[u8; 16]]) {
         for (i, wire_id) in wires.iter().enumerate() {
             let wire_id = *wire_id as usize;
-            labels[i] = unsafe { std::mem::transmute::<std::arch::x86_64::__m128i, [u8; 16]>(self.working_space[wire_id].0) };
+            labels[i] = unsafe {
+                std::mem::transmute::<std::arch::x86_64::__m128i, [u8; 16]>(
+                    self.working_space[wire_id].0,
+                )
+            };
         }
     }
 
@@ -79,11 +83,14 @@ impl X86_64EvaluationInstance {
     /// Initialize a new evaluation instance with the given configuration.
     pub fn new<'labels>(config: EvaluationInstanceConfig<'labels>) -> Self {
         let bytes = [0u8; 16];
-        let empty_label = unsafe { std::mem::transmute::<[u8; 16], std::arch::x86_64::__m128i>(bytes) };
+        let empty_label =
+            unsafe { std::mem::transmute::<[u8; 16], std::arch::x86_64::__m128i>(bytes) };
         let mut working_space = vec![Label(empty_label); config.scratch_space as usize];
 
         for (label, i) in config.selected_primary_input_labels.iter().zip(2..) {
-            working_space[i] = Label(unsafe { std::mem::transmute::<[u8; 16], std::arch::x86_64::__m128i>(*label) });
+            working_space[i] = Label(unsafe {
+                std::mem::transmute::<[u8; 16], std::arch::x86_64::__m128i>(*label)
+            });
         }
 
         let mut working_space_bits = BitVec::repeat(false, config.scratch_space as usize);
