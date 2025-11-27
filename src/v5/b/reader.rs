@@ -36,7 +36,7 @@ pub use crate::v5::b::GateV5b;
 
 /// A level with owned XOR and AND gate data
 ///
-/// The byte vectors are directly reinterpreted as Vec<GateV5b> for zero-parse access.
+/// The byte vectors are directly reinterpreted as `Vec<GateV5b>` for zero-parse access.
 pub struct Level {
     pub xor_gates: Vec<GateV5b>,
     pub and_gates: Vec<GateV5b>,
