@@ -6,6 +6,8 @@ updates:
     schedule:
       interval: "monthly"
       time: "00:00"
+    cooldown:
+      default-days: 1
     # Group all updates into a single PR
     groups:
       all-dependencies:
@@ -16,7 +18,6 @@ updates:
           - "patch"
     open-pull-requests-limit: 10
     commit-message:
-      # Use conventional commit format as specified in user rules
       prefix: "chore(deps)"
       include: "scope"
 
@@ -27,6 +28,8 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "00:00"
+    cooldown:
+      default-days: 1
     # Group non-security updates
     groups:
       rust-dependencies:
