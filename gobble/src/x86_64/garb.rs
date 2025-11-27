@@ -68,7 +68,7 @@ impl GarblingInstance for X86_64GarblingInstance {
                 false_label
             };
 
-            labels[i] = unsafe { std::mem::transmute(selected_label.0) };
+            labels[i] = unsafe { std::mem::transmute::<__m128i, [u8; 16]>(selected_label.0) };
         }
     }
 }
@@ -77,16 +77,16 @@ impl X86_64GarblingInstance {
     /// Creates a new X86_64GarblingInstance with the given configuration.
     pub fn new<'a>(config: GarblingInstanceConfig<'a>) -> Self {
         let bytes = [0u8; 16];
-        let empty_label = unsafe { std::mem::transmute(bytes) };
+        let empty_label = unsafe { std::mem::transmute::<[u8; 16], __m128i>(bytes) };
         let mut working_space = vec![Label(empty_label); config.scratch_space as usize];
         for (label, i) in config.primary_input_false_labels.iter().zip(2..) {
-            working_space[i] = Label(unsafe { std::mem::transmute(*label) });
+            working_space[i] = Label(unsafe { std::mem::transmute::<[u8; 16], __m128i>(*label) });
         }
 
         X86_64GarblingInstance {
             gate_ctr: 0,
             working_space,
-            delta: unsafe { std::mem::transmute(config.delta) },
+            delta: unsafe { std::mem::transmute::<[u8; 16], __m128i>(config.delta) },
             and_ctr: 0,
         }
     }

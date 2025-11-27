@@ -75,12 +75,13 @@ pub unsafe fn decode_block_v5a_avx512(
     }
 
     // Gate types (scalar, bit-per-gate)
-    for i in 0..n {
+    for (i, gate_type) in gate_types_out.iter_mut().enumerate().take(n) {
         let b = blk.gate_types[i >> 3];
-        gate_types_out[i] = ((b >> (i & 7)) & 1) != 0;
+        *gate_type = ((b >> (i & 7)) & 1) != 0;
     }
 }
 
+#[allow(dead_code)]
 pub struct BlockV5b {
     pub in1_stream: [u8; 1512], // 504 × 24 bits
     pub in2_stream: [u8; 1512], // 504 × 24 bits
@@ -99,6 +100,7 @@ pub struct BlockV5b {
 /// # Safety
 /// Requires AVX-512F CPU feature. Caller must ensure feature is available.
 #[target_feature(enable = "avx512f")]
+#[allow(dead_code)]
 pub unsafe fn decode_block_v5b_avx512(
     blk: &BlockV5b,
     num_gates: usize,
@@ -140,7 +142,7 @@ pub unsafe fn unpack_bits_34_to_u64_gather(src_padded: &[u8], n: usize, dst: &mu
     let base = src_padded.as_ptr(); // padded with 8 trailing zeros
 
     let offs_bits = _mm512_setr_epi64(0, 34, 68, 102, 136, 170, 204, 238);
-    let mask34 = _mm512_set1_epi64(0x3_FFFF_FFFF);
+    let mask34 = _mm512_set1_epi64(0x0003_FFFF_FFFF);
     let seven = _mm512_set1_epi64(7);
 
     let mut g = 0usize;
@@ -169,7 +171,7 @@ pub unsafe fn unpack_bits_34_to_u64_gather(src_padded: &[u8], n: usize, dst: &mu
         let bit_shift = _mm512_and_si512(offs, seven);
         let words = unsafe { _mm512_i64gather_epi64::<1>(byte_idx, base as *const i64) };
         let shifted = _mm512_srlv_epi64(words, bit_shift);
-        let vals = _mm512_and_si512(shifted, _mm512_set1_epi64(0x3_FFFF_FFFF));
+        let vals = _mm512_and_si512(shifted, _mm512_set1_epi64(0x0003_FFFF_FFFF));
 
         let mut tmp = [0u64; 8];
         unsafe { _mm512_storeu_si512(tmp.as_mut_ptr() as *mut __m512i, vals) };
@@ -227,6 +229,7 @@ pub unsafe fn unpack_bits_24_to_u32_gather(src_padded: &[u8], n: usize, dst: &mu
 }
 
 #[cfg(test)]
+#[allow(clippy::needless_range_loop)]
 mod tests {
     use super::*;
 
@@ -304,7 +307,7 @@ mod tests {
     fn pack_stream_34(vals: &[u64]) -> [u8; 1088] {
         let mut buf = [0u8; 1088];
         for (i, &v) in vals.iter().enumerate() {
-            pack_bits_le(&mut buf, i * 34, 34, v & 0x3FFFF_FFFF);
+            pack_bits_le(&mut buf, i * 34, 34, v & 0x0003_FFFF_FFFF);
         }
         buf
     }
@@ -385,12 +388,12 @@ mod tests {
             assert!(out.iter().all(|&v| v == 0));
 
             // Max values
-            let max = [0x3FFFF_FFFFu64; 256];
+            let max = [0x0003_FFFF_FFFFu64; 256];
             let packed = pack_stream_34(&max);
             let padded = pad8_bytes(&packed);
             let mut out = [0u64; 256];
             unpack_bits_34_to_u64_gather(&padded, 256, &mut out);
-            assert!(out.iter().all(|&v| v == 0x3FFFF_FFFF));
+            assert!(out.iter().all(|&v| v == 0x0003_FFFF_FFFF));
         }
     }
 
@@ -432,7 +435,7 @@ mod tests {
             ];
             let mut vals = [0u64; 256];
             for i in 0..256 {
-                vals[i] = ((i as u64) * 0x1F_0003) & 0x3FFFF_FFFF;
+                vals[i] = ((i as u64) * 0x1F_0003) & 0x0003_FFFF_FFFF;
             }
             let packed = pack_stream_34(&vals);
             let padded = pad8_bytes(&packed);
@@ -483,7 +486,7 @@ mod tests {
         unsafe {
             let mut vals = [0u64; 256];
             vals.fill(0);
-            vals[255] = 0x0123_4567u64 & 0x3FFFF_FFFF;
+            vals[255] = 0x0123_4567u64 & 0x0003_FFFF_FFFF;
             let packed = pack_stream_34(&vals);
             let padded = pad8_bytes(&packed);
 
@@ -533,7 +536,7 @@ mod tests {
 
                 let mut v34 = [0u64; 256];
                 for i in 0..256 {
-                    v34[i] = rng.next_u64() & 0x3FFFF_FFFF;
+                    v34[i] = rng.next_u64() & 0x0003_FFFF_FFFF;
                 }
                 let mut v24 = [0u32; 256];
                 for i in 0..256 {
@@ -588,9 +591,9 @@ mod tests {
             let mut types = [false; 256];
 
             for i in 0..256 {
-                in1[i] = ((i as u64) * 7 + 2) & 0x3FFFF_FFFF;
-                in2[i] = ((i as u64) * 5 + 3) & 0x3FFFF_FFFF;
-                out_vals[i] = ((i as u64) * 11 + 1) & 0x3FFFF_FFFF;
+                in1[i] = ((i as u64) * 7 + 2) & 0x0003_FFFF_FFFF;
+                in2[i] = ((i as u64) * 5 + 3) & 0x0003_FFFF_FFFF;
+                out_vals[i] = ((i as u64) * 11 + 1) & 0x0003_FFFF_FFFF;
                 credits[i] = (((i as u32) * 3 + 1) % 1_000_000) & 0x00FF_FFFF;
                 types[i] = (i % 3) == 1;
             }
@@ -640,16 +643,16 @@ mod tests {
 
             for i in 0..256 {
                 in1[i] = if i % 2 == 0 {
-                    0x3FFFF_FFFF
+                    0x0003_FFFF_FFFF
                 } else {
-                    (i as u64) & 0x3FFFF_FFFF
+                    (i as u64) & 0x0003_FFFF_FFFF
                 };
                 in2[i] = if i % 3 == 0 {
-                    (i as u64) * 0x1_0001 & 0x3FFFF_FFFF
+                    ((i as u64) * 0x1_0001) & 0x0003_FFFF_FFFF
                 } else {
                     0
                 };
-                out_vals[i] = (0x3AA55AA5u64.wrapping_mul(i as u64)) & 0x3FFFF_FFFF;
+                out_vals[i] = (0x3AA55AA5u64.wrapping_mul(i as u64)) & 0x0003_FFFF_FFFF;
                 credits[i] = if i % 5 == 0 {
                     0x00FF_FFFF
                 } else {
@@ -693,7 +696,7 @@ mod tests {
             return;
         }
         unsafe {
-            let mut rng = Rng::new(0xCAFEBABE_D00D_F00D);
+            let mut rng = Rng::new(0xCAFE_BABE_D00D_F00D);
             for iter in 0..100 {
                 let n = (rng.next_u32() as usize % 257).min(256);
 
@@ -704,9 +707,9 @@ mod tests {
                 let mut types = [false; 256];
 
                 for i in 0..256 {
-                    in1[i] = rng.next_u64() & 0x3FFFF_FFFF;
-                    in2[i] = rng.next_u64() & 0x3FFFF_FFFF;
-                    out_vals[i] = rng.next_u64() & 0x3FFFF_FFFF;
+                    in1[i] = rng.next_u64() & 0x0003_FFFF_FFFF;
+                    in2[i] = rng.next_u64() & 0x0003_FFFF_FFFF;
+                    out_vals[i] = rng.next_u64() & 0x0003_FFFF_FFFF;
                     credits[i] = rng.next_u32() & 0x00FF_FFFF;
                     types[i] = (rng.next_u32() & 1) != 0;
                 }
@@ -798,7 +801,7 @@ mod tests {
         let mut v34 = [0u64; 256];
         let mut v24 = [0u32; 256];
         for i in 0..256 {
-            v34[i] = rng.next_u64() & 0x3FFFF_FFFF;
+            v34[i] = rng.next_u64() & 0x0003_FFFF_FFFF;
             v24[i] = rng.next_u32() & 0x00FF_FFFF;
         }
         let p34 = pack_stream_34(&v34);
@@ -932,16 +935,16 @@ mod tests {
         let n = 256;
 
         // Build randomized block
-        let mut rng = Rng::new(0xF00D_BABE_C0FFEE01);
+        let mut rng = Rng::new(0xF00D_BABE_C0FF_EE01);
         let mut in1 = [0u64; 256];
         let mut in2 = [0u64; 256];
         let mut out_vals = [0u64; 256];
         let mut credits = [0u32; 256];
         let mut types = [false; 256];
         for i in 0..256 {
-            in1[i] = rng.next_u64() & 0x3FFFF_FFFF;
-            in2[i] = rng.next_u64() & 0x3FFFF_FFFF;
-            out_vals[i] = rng.next_u64() & 0x3FFFF_FFFF;
+            in1[i] = rng.next_u64() & 0x0003_FFFF_FFFF;
+            in2[i] = rng.next_u64() & 0x0003_FFFF_FFFF;
+            out_vals[i] = rng.next_u64() & 0x0003_FFFF_FFFF;
             credits[i] = rng.next_u32() & 0x00FF_FFFF;
             types[i] = (rng.next_u32() & 1) != 0;
         }
@@ -1086,9 +1089,9 @@ mod tests {
         let mut credits = [0u32; 256];
         let mut types = [false; 256];
         for i in 0..256 {
-            in1[i] = rng.next_u64() & 0x3FFFF_FFFF;
-            in2[i] = rng.next_u64() & 0x3FFFF_FFFF;
-            out_vals[i] = rng.next_u64() & 0x3FFFF_FFFF;
+            in1[i] = rng.next_u64() & 0x0003_FFFF_FFFF;
+            in2[i] = rng.next_u64() & 0x0003_FFFF_FFFF;
+            out_vals[i] = rng.next_u64() & 0x0003_FFFF_FFFF;
             credits[i] = rng.next_u32() & 0x00FF_FFFF;
             types[i] = (rng.next_u32() & 1) != 0;
         }
@@ -1108,9 +1111,9 @@ mod tests {
             ref_unpack_34_to_u64(&blk.in2_packed, n, o2);
             ref_unpack_34_to_u64(&blk.out_packed, n, oo);
             ref_unpack_24_to_u32(&blk.credits_packed, n, oc);
-            for i in 0..n {
+            for (i, gate_type) in gt.iter_mut().enumerate().take(n) {
                 let b = blk.gate_types[i >> 3];
-                gt[i] = ((b >> (i & 7)) & 1) != 0;
+                *gate_type = ((b >> (i & 7)) & 1) != 0;
             }
         }
 
@@ -1375,8 +1378,8 @@ mod tests {
         }
 
         fn ref_unpack_24_to_u32(src: &[u8], n: usize, out: &mut [u32]) {
-            for i in 0..n {
-                out[i] = ref_extract_bits_le(src, i * 24, 24) as u32;
+            for (i, out) in out.iter_mut().enumerate().take(n) {
+                *out = ref_extract_bits_le(src, i * 24, 24) as u32;
             }
         }
 
