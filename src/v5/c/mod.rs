@@ -74,8 +74,14 @@ pub const CIPHERTEXT_VEC_SIZE: usize = CIPHERTEXTS_PER_BLOCK * 16; // 346,320 by
 
 // Compile-time assertions
 const _: () = assert!(GATES_SIZE + TYPES_SIZE + BLOCK_PADDING == BLOCK_SIZE);
-const _: () = assert!(GATES_SIZE.is_multiple_of(8), "Gates size must be 8-byte aligned");
-const _: () = assert!(TYPES_OFFSET.is_multiple_of(8), "Types must start at 8-byte boundary");
+const _: () = assert!(
+    GATES_SIZE.is_multiple_of(8),
+    "Gates size must be 8-byte aligned"
+);
+const _: () = assert!(
+    TYPES_OFFSET.is_multiple_of(8),
+    "Types must start at 8-byte boundary"
+);
 const _: () = assert!(BLOCKS_PER_DISK_BUFFER == 16);
 const _: () = assert!(
     CIPHERTEXT_VEC_SIZE < 512 * 1024,
