@@ -262,7 +262,7 @@ impl CircuitReaderV5b {
 impl Drop for CircuitReaderV5b {
     fn drop(&mut self) {
         if let Some(tx) = self.stop_tx.take() {
-            let _ = tx.send(());
+            let _ = tx.to_sync().send(());
         }
         if let Some(jh) = self.io_jh.take() {
             let _ = jh.join();
@@ -305,7 +305,7 @@ fn bytes_to_gates(bytes: &[u8], num_gates: usize) -> Result<Vec<GateV5b>> {
 
 /// Decode outputs from 4-byte little-endian u32 entries
 fn decode_outputs_le32(bytes: &[u8]) -> Result<Vec<u32>> {
-    if bytes.len() % 4 != 0 {
+    if !bytes.len().is_multiple_of(4) {
         return Err(Error::new(
             ErrorKind::InvalidData,
             "outputs length not multiple of 4",

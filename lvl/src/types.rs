@@ -194,7 +194,7 @@ pub struct CompactDependency {
 
 impl std::fmt::Debug for CompactDependency {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let dep = self.to_dependency();
+        let dep = self.as_dependency();
         f.debug_struct("CompactDependency")
             .field("other_in", &dep.other_in)
             .field("out", &dep.out)
@@ -255,7 +255,7 @@ impl CompactDependency {
     }
 
     /// Unpacks the compact dependency into a full structure.
-    pub(crate) fn to_dependency(&self) -> Dependency {
+    pub(crate) fn as_dependency(&self) -> Dependency {
         // Unpack other_in
         let other_in_u64 = self.bytes[0] as u64
             | ((self.bytes[1] as u64) << 8)

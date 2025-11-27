@@ -60,6 +60,12 @@ pub struct HeaderV5b {
     pub reserved2: u32,      // Reserved for alignment
 }
 
+impl Default for HeaderV5b {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HeaderV5b {
     /// Create a new header with default values
     pub fn new() -> Self {
@@ -138,7 +144,7 @@ impl HeaderV5b {
         // Safe: read_unaligned for packed struct field access using raw pointer
         let scratch_space =
             unsafe { std::ptr::read_unaligned(std::ptr::addr_of!(self.scratch_space)) };
-        if scratch_space > MAX_MEMORY_ADDRESS as u64 {
+        if scratch_space > MAX_MEMORY_ADDRESS {
             return Err(format!(
                 "Scratch space {} exceeds maximum addressable memory {}",
                 scratch_space, MAX_MEMORY_ADDRESS
@@ -343,7 +349,7 @@ mod tests {
         header.format_type = 0x01;
 
         // Test scratch space overflow
-        header.scratch_space = MAX_MEMORY_ADDRESS as u64 + 1;
+        header.scratch_space = MAX_MEMORY_ADDRESS + 1;
         assert!(header.validate().is_err());
     }
 
@@ -365,10 +371,8 @@ mod tests {
         assert_eq!(std::mem::align_of::<GateV5b>(), 4);
 
         // Test that we can safely cast bytes to gates
-        let gates = vec![
-            GateV5b::new(10, 20, 30).unwrap(),
-            GateV5b::new(40, 50, 60).unwrap(),
-        ];
+        let gates = [GateV5b::new(10, 20, 30).unwrap(),
+            GateV5b::new(40, 50, 60).unwrap()];
 
         // Convert to bytes
         let bytes: &[u8] = unsafe {

@@ -24,9 +24,9 @@ struct TrackingAllocator {
 static MEMORY_LIMIT: OnceLock<usize> = OnceLock::new();
 
 thread_local! {
-    static ALLOCATED_BYTES: Cell<usize> = Cell::new(0);
+    static ALLOCATED_BYTES: Cell<usize> = const {Cell::new(0)};
 
-    static MAX_ALLOCATED_BYTES: Cell<usize> = Cell::new(0);
+    static MAX_ALLOCATED_BYTES: Cell<usize> = const {Cell::new(0)};
 }
 
 unsafe impl GlobalAlloc for TrackingAllocator {
@@ -164,7 +164,7 @@ async fn run_level(args: cli::LevelCommand) -> Result<(), Box<dyn std::error::Er
     let multi_pb = MultiProgress::new();
 
     // Progress bar for gates loaded into leveller
-    let pb_load = multi_pb.add(ProgressBar::new(total_gates as u64));
+    let pb_load = multi_pb.add(ProgressBar::new(total_gates));
     pb_load.set_style(
         ProgressStyle::default_bar()
             .template(
@@ -175,7 +175,7 @@ async fn run_level(args: cli::LevelCommand) -> Result<(), Box<dyn std::error::Er
     );
 
     // Progress bar for gates processed into levels
-    let pb_level = multi_pb.add(ProgressBar::new(total_gates as u64));
+    let pb_level = multi_pb.add(ProgressBar::new(total_gates));
     pb_level.set_style(
         ProgressStyle::default_bar()
             .template("{spinner:.green} Gates levelled: [{bar:40.yellow/blue}] {pos}/{len} gates ({eta}) | {msg}")
@@ -406,7 +406,7 @@ async fn run_level(args: cli::LevelCommand) -> Result<(), Box<dyn std::error::Er
                                     leveller.add_gate(gate, v5a_gate.gate_type);
                                     total_gates_added += 1;
                                     loaded += 1;
-                                    pb_load.inc(1 as u64);
+                                    pb_load.inc(1);
                                 }
                                 if loaded % 10000 == 0 {
                                     update_pb_load(total_gates_added - total_gates_in_levels);

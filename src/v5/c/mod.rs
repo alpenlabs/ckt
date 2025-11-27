@@ -42,7 +42,7 @@ pub const ALIGNMENT: usize = 256 * 1024;
 pub const GATES_OFFSET: usize = 0;
 pub const GATES_SIZE: usize = GATES_PER_BLOCK * GATE_SIZE; // 259,440 bytes
 pub const TYPES_OFFSET: usize = GATES_SIZE; // 259,440
-pub const TYPES_SIZE: usize = (GATES_PER_BLOCK + 7) / 8; // 2,703 bytes
+pub const TYPES_SIZE: usize = GATES_PER_BLOCK.div_ceil(8); // 2,703 bytes
 pub const BLOCK_PADDING: usize = BLOCK_SIZE - GATES_SIZE - TYPES_SIZE; // 1 byte
 
 /// Magic bytes for v5 format: "Zk2u"
@@ -74,8 +74,8 @@ pub const CIPHERTEXT_VEC_SIZE: usize = CIPHERTEXTS_PER_BLOCK * 16; // 346,320 by
 
 // Compile-time assertions
 const _: () = assert!(GATES_SIZE + TYPES_SIZE + BLOCK_PADDING == BLOCK_SIZE);
-const _: () = assert!(GATES_SIZE % 8 == 0, "Gates size must be 8-byte aligned");
-const _: () = assert!(TYPES_OFFSET % 8 == 0, "Types must start at 8-byte boundary");
+const _: () = assert!(GATES_SIZE.is_multiple_of(8), "Gates size must be 8-byte aligned");
+const _: () = assert!(TYPES_OFFSET.is_multiple_of(8), "Types must start at 8-byte boundary");
 const _: () = assert!(BLOCKS_PER_DISK_BUFFER == 16);
 const _: () = assert!(
     CIPHERTEXT_VEC_SIZE < 512 * 1024,
@@ -144,7 +144,7 @@ impl HeaderV5c {
 
     /// Get total number of blocks (including partial)
     pub fn total_blocks(&self) -> u64 {
-        (self.total_gates() + GATES_PER_BLOCK as u64 - 1) / GATES_PER_BLOCK as u64
+        self.total_gates().div_ceil(GATES_PER_BLOCK as u64)
     }
 
     /// Validate the header
@@ -514,7 +514,7 @@ pub fn set_gate_type(types: &mut [u8], gate_index: usize, gate_type: bool) {
 
 /// Calculate padded size for alignment to 256 KiB boundaries
 pub fn padded_size(size: usize) -> usize {
-    ((size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT
+    size.div_ceil(ALIGNMENT) * ALIGNMENT
 }
 
 /// Calculate the file size for a circuit
@@ -522,7 +522,7 @@ pub fn calculate_file_size(total_gates: u64, num_outputs: u64) -> u64 {
     let header_padded = ALIGNMENT as u64;
     let outputs_size = num_outputs * OUTPUT_ENTRY_SIZE as u64;
     let outputs_padded = padded_size(outputs_size as usize) as u64;
-    let num_blocks = (total_gates + GATES_PER_BLOCK as u64 - 1) / GATES_PER_BLOCK as u64;
+    let num_blocks = total_gates.div_ceil(GATES_PER_BLOCK as u64);
     let blocks_size = num_blocks * BLOCK_SIZE as u64;
 
     header_padded + outputs_padded + blocks_size
@@ -648,11 +648,11 @@ mod tests {
         set_gate_type(&mut types, 21619, true); // AND (last gate)
 
         // Verify
-        assert_eq!(get_gate_type(&types, 0), false);
-        assert_eq!(get_gate_type(&types, 1), true);
-        assert_eq!(get_gate_type(&types, 7), true);
-        assert_eq!(get_gate_type(&types, 8), false);
-        assert_eq!(get_gate_type(&types, 21619), true);
+        assert!(!get_gate_type(&types, 0));
+        assert!(get_gate_type(&types, 1));
+        assert!(get_gate_type(&types, 7));
+        assert!(!get_gate_type(&types, 8));
+        assert!(get_gate_type(&types, 21619));
     }
 
     #[test]

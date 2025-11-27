@@ -152,8 +152,7 @@ async fn test_arc_sharing_pattern() {
     // Simulate 4 workers processing their assigned blocks
     let blocks = unsafe { &*(shared.as_ptr() as *const [Block; 16]) };
     let mut total_processed = 0;
-    for block_idx in 0..num_blocks {
-        let _block = &blocks[block_idx];
+    for _block in blocks.iter().take(num_blocks) {
         // Each worker would process gates from this block
         total_processed += GATES_PER_BLOCK;
     }
@@ -244,7 +243,7 @@ async fn test_partial_last_block() {
 
     // Read and verify partial block handling
     let mut reader = ReaderV5c::open(path).unwrap();
-    let header = reader.header().clone();
+    let header = *reader.header();
 
     let mut buffer = vec![0u8; BLOCK_SIZE * 16];
     let num_blocks = reader.read_blocks(&mut buffer).await.unwrap();

@@ -44,6 +44,12 @@ pub struct BlockBuilder {
     gate_types: [GateType; GATES_PER_BLOCK], // 0 = XOR, 1 = AND
 }
 
+impl Default for BlockBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl BlockBuilder {
     pub fn new() -> Self {
         Self {
@@ -70,10 +76,7 @@ impl BlockBuilder {
 
     pub fn push(&mut self, gate: GateV5a) -> Result<()> {
         if self.is_full() {
-            return Err(Error::new(
-                ErrorKind::Other,
-                "internal error: push into full block",
-            ));
+            return Err(Error::other("internal error: push into full block"));
         }
         // Validate wire IDs and credits
         if gate.in1 > MAX_WIRE_ID || gate.in2 > MAX_WIRE_ID || gate.out > MAX_WIRE_ID {
@@ -439,7 +442,7 @@ fn pack_24_bits(values: &[u32], output: &mut [u8]) {
             output[byte_offset + 2] = (v >> 16) as u8;
         } else {
             // unaligned: up to 4 bytes spanned
-            let shifted = (v as u32) << bit_shift;
+            let shifted = v << bit_shift;
             output[byte_offset] |= shifted as u8;
             output[byte_offset + 1] |= (shifted >> 8) as u8;
             output[byte_offset + 2] |= (shifted >> 16) as u8;
@@ -482,13 +485,13 @@ mod tests {
             bytes[..to_copy].copy_from_slice(&data[byte_offset..byte_offset + to_copy]);
         }
         let val = u32::from_le_bytes(bytes);
-        ((val >> bit_shift) & 0xFF_FFFF) as u32
+        (val >> bit_shift) & 0xFF_FFFF
     }
 
     #[test]
     fn test_pack_34_bits_basic() {
         let vals = vec![0, 1, 2, 3, MAX_WIRE_ID, 0x123456789 & MAX_WIRE_ID];
-        let need = (vals.len() * 34 + 7) / 8;
+        let need = (vals.len() * 34).div_ceil(8);
         let mut out = vec![0u8; need];
         pack_34_bits(&vals, &mut out);
 
@@ -500,7 +503,7 @@ mod tests {
     #[test]
     fn test_pack_24_bits_basic() {
         let vals = vec![0, 1, 2, 3, MAX_CREDITS, 0x00BBCCDD & MAX_CREDITS];
-        let need = (vals.len() * 24 + 7) / 8;
+        let need = (vals.len() * 24).div_ceil(8);
         let mut out = vec![0u8; need];
         pack_24_bits(&vals, &mut out);
 

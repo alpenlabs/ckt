@@ -44,7 +44,7 @@ pub async fn garble(
 
     let config = GarblingInstanceConfig {
         scratch_space: header.scratch_space as u32,
-        delta: delta,
+        delta,
         primary_input_false_labels: &labels,
     };
 
@@ -124,7 +124,7 @@ pub async fn garble(
 
     // Read inputs and encode them
     let input_values_bits = read_inputs(input_file, header.primary_inputs as usize);
-    let input_wires: Vec<u64> = (2..=header.primary_inputs + 1).map(|w| w as u64).collect();
+    let input_wires: Vec<u64> = (2..=header.primary_inputs + 1).collect();
     let mut input_labels = vec![[0u8; 16]; input_wires.len()];
 
     garb_instance.get_selected_labels(&input_wires, &input_values_bits, &mut input_labels);
@@ -158,7 +158,7 @@ pub async fn garble_discard(circuit_file: &str, rng: &mut ChaCha20Rng) -> Vec<[u
 
     let config = GarblingInstanceConfig {
         scratch_space: header.scratch_space as u32,
-        delta: delta,
+        delta,
         primary_input_false_labels: &labels,
     };
 

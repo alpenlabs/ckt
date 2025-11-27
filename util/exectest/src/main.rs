@@ -70,8 +70,7 @@ async fn main() {
                         let ptr = state_ptr.as_ptr();
 
                         // Process AND gates for this worker
-                        let and_chunk_size =
-                            (level.and_gates.len() + num_threads - 1) / num_threads;
+                        let and_chunk_size = level.and_gates.len().div_ceil(num_threads);
                         let and_start = worker_id * and_chunk_size;
 
                         if and_start < level.and_gates.len() {
@@ -87,8 +86,7 @@ async fn main() {
                         }
 
                         // Process XOR gates for this worker
-                        let xor_chunk_size =
-                            (level.xor_gates.len() + num_threads - 1) / num_threads;
+                        let xor_chunk_size = level.xor_gates.len().div_ceil(num_threads);
                         let xor_start = worker_id * xor_chunk_size;
 
                         if xor_start < level.xor_gates.len() {
@@ -142,7 +140,7 @@ async fn main() {
         let string = String::from_utf8(bytes).unwrap();
         assert_eq!(string.chars().count(), header.primary_inputs as usize);
         for (char_idx, char) in string.chars().enumerate() {
-            let idx = char_idx as usize + 2;
+            let idx = char_idx + 2;
             match char {
                 '0' => state[idx] = false,
                 '1' => state[idx] = true,

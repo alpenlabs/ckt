@@ -5,7 +5,7 @@ use bitvec::vec::BitVec;
 /// A generic trait for describing an instance used for garbling a boolean circuit. The garbling instance stores labels of active wires during garbling.
 pub trait GarblingInstance {
     /// The ciphertext type used by this implementation.
-    type Ciphertext;
+    type Ciphertext: From<[u8; 16]> + Into<[u8; 16]>;
 
     /// Feed an XOR gate into the instance. Accepts the memory addresses of the
     /// inputs and output.
@@ -27,7 +27,7 @@ pub trait GarblingInstance {
 /// A generic trait for describing an instance used for evaluating a garbled boolean circuit. The evaluation instance stores labels and values corresponding to active wires during evaluation.
 pub trait EvaluationInstance {
     /// The ciphertext type used by this implementation.
-    type Ciphertext;
+    type Ciphertext: From<[u8; 16]> + Into<[u8; 16]>;
 
     /// Feed an XOR gate into the instance. Accepts the memory addresses of the
     /// inputs and output.

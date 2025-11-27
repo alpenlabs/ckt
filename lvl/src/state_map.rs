@@ -134,7 +134,7 @@ impl<'a> Drop for WaitingSetGuard<'a> {
 ///
 /// Uses `#[repr(packed)]` to minimize memory overhead. All access must use
 /// unaligned reads/writes.
-#[repr(packed)]
+#[repr(Rust, packed)]
 union Wire {
     credits: u32,             // Credits (4 bytes) - only lower 24 bits used
     waiting_inline: [u8; 12], // Single CompactDependency (12 bytes)
@@ -155,7 +155,7 @@ union Wire {
 /// - `01` (1): Available (contains Credits)
 /// - `10` (2): Waiting with HashSet (contains pointer)
 /// - `11` (3): Waiting inline (contains CompactDependency bytes)
-#[repr(packed)]
+#[repr(Rust, packed)]
 struct SlottedValue {
     mask: u8,
     slots: [Wire; 4],
@@ -493,6 +493,12 @@ impl WireStateMap {
     #[inline]
     pub fn buckets(&self) -> usize {
         self.inner.len()
+    }
+}
+
+impl Default for WireStateMap {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

@@ -12,14 +12,6 @@ use hex_literal::hex;
 /// [`GobbleEngine`] implementations.
 #[cfg(target_arch = "aarch64")]
 pub type Engine = aarch64::Aarch64GobbleEngine;
-#[cfg(target_arch = "x86_64")]
-pub type Engine = x86_64::X86_64GobbleEngine;
-
-#[cfg(test)]
-mod tests {
-    // Fixes a compiler warning
-    use criterion as _;
-}
 
 /// Main AES key used for gate hashing.
 /// 
@@ -41,3 +33,11 @@ pub const AES128_ROUND_KEY_BYTES: [[u8; 16]; 10] = [
     hex!("ac7766f319fadc2128d12941575c006e"),
     hex!("d014f9a8c9ee2589e13f0cc8b6630ca6"),
 ];
+#[cfg(target_arch = "x86_64")]
+pub type Engine = x86_64::X86_64GobbleEngine;
+
+#[cfg(test)]
+mod tests {
+    // Fixes a compiler warning
+    use criterion as _;
+}

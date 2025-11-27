@@ -37,7 +37,7 @@ async fn main() {
                 let idx = block.in2[i] as usize % NUM;
                 actual[idx] += 1;
             }
-            // max_creds = max_creds.max(block.credits[i]);
+            max_creds = max_creds.max(block.credits[i]);
         }
         pb.inc(block.gates_in_block as u64);
     }
