@@ -14,10 +14,10 @@ use hex_literal::hex;
 pub type Engine = aarch64::Aarch64GobbleEngine;
 
 /// Main AES key used for gate hashing.
-/// 
+///
 /// Taken from https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/armv8/test_expand.rs
 /// Corresponding to FIPS 197 Appendix A.1
-/// 
+///
 /// Note that this key is intentionally arbitrary, fixed, and public.
 pub const AES128_KEY_BYTES: [u8; 16] = hex!("2b7e151628aed2a6abf7158809cf4f3c");
 /// Precomputed round keys used for gate hashing.

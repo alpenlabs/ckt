@@ -371,8 +371,10 @@ mod tests {
         assert_eq!(std::mem::align_of::<GateV5b>(), 4);
 
         // Test that we can safely cast bytes to gates
-        let gates = [GateV5b::new(10, 20, 30).unwrap(),
-            GateV5b::new(40, 50, 60).unwrap()];
+        let gates = [
+            GateV5b::new(10, 20, 30).unwrap(),
+            GateV5b::new(40, 50, 60).unwrap(),
+        ];
 
         // Convert to bytes
         let bytes: &[u8] = unsafe {
