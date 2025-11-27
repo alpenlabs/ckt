@@ -456,7 +456,7 @@ pub struct Block {
     /// Gates in execution order (21,620 gates × 12 bytes = 259,440 bytes)
     pub gates: [GateV5c; GATES_PER_BLOCK],
     /// Gate types bit-packed (2,703 bytes)
-    /// Bit N corresponds to gates[N]: 0 = XOR, 1 = AND
+    /// Bit N corresponds to `gates[N]`: 0 = XOR, 1 = AND
     pub types: [u8; TYPES_SIZE],
     /// Padding to reach exactly 256 KiB (1 byte)
     pub _padding: [u8; BLOCK_PADDING],
