@@ -1,6 +1,5 @@
 use std::fs::File;
-use std::io::{BufWriter, Write};
-use std::path::PathBuf;
+use std::io::BufWriter;
 use std::time::Instant;
 
 use bitvec::vec::BitVec;
@@ -8,132 +7,13 @@ use ckt_fmtv5_types::{GateType, v5::c::*};
 use ckt_gobble::{
     Engine,
     traits::{GarblingInstance, GarblingInstanceConfig, GobbleEngine},
-    x86_64::garb::X86_64GarblingInstance,
 };
-use ckt_runner_exec::process_task;
-use ckt_runner_types::{CircuitTask, GateBlock};
+use ckt_runner_exec::{GarbleTask, process_task};
 use indicatif::{ProgressBar, ProgressStyle};
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::RngCore;
 
-use crate::common::{read_inputs, ProgressBarTask};
-
-/// Internal garbling state.
-struct GarbleState {
-    instance: X86_64GarblingInstance,
-    writer: BufWriter<File>,
-    output_wires: u64,
-}
-
-#[derive(Debug)]
-pub struct GarbleTaskOutput {
-    instance: X86_64GarblingInstance,
-
-    garbler_output_labels: Vec<[u8; 16]>,
-    output_values: BitVec,
-}
-
-struct GarbleTask<'c> {
-    garb_config: GarblingInstanceConfig<'c>,
-    output_file: PathBuf,
-}
-
-impl<'c> GarbleTask<'c> {
-    pub fn new(garb_config: GarblingInstanceConfig<'c>, output_file: PathBuf) -> Self {
-        Self {
-            garb_config,
-            output_file,
-        }
-    }
-}
-
-impl<'c> CircuitTask for GarbleTask<'c> {
-    type Error = std::io::Error;
-
-    type State = GarbleState;
-
-    type Output = GarbleTaskOutput;
-
-    fn initialize(&self, header: &HeaderV5c) -> Result<Self::State, Self::Error> {
-        // Create the engine.
-        let engine = Engine::new();
-        let instance = engine.new_garbling_instance(self.garb_config);
-
-        // Open the output writer.
-        let file = File::create(&self.output_file).unwrap();
-        let writer = BufWriter::new(file);
-
-        Ok(GarbleState {
-            instance,
-            writer,
-            output_wires: header.num_outputs,
-        })
-    }
-
-    fn on_block(&self, state: &mut Self::State, block: &GateBlock<'_>) -> Result<(), Self::Error> {
-        for (ginfo, gty) in block.gates_iter() {
-            match gty {
-                GateType::AND => {
-                    let ct = state.instance.feed_and_gate(
-                        ginfo.in1 as usize,
-                        ginfo.in2 as usize,
-                        ginfo.out as usize,
-                    );
-
-                    let bytes: [u8; 16] = unsafe { std::mem::transmute(ct.0) };
-
-                    state
-                        .writer
-                        .write_all(&bytes)
-                        .expect("garble: write output table");
-                }
-
-                GateType::XOR => state.instance.feed_xor_gate(
-                    ginfo.in1 as usize,
-                    ginfo.in2 as usize,
-                    ginfo.out as usize,
-                ),
-            }
-        }
-
-        Ok(())
-    }
-
-    fn on_after_chunk(&self, _state: &mut Self::State) -> Result<(), Self::Error> {
-        Ok(())
-    }
-
-    fn finish(
-        &self,
-        mut state: Self::State,
-        output_wire_idxs: &[u64],
-    ) -> Result<Self::Output, Self::Error> {
-        // Cleanup.
-        state.writer.flush().expect("garble: flush output table");
-
-        // Extract output values.
-        let mut garbler_output_labels = vec![[0u8; 16]; output_wire_idxs.len()];
-        let output_values = BitVec::repeat(false, output_wire_idxs.len());
-        state.instance.get_selected_labels(
-            &output_wire_idxs,
-            &output_values,
-            &mut garbler_output_labels,
-        );
-
-        Ok(GarbleTaskOutput {
-            instance: state.instance,
-            garbler_output_labels,
-            output_values,
-        })
-    }
-
-    fn on_abort(&self, mut state: Self::State) {
-        state
-            .writer
-            .flush()
-            .expect("garble: flush outpput table on abort");
-    }
-}
+use crate::common::{ProgressBarTask, read_inputs};
 
 pub async fn garble(
     circuit_file: &str,
@@ -163,13 +43,17 @@ pub async fn garble(
         primary_input_false_labels: &labels,
     };
 
-    let task_info = GarbleTask::new(config, PathBuf::from(output_file));
+    let task_info = GarbleTask::new(config);
     let task_with_progress = ProgressBarTask::new(task_info);
+
+    // Open the output writer.
+    let file = File::create(output_file).unwrap();
+    let writer = BufWriter::new(file);
 
     // Execute the garbling loop.
     //
     // The output from this is the garbler output labels.
-    let output = process_task(&task_with_progress, &mut reader)
+    let output = process_task(&task_with_progress, writer, &mut reader)
         .await
         .expect("garble: process task");
 
