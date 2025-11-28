@@ -68,19 +68,21 @@ pub trait ExecutionInstance {
 }
 
 /// Configuration for garbling a boolean circuit
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct GarblingInstanceConfig<'labels> {
     /// Max live wires used at any point in the circuit. See ckt v5 architecture
     /// for additional details.
     pub scratch_space: u32,
+
     /// The delta is a global offset constant used for garbling a circuit. This value must be kept secret from the evaluator.
     pub delta: [u8; 16],
+
     /// Input false labels for the circuit.
     pub primary_input_false_labels: &'labels [[u8; 16]],
 }
 
 /// Configuration for executing a boolean circuit
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct ExecutionInstanceConfig<'values> {
     /// Max live wires used at any point in the circuit. See ckt v5 architecture
     /// for additional details.
@@ -90,7 +92,7 @@ pub struct ExecutionInstanceConfig<'values> {
 }
 
 /// Configuration for evaluating a garbled circuit
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct EvaluationInstanceConfig<'labels> {
     /// Max live wires used at any point in the circuit. See ckt v5 architecture
     /// for additional details.

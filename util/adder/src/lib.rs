@@ -4,8 +4,8 @@
 //! This module provides utilities for generating ripple-carry adder circuits
 //! that can be used for testing and validation of CKT tooling.
 
-use ckt::GateType;
-use ckt::v5::a::{CREDITS_OUTPUT, GateV5a, MAX_CREDITS, MAX_WIRE_ID};
+use ckt_fmtv5_types::GateType;
+use ckt_fmtv5_types::v5::a::{CREDITS_OUTPUT, GateV5a, MAX_CREDITS, MAX_WIRE_ID};
 
 /// Generate an n-bit ripple-carry adder circuit.
 ///

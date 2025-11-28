@@ -5,7 +5,7 @@
 //! - Gate dependencies packed into 12 bytes
 //! - Efficient tracking of wire availability and pending dependencies
 
-use ckt::GateType;
+use ckt_fmtv5_types::GateType;
 use indexmap::IndexSet;
 
 use std::cmp::Ordering;

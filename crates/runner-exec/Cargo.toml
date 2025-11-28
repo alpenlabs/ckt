@@ -1,5 +1,5 @@
 [package]
-name = "gobbletest"
+name = "ckt-runner-exec"
 version = "0.1.0"
 edition.workspace = true
 authors.workspace = true
@@ -10,9 +10,9 @@ repository.workspace = true
 ckt-fmtv5-types.workspace = true
 ckt-gobble.workspace = true
 ckt-runner-types.workspace = true
-ckt-runner-exec.workspace = true
 
+anyhow.workspace = true
 bitvec.workspace = true
-indicatif.workspace = true
-monoio.workspace = true
-rand_chacha.workspace = true
+
+[lints]
+workspace = true

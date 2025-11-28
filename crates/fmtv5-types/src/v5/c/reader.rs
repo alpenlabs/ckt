@@ -15,6 +15,7 @@ use cynosure::site_d::triplebuffer::{
 use kanal::{AsyncReceiver, AsyncSender, bounded_async};
 use monoio::{FusionDriver, select};
 
+use super::chunk::Chunk;
 use crate::v5::c::{ALIGNMENT, BLOCK_SIZE, GATES_PER_BLOCK, HEADER_SIZE, HeaderV5c, padded_size};
 
 /// Reader for v5c format files with triple-buffered io_uring
@@ -125,6 +126,17 @@ impl ReaderV5c {
             cur_buf: None,
             bytes_remaining: gate_region_bytes,
         })
+    }
+
+    /// Returns the next chunk of blocks that we can iterate over.
+    pub async fn next_blocks_chunk(&mut self) -> Result<Option<Chunk<'_>>> {
+        let Some((buf, num_blocks)) = self.next_blocks_ref().await? else {
+            return Ok(None);
+        };
+
+        // SAFETY: `next_blocks_ref` returns values constructed properly.
+        let chunk = unsafe { Chunk::from_blocks_buf(buf, num_blocks) };
+        Ok(Some(chunk))
     }
 
     /// Get a zero-copy reference to the next 4 MiB buffer from the triple-buffer reader

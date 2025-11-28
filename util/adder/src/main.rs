@@ -1,7 +1,7 @@
 //! CLI tool for generating n-bit adder circuits in v5a format.
 
 use adder::generate_adder;
-use ckt::v5::a::writer::CircuitWriterV5a;
+use ckt_fmtv5_types::v5::a::writer::CircuitWriterV5a;
 use monoio::{FusionDriver, RuntimeBuilder};
 use std::path::PathBuf;
 
