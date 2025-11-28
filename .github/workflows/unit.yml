@@ -20,7 +20,16 @@ permissions: {}
 jobs:
   test:
     name: Run unit tests and generate report
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            bitcoind_arch: "x86_64-linux-gnu"
+            shasum: "a681e4f6ce524c338a105f214613605bac6c33d58c31dc5135bbc02bc458bb6c"
+          - runner: ubuntu-24.04-arm
+            bitcoind_arch: "aarch64-linux-gnu"
+            shasum: "7922ac99363dd28f79e57ef7098581fd48ebd1119b412b07e73b1fd19fd0443f"
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60 # better fail-safe than the default 360 in github actions
     permissions:
       contents: read
@@ -41,8 +50,8 @@ jobs:
       - name: Install bitcoind
         env:
           BITCOIND_VERSION: "29.0"
-          BITCOIND_ARCH: "x86_64-linux-gnu"
-          SHASUM: "a681e4f6ce524c338a105f214613605bac6c33d58c31dc5135bbc02bc458bb6c"
+          BITCOIND_ARCH: ${{ matrix.bitcoind_arch }}
+          SHASUM: ${{ matrix.shasum }}
         run: |
           curl -fsSLO --proto "=https" --tlsv1.2 "https://bitcoincore.org/bin/bitcoin-core-$BITCOIND_VERSION/bitcoin-$BITCOIND_VERSION-$BITCOIND_ARCH.tar.gz"
           sha256sum -c <<< "$SHASUM bitcoin-$BITCOIND_VERSION-$BITCOIND_ARCH.tar.gz"
@@ -62,7 +71,12 @@ jobs:
 
   doc:
     name: Run doc tests
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+          - runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     env:
       RUST_BACKTRACE: 1
     timeout-minutes: 60
