@@ -1,6 +1,6 @@
 //! asdas
 
-use ckt::v5::a::reader::CircuitReaderV5a;
+use ckt_fmtv5_types::v5::a::reader::CircuitReaderV5a;
 use indicatif::ProgressBar;
 // use roaring::{RoaringBitmap, RoaringTreemap};
 

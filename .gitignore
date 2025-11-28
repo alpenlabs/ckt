@@ -5,3 +5,16 @@ Cargo.lock
 *.csv
 *.ptx
 inputs.txt
+
+# macos, gross
+.DS_Store
+
+# emacs, yay!
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
