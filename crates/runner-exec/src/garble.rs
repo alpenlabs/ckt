@@ -6,13 +6,9 @@ use bitvec::vec::BitVec;
 use ckt_fmtv5_types::v5::c::HeaderV5c;
 use ckt_fmtv5_types::GateType;
 use ckt_gobble::{
+    Engine, GarblingInstance as PlatformGarblingInstance,
     traits::{GarblingInstance, GarblingInstanceConfig, GobbleEngine},
-    Engine,
 };
-#[cfg(target_arch = "aarch64")]
-use ckt_gobble::aarch64::garb::Aarch64GarblingInstance as PlatformGarblingInstance;
-#[cfg(target_arch = "x86_64")]
-use ckt_gobble::x86_64::garb::X86_64GarblingInstance as PlatformGarblingInstance;
 use ckt_runner_types::{CircuitTask, GateBlock};
 
 /// Internal garbling state.
