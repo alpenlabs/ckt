@@ -5,17 +5,9 @@ use std::io::Read;
 use ckt_fmtv5_types::v5::c::HeaderV5c;
 use ckt_fmtv5_types::GateType;
 use ckt_gobble::{
+    Ciphertext, Engine, EvaluationInstance as PlatformEvaluationInstance,
     traits::{EvaluationInstance, EvaluationInstanceConfig, GobbleEngine},
-    Engine,
 };
-#[cfg(target_arch = "aarch64")]
-use ckt_gobble::aarch64::Ciphertext;
-#[cfg(target_arch = "aarch64")]
-use ckt_gobble::aarch64::eval::Aarch64EvaluationInstance as PlatformEvaluationInstance;
-#[cfg(target_arch = "x86_64")]
-use ckt_gobble::x86_64::Ciphertext;
-#[cfg(target_arch = "x86_64")]
-use ckt_gobble::x86_64::eval::X86_64EvaluationInstance as PlatformEvaluationInstance;
 use ckt_runner_types::{CircuitTask, GateBlock};
 
 /// Internal evaluation state.

@@ -3,13 +3,9 @@
 use ckt_fmtv5_types::v5::c::HeaderV5c;
 use ckt_fmtv5_types::GateType;
 use ckt_gobble::{
+    Engine, ExecutionInstance as PlatformExecutionInstance,
     traits::{ExecutionInstance, ExecutionInstanceConfig, GobbleEngine},
-    Engine,
 };
-#[cfg(target_arch = "aarch64")]
-use ckt_gobble::aarch64::exec::Aarch64ExecutionInstance as PlatformExecutionInstance;
-#[cfg(target_arch = "x86_64")]
-use ckt_gobble::x86_64::exec::X86_64ExecutionInstance as PlatformExecutionInstance;
 use ckt_runner_types::{CircuitTask, GateBlock};
 
 /// Internal execution state.

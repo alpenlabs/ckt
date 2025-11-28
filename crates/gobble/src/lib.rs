@@ -1,19 +1,37 @@
 //! Core crate for garbling, executing and evaluating garbled/boolean circuits.
 
-#[cfg(target_arch = "aarch64")]
-pub mod aarch64;
 pub mod traits;
+
+#[cfg(target_arch = "aarch64")]
+mod aarch64;
+
 #[cfg(target_arch = "x86_64")]
-/// Dynamically switching type alias that changes between architecture specific
-/// [`GobbleEngine`] implementations.
-pub mod x86_64;
+mod x86_64;
 
 use hex_literal::hex;
 
-/// Dynamically switching type alias that changes between architecture specific
-/// [`GobbleEngine`] implementations.
+/// Architecture-specific types re-exported at a consistent path.
 #[cfg(target_arch = "aarch64")]
-pub type Engine = aarch64::Aarch64GobbleEngine;
+mod arch {
+    pub use crate::aarch64::{
+        Aarch64GobbleEngine as Engine, Ciphertext, Label,
+        eval::Aarch64EvaluationInstance as EvaluationInstance,
+        exec::Aarch64ExecutionInstance as ExecutionInstance,
+        garb::Aarch64GarblingInstance as GarblingInstance,
+    };
+}
+
+#[cfg(target_arch = "x86_64")]
+mod arch {
+    pub use crate::x86_64::{
+        Ciphertext, Label, X86_64GobbleEngine as Engine,
+        eval::X86_64EvaluationInstance as EvaluationInstance,
+        exec::X86_64ExecutionInstance as ExecutionInstance,
+        garb::X86_64GarblingInstance as GarblingInstance,
+    };
+}
+
+pub use arch::*;
 
 /// Main AES key used for gate hashing.
 ///
@@ -22,6 +40,7 @@ pub type Engine = aarch64::Aarch64GobbleEngine;
 ///
 /// Note that this key is intentionally arbitrary, fixed, and public.
 pub const AES128_KEY_BYTES: [u8; 16] = hex!("2b7e151628aed2a6abf7158809cf4f3c");
+
 /// Precomputed round keys used for gate hashing.
 pub const AES128_ROUND_KEY_BYTES: [[u8; 16]; 10] = [
     hex!("a0fafe1788542cb123a339392a6c7605"),
@@ -35,10 +54,6 @@ pub const AES128_ROUND_KEY_BYTES: [[u8; 16]; 10] = [
     hex!("ac7766f319fadc2128d12941575c006e"),
     hex!("d014f9a8c9ee2589e13f0cc8b6630ca6"),
 ];
-#[cfg(target_arch = "x86_64")]
-/// Dynamically switching type alias that changes between architecture specific
-/// [`GobbleEngine`] implementations.
-pub type Engine = x86_64::X86_64GobbleEngine;
 
 #[cfg(test)]
 mod tests {
