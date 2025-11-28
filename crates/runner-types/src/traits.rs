@@ -11,6 +11,9 @@ pub trait CircuitTask {
     /// Error type for whatever errors might happen.
     type Error: Error + Sync + Send + 'static;
 
+    /// Additional input data needed to initialize the task.
+    type InitInput;
+
     /// Running task state.
     type State;
 
@@ -21,7 +24,7 @@ pub trait CircuitTask {
     /// running task state.
     ///
     /// This is called first and once.
-    fn initialize(&self, header: &HeaderV5c) -> Result<Self::State, Self::Error>;
+    fn initialize(&self, header: &HeaderV5c, init_input: Self::InitInput) -> Result<Self::State, Self::Error>;
 
     /// Visits a block of gates for processing.  This modifies the passed task
     /// state as needed by the task.

@@ -8,9 +8,11 @@ repository.workspace = true
 
 [dependencies]
 ckt-fmtv5-types.workspace = true
+ckt-gobble.workspace = true
 ckt-runner-types.workspace = true
 
 anyhow.workspace = true
+bitvec.workspace = true
 
 [lints]
 workspace = true
