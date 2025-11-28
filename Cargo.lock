@@ -311,7 +311,9 @@ name = "ckt-runner-exec"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "bitvec",
  "ckt-fmtv5-types",
+ "ckt-gobble",
  "ckt-runner-types",
 ]
 

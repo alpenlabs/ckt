@@ -58,11 +58,12 @@ pub struct ProgressBarState<S> {
 
 impl<T: CircuitTask> CircuitTask for ProgressBarTask<T> {
     type Error = T::Error;
+    type InitInput = T::InitInput;
     type State = ProgressBarState<T::State>;
     type Output = T::Output;
 
-    fn initialize(&self, header: &HeaderV5c) -> Result<Self::State, Self::Error> {
-        let inner_state = self.inner.initialize(header)?;
+    fn initialize(&self, header: &HeaderV5c, init_input: Self::InitInput) -> Result<Self::State, Self::Error> {
+        let inner_state = self.inner.initialize(header, init_input)?;
 
         let total_gates = header.total_gates();
         let pb = ProgressBar::new(total_gates);

@@ -4,10 +4,11 @@ use ckt_runner_types::{CircuitTask, GateBlock};
 /// Proceses a circuit task by reading blocks out of a `ReaderV5c`.
 pub async fn process_task<T: CircuitTask>(
     task_info: &T,
+    init_input: T::InitInput,
     reader: &mut ReaderV5c,
 ) -> anyhow::Result<T::Output> {
     // Initialize the task and run through the circuit.
-    let mut task_state = task_info.initialize(reader.header())?;
+    let mut task_state = task_info.initialize(reader.header(), init_input)?;
     if let Err(e) = process_task_inner(task_info, &mut task_state, reader).await {
         task_info.on_abort(task_state);
         return Err(e);
