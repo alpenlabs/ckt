@@ -12,24 +12,17 @@ use ckt_gobble::{
 };
 use ckt_runner_exec::process_task;
 use ckt_runner_types::{CircuitTask, GateBlock};
-use indicatif::ProgressBar;
-use indicatif::ProgressStyle;
+use indicatif::{ProgressBar, ProgressStyle};
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::RngCore;
 
-use crate::common::read_inputs;
+use crate::common::{read_inputs, ProgressBarTask};
 
 /// Internal garbling state.
 struct GarbleState {
     instance: X86_64GarblingInstance,
     writer: BufWriter<File>,
-
-    total_gates: u64,
-    total_gates_processed: u64,
     output_wires: u64,
-
-    progress_bar: ProgressBar,
-    start: Instant,
 }
 
 #[derive(Debug)]
@@ -70,27 +63,10 @@ impl<'c> CircuitTask for GarbleTask<'c> {
         let file = File::create(&self.output_file).unwrap();
         let writer = BufWriter::new(file);
 
-        // Progress meters.
-        let total_gates = header.total_gates();
-        let pb = ProgressBar::new(total_gates);
-        pb.set_style(
-            ProgressStyle::default_bar()
-                .template("🦃 [{bar:50.cyan/blue}] {percent:>3}% | {msg} | {elapsed_precise}")
-                .unwrap()
-                .progress_chars("█░"),
-        );
-        let start = Instant::now();
-
         Ok(GarbleState {
             instance,
             writer,
-
-            total_gates,
-            total_gates_processed: 0,
             output_wires: header.num_outputs,
-
-            progress_bar: pb,
-            start,
         })
     }
 
@@ -120,25 +96,10 @@ impl<'c> CircuitTask for GarbleTask<'c> {
             }
         }
 
-        state.total_gates_processed += block.num_gates() as u64;
-        state.progress_bar.inc(block.num_gates() as u64);
-
         Ok(())
     }
 
-    fn on_after_chunk(&self, state: &mut Self::State) -> Result<(), Self::Error> {
-        let elapsed = state.start.elapsed();
-        if elapsed.as_secs_f64() > 0.0 {
-            let rate_m = (state.total_gates_processed as f64 / elapsed.as_secs_f64()) / 1_000_000.0;
-            let processed_b = state.total_gates_processed as f64 / 1_000_000_000.0;
-            let total_b = state.total_gates as f64 / 1_000_000_000.0;
-
-            state.progress_bar.set_message(format!(
-                "{:.2}B / {:.2}B gates @ {:.0} M/s",
-                processed_b, total_b, rate_m
-            ));
-        }
-
+    fn on_after_chunk(&self, _state: &mut Self::State) -> Result<(), Self::Error> {
         Ok(())
     }
 
@@ -149,7 +110,6 @@ impl<'c> CircuitTask for GarbleTask<'c> {
     ) -> Result<Self::Output, Self::Error> {
         // Cleanup.
         state.writer.flush().expect("garble: flush output table");
-        state.progress_bar.finish();
 
         // Extract output values.
         let mut garbler_output_labels = vec![[0u8; 16]; output_wire_idxs.len()];
@@ -172,7 +132,6 @@ impl<'c> CircuitTask for GarbleTask<'c> {
             .writer
             .flush()
             .expect("garble: flush outpput table on abort");
-        state.progress_bar.finish();
     }
 }
 
@@ -185,7 +144,6 @@ pub async fn garble(
     let mut reader = ReaderV5c::open(circuit_file).unwrap();
 
     let header = *reader.header();
-    let total_gates = header.total_gates();
 
     // TODO move this setup into `initialize`
     let labels: Vec<_> = (0..header.primary_inputs)
@@ -206,11 +164,12 @@ pub async fn garble(
     };
 
     let task_info = GarbleTask::new(config, PathBuf::from(output_file));
+    let task_with_progress = ProgressBarTask::new(task_info);
 
     // Execute the garbling loop.
     //
     // The output from this is the garbler output labels.
-    let output = process_task(&task_info, &mut reader)
+    let output = process_task(&task_with_progress, &mut reader)
         .await
         .expect("garble: process task");
 
