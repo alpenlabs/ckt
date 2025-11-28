@@ -14,7 +14,12 @@ permissions: {}
 jobs:
   supply-chain:
     name: Run `cargo-audit`
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+          - runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     permissions:
       contents: read

@@ -14,7 +14,14 @@ permissions: {}
 jobs:
   clippy:
     name: Run clippy on crates
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     permissions:
       contents: read
@@ -39,7 +46,14 @@ jobs:
 
   fmt:
     name: Check code formatting
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     permissions:
       contents: read
@@ -59,7 +73,14 @@ jobs:
 
   taplo:
     name: Lint and check formatting of TOML files
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: x86_64
+          - runner: ubuntu-24.04-arm
+            arch: aarch64
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 10
     permissions:
       contents: read
@@ -71,7 +92,7 @@ jobs:
 
       - name: Install latest taplo
         run: |
-          curl -fsSL https://github.com/tamasfe/taplo/releases/latest/download/taplo-full-linux-x86_64.gz \
+          curl -fsSL https://github.com/tamasfe/taplo/releases/latest/download/taplo-full-linux-${{ matrix.arch }}.gz \
             | gzip -d - | install -m 755 /dev/stdin /usr/local/bin/taplo
 
       - name: Run taplo lint
