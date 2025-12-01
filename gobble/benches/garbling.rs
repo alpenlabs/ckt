@@ -20,10 +20,31 @@ use gobble::{
 };
 
 #[cfg(target_arch = "aarch64")]
-use gobble::aarch64::{Ciphertext, get_permute_bit, index_to_tweak, xor128};
+use gobble::aarch64::{Ciphertext, ccrnd, get_permute_bit, hash, index_to_tweak, xor128};
 
 #[cfg(target_arch = "x86_64")]
 use gobble::x86_64::{Ciphertext, get_permute_bit, index_to_tweak, xor128};
+
+fn bench_hash(c: &mut Criterion) {
+    c.bench_function("hash", |b| unsafe {
+        let x = transmute::<[u8; 16], Vector128>([0x42u8; 16]);
+        let tweak = transmute::<[u8; 16], Vector128>([0x42u8; 16]);
+        b.iter(|| {
+            let result = hash(black_box(x), black_box(tweak));
+            black_box(result)
+        });
+    });
+}
+fn bench_ccrnd(c: &mut Criterion) {
+    c.bench_function("ccrnd", |b| unsafe {
+        let x = transmute::<[u8; 16], Vector128>([0x42u8; 16]);
+        let tweak = transmute::<[u8; 16], Vector128>([0x42u8; 16]);
+        b.iter(|| {
+            let result = ccrnd(black_box(x), black_box(tweak));
+            black_box(result)
+        });
+    });
+}
 
 fn bench_garble_xor_gate(c: &mut Criterion) {
     c.bench_function("garble_xor_gate", |b| {
@@ -238,6 +259,8 @@ fn bench_index_to_tweak(c: &mut Criterion) {
 
 criterion_group!(
     benches,
+    bench_hash,
+    bench_ccrnd,
     bench_garble_xor_gate,
     bench_garble_and_gate,
     bench_garble_mixed_gates,
