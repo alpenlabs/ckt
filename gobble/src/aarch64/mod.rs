@@ -19,7 +19,7 @@ use crate::traits::ExecutionInstanceConfig;
 use crate::traits::GarblingInstanceConfig;
 use crate::traits::GobbleEngine;
 
-use crate::{S_BYTES, AES128_KEY_BYTES, AES128_ROUND_KEY_BYTES};
+use crate::{AES128_KEY_BYTES, AES128_ROUND_KEY_BYTES, S_BYTES};
 
 const LABEL_ZERO_BYTES: [u8; 16] = [98u8; 16];
 const LABEL_ZERO: Label = Label(unsafe { transmute::<[u8; 16], uint8x16_t>(LABEL_ZERO_BYTES) });
@@ -242,7 +242,7 @@ pub unsafe fn hash(x: uint8x16_t, tweak: uint8x16_t) -> uint8x16_t {
 #[inline]
 #[target_feature(enable = "neon")]
 pub unsafe fn sigma(x: uint8x16_t) -> uint8x16_t {
-    let swapped =  vextq_u8(x, x, 8);   // swap halves: [R|L]
+    let swapped = vextq_u8(x, x, 8); // swap halves: [R|L]
     let swapped_xor = veorq_u8(x, swapped); // (L xor R) || (L xor R)
     vextq_u8(swapped_xor, x, 8) // (L xor R)||L
 }
