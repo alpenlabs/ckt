@@ -15,6 +15,9 @@ use hex_literal::hex;
 #[cfg(target_arch = "aarch64")]
 pub type Engine = aarch64::Aarch64GobbleEngine;
 
+/// public S used for alternate hash function
+pub const S_BYTES: [u8; 16] = hex!("deadbeefcafebabedeadbeefcafebabe");
+
 /// Main AES key used for gate hashing.
 ///
 /// Taken from https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/armv8/test_expand.rs

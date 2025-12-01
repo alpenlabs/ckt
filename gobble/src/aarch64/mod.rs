@@ -19,7 +19,7 @@ use crate::traits::ExecutionInstanceConfig;
 use crate::traits::GarblingInstanceConfig;
 use crate::traits::GobbleEngine;
 
-use crate::{AES128_KEY_BYTES, AES128_ROUND_KEY_BYTES};
+use crate::{S_BYTES, AES128_KEY_BYTES, AES128_ROUND_KEY_BYTES};
 
 const LABEL_ZERO_BYTES: [u8; 16] = [98u8; 16];
 const LABEL_ZERO: Label = Label(unsafe { transmute::<[u8; 16], uint8x16_t>(LABEL_ZERO_BYTES) });
@@ -95,6 +95,7 @@ impl GobbleEngine for Aarch64GobbleEngine {
     }
 }
 
+const S: uint8x16_t = unsafe { transmute(S_BYTES) };
 const AES128_KEY: uint8x16_t = unsafe { transmute(AES128_KEY_BYTES) };
 const AES128_ROUND_KEYS: [uint8x16_t; 11] = [
     AES128_KEY,
@@ -231,6 +232,32 @@ pub fn encode(input: Vec<bool>, false_input_labels: Vec<Label>, delta: Label) ->
 pub unsafe fn hash(x: uint8x16_t, tweak: uint8x16_t) -> uint8x16_t {
     let aes_x = unsafe { aes_encrypt(x) };
     unsafe { xor128(aes_encrypt(xor128(aes_x, tweak)), aes_x) }
+}
+
+/// Linear orthomorphism: L || R -> (L ⊕ R) || L, taken from https://eprint.iacr.org/2019/074.pdf Section 7.3
+///
+/// # Safety
+/// - The caller must ensure that the CPU supports the `neon` target feature
+/// - `x` must be a valid 128-bit value
+#[inline]
+#[target_feature(enable = "neon")]
+pub unsafe fn sigma(x: uint8x16_t) -> uint8x16_t {
+    let swapped =  vextq_u8(x, x, 8);   // swap halves: [R|L]
+    let swapped_xor = veorq_u8(x, swapped); // (L xor R) || (L xor R)
+    vextq_u8(swapped_xor, x, 8) // (L xor R)||L
+}
+/// ccrnd hash function using one AES call and one linear orthomorphism, taken from https://eprint.iacr.org/2019/074.pdf Section 5
+///
+/// # Safety
+/// - The caller must ensure that the CPU supports the `aes` and `neon` target features
+/// - `x` and `tweak` must be valid 128-bit values
+#[inline]
+#[target_feature(enable = "aes")]
+#[target_feature(enable = "neon")]
+pub unsafe fn ccrnd(x: uint8x16_t, tweak: uint8x16_t) -> uint8x16_t {
+    let input = unsafe { xor128(xor128(x, S), tweak) };
+    let lin_orth_input = unsafe { sigma(input) };
+    unsafe { xor128(aes_encrypt(lin_orth_input), lin_orth_input) }
 }
 
 mod tests {
