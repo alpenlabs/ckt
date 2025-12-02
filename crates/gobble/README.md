@@ -65,11 +65,7 @@ The crate includes a comprehensive benchmark suite using `criterion`. Benchmarks
 
 ## Testing
 
-<<<<<<< HEAD
-Unit tests validate AES encryption against reference implementations from the `aes` crate, ensures correctness of our custom low-level implementation.
-=======
 The test suite validates AES encryption against reference implementations from the `aes` crate, ensures correctness of garbling and evaluation operations, and verifies proper label encoding and decoding. All cryptographic operations follow standard garbled circuit constructions documented in academic literature.
->>>>>>> ef6cd34 (added gobble mod level README and eval benches)
 
 ## Safety
 
