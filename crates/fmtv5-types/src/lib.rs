@@ -1,5 +1,7 @@
 //! CKT - High-performance Boolean circuit format library
 
+#![expect(missing_docs, reason = "please let me merge")]
+
 #[cfg(feature = "v5")]
 pub mod v5;
 
