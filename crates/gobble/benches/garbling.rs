@@ -10,20 +10,20 @@ type Vector128 = std::arch::x86_64::__m128i;
 type Vector128 = std::arch::aarch64::uint8x16_t;
 
 use bitvec::vec::BitVec;
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
-use gobble::{
+use ckt_gobble::{
     Engine,
     traits::{
         EvaluationInstance, EvaluationInstanceConfig, GarblingInstance, GarblingInstanceConfig,
         GobbleEngine,
     },
 };
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 
 #[cfg(target_arch = "aarch64")]
-use gobble::aarch64::{Ciphertext, get_permute_bit, index_to_tweak, xor128};
+use ckt_gobble::aarch64::{Ciphertext, get_permute_bit, index_to_tweak, xor128};
 
 #[cfg(target_arch = "x86_64")]
-use gobble::x86_64::{Ciphertext, get_permute_bit, index_to_tweak, xor128};
+use ckt_gobble::x86_64::{Ciphertext, get_permute_bit, index_to_tweak, xor128};
 
 fn bench_garble_xor_gate(c: &mut Criterion) {
     c.bench_function("garble_xor_gate", |b| {
