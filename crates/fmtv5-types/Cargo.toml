@@ -15,10 +15,10 @@ cynosure = { version = ">=0.3", optional = true, default-features = false, featu
 kanal = { version = "0.1.1", optional = true }
 libc.workspace = true
 monoio = { version = "0.2.4", features = ["sync"], optional = true }
-tempfile.workspace = true
 
 [dev-dependencies]
 monoio = { version = "0.2.4", features = ["sync"] }
+tempfile.workspace = true
 
 [features]
 default = ["high-performance", "v5"]

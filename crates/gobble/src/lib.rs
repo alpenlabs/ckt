@@ -1,27 +1,30 @@
 //! Core crate for garbling, executing and evaluating garbled/boolean circuits.
 
+pub mod traits;
+
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
-pub mod traits;
-#[cfg(target_arch = "x86_64")]
+
 /// Dynamically switching type alias that changes between architecture specific
-/// [`GobbleEngine`] implementations.
+/// `GobbleEngine` implementations.
+#[cfg(target_arch = "x86_64")]
 pub mod x86_64;
 
 use hex_literal::hex;
 
 /// Dynamically switching type alias that changes between architecture specific
-/// [`GobbleEngine`] implementations.
+/// `GobbleEngine` implementations.
 #[cfg(target_arch = "aarch64")]
 pub type Engine = aarch64::Aarch64GobbleEngine;
 
 /// Main AES key used for gate hashing.
 ///
-/// Taken from https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/armv8/test_expand.rs
+/// Taken from <https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/armv8/test_expand.rs>
 /// Corresponding to FIPS 197 Appendix A.1
 ///
 /// Note that this key is intentionally arbitrary, fixed, and public.
 pub const AES128_KEY_BYTES: [u8; 16] = hex!("2b7e151628aed2a6abf7158809cf4f3c");
+
 /// Precomputed round keys used for gate hashing.
 pub const AES128_ROUND_KEY_BYTES: [[u8; 16]; 10] = [
     hex!("a0fafe1788542cb123a339392a6c7605"),
@@ -35,9 +38,10 @@ pub const AES128_ROUND_KEY_BYTES: [[u8; 16]; 10] = [
     hex!("ac7766f319fadc2128d12941575c006e"),
     hex!("d014f9a8c9ee2589e13f0cc8b6630ca6"),
 ];
-#[cfg(target_arch = "x86_64")]
+
 /// Dynamically switching type alias that changes between architecture specific
-/// [`GobbleEngine`] implementations.
+/// `GobbleEngine` implementations.
+#[cfg(target_arch = "x86_64")]
 pub type Engine = x86_64::X86_64GobbleEngine;
 
 #[cfg(test)]

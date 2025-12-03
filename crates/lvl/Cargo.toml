@@ -3,11 +3,6 @@ name = "ckt-lvl"
 version = "0.1.0"
 edition = "2021"
 
-[profile.release]
-lto = true
-codegen-units = 1
-opt-level = 3
-
 [dependencies]
 ahash.workspace = true
 ckt-fmtv5-types = { workspace = true, features = ["v5"] }

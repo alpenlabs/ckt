@@ -73,8 +73,10 @@ pub struct GarblingInstanceConfig<'labels> {
     /// Max live wires used at any point in the circuit. See ckt v5 architecture
     /// for additional details.
     pub scratch_space: u32,
+
     /// The delta is a global offset constant used for garbling a circuit. This value must be kept secret from the evaluator.
     pub delta: [u8; 16],
+
     /// Input false labels for the circuit.
     pub primary_input_false_labels: &'labels [[u8; 16]],
 }
@@ -95,9 +97,11 @@ pub struct EvaluationInstanceConfig<'labels> {
     /// Max live wires used at any point in the circuit. See ckt v5 architecture
     /// for additional details.
     pub scratch_space: u32,
+
     /// Selected labels (each wire one corresponding to either true or false) for
     /// the primary inputs.
     pub selected_primary_input_labels: &'labels [[u8; 16]],
+
     /// Selected values for each wire (1 bit per wire, boolean)
     pub selected_primary_input_values: &'labels BitVec,
 }
@@ -108,15 +112,17 @@ pub struct EvaluationInstanceConfig<'labels> {
 ///
 /// This allows for architecture specific implementations of the garbling,
 /// execution, and evaluation instances. You can access the one for your platform
-/// via [`gobble::Engine`].
+/// via `ckt_gobble::Engine`.
 pub trait GobbleEngine {
     /// Create a new instance of the engine.
     fn new() -> Self;
 
     /// The garbling instance implementation for this engine.
     type GarblingInstance: GarblingInstance;
+
     /// The evaluation instance implementation for this engine.
     type EvaluationInstance: EvaluationInstance;
+
     /// The execution instance implementation for this engine.
     type ExecutionInstance: ExecutionInstance;
 
