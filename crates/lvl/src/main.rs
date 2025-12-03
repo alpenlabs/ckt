@@ -2,9 +2,9 @@ use ahash::{HashMap, HashMapExt};
 use ckt_fmtv5_types::v5::a::reader::CircuitReaderV5a;
 use ckt_fmtv5_types::v5::b::writer::CircuitWriterV5b;
 use ckt_fmtv5_types::{v5, GateType};
-use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use ckt_lvl::slab::FakeSlabAllocator;
 use ckt_lvl::types::{CompactWireId, Credits, IntermediateGate};
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::alloc::{GlobalAlloc, Layout};
 use std::cell::Cell;
 use std::collections::hash_map::Entry;
@@ -13,8 +13,8 @@ use std::time::{Duration, Instant};
 
 mod cli;
 
-use cli::{Cli, Command};
 use ckt_lvl::{prealloc, Leveller};
+use cli::{Cli, Command};
 
 // Memory tracking wrapper around mimalloc
 struct TrackingAllocator {

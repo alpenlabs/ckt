@@ -4,8 +4,8 @@ use std::collections::hash_map::Entry;
 
 use ahash::{HashMap, HashMapExt};
 use ckt_fmtv5_types::v5::a::reader::CircuitReaderV5a;
-use indicatif::ProgressBar;
 use ckt_lvl::slab::FakeSlabAllocator;
+use indicatif::ProgressBar;
 
 #[monoio::main]
 async fn main() {
