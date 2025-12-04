@@ -5,6 +5,7 @@ Cargo.lock
 *.csv
 *.ptx
 inputs.txt
+*~
 
 # macos, gross
 .DS_Store
