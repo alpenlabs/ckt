@@ -65,7 +65,7 @@ The crate includes a comprehensive benchmark suite using `criterion`. Benchmarks
 
 ## Testing
 
-The test suite validates AES encryption against reference implementations from the `aes` crate, ensures correctness of garbling and evaluation operations, and verifies proper label encoding and decoding. All cryptographic operations follow standard garbled circuit constructions documented in academic literature.
+The test suite validates AES encryption against reference implementations from the `aes` crate.
 
 ## Safety
 
