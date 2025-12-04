@@ -16,9 +16,6 @@ monoio.workspace = true
 nohash-hasher.workspace = true
 roaring.workspace = true
 
-[features]
-nightly = ["roaring/simd"]
-
 [[bin]]
 name = "lvl"
 path = "src/main.rs"
