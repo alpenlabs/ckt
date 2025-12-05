@@ -153,11 +153,10 @@ impl WriterV5c {
             .copy_from_slice(&gate.out.to_le_bytes());
 
         // Set gate type bit in types section
-        let is_and = gate_type == GateType::AND;
         set_gate_type(
             &mut self.block_buffer[TYPES_OFFSET..],
             self.gates_in_block,
-            is_and,
+            gate_type,
         );
 
         // Update statistics

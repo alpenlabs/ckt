@@ -9,7 +9,6 @@ use ckt_runner_types::CircuitReader;
 // this is in a weird place and the inner thing doesn't implement it because I
 // didn't want to think through restructuring the crates again to make it make
 // the most elegant possible
-#[derive(Debug)]
 pub struct ReaderV5cWrapper(pub ReaderV5c);
 
 impl ReaderV5cWrapper {
