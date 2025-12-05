@@ -13,6 +13,7 @@ ckt-runner-types.workspace = true
 
 anyhow.workspace = true
 bitvec.workspace = true
+blake3.workspace = true
 
 [lints]
 workspace = true

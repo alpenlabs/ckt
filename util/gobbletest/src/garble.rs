@@ -1,15 +1,10 @@
 use std::fs::File;
-use std::io::BufWriter;
-use std::time::Instant;
+use std::io::{BufWriter, sink};
 
 use bitvec::vec::BitVec;
-use ckt_fmtv5_types::{GateType, v5::c::*};
-use ckt_gobble::{
-    Engine,
-    traits::{GarblingInstance, GarblingInstanceConfig, GobbleEngine},
-};
-use ckt_runner_exec::{GarbleTask, process_task};
-use indicatif::{ProgressBar, ProgressStyle};
+use ckt_fmtv5_types::v5::c::*;
+use ckt_gobble::traits::{GarblingInstance, GarblingInstanceConfig};
+use ckt_runner_exec::{GarbleTask, HashWriter, process_task};
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::RngCore;
 
@@ -79,9 +74,6 @@ pub async fn garble_discard(circuit_file: &str, rng: &mut ChaCha20Rng) -> Vec<[u
     let mut reader = ReaderV5c::open(circuit_file).unwrap();
 
     let header = *reader.header();
-    let total_gates = header.total_gates();
-
-    let engine = Engine::new();
 
     let labels: Vec<_> = (0..header.primary_inputs)
         .map(|_| {
@@ -100,67 +92,15 @@ pub async fn garble_discard(circuit_file: &str, rng: &mut ChaCha20Rng) -> Vec<[u
         primary_input_false_labels: &labels,
     };
 
-    let mut garb_instance = engine.new_garbling_instance(config);
+    let task_info = GarbleTask::new(config);
+    let task_with_progress = ProgressBarTask::new(task_info);
 
-    let mut block_idx = 0;
-    let mut total_gates_processed = 0u64;
-    let pb = ProgressBar::new(total_gates);
-    pb.set_style(
-        ProgressStyle::default_bar()
-            .template("🦃 [{bar:50.cyan/blue}] {percent:>3}% | {msg} | {elapsed_precise}")
-            .unwrap()
-            .progress_chars("█░"),
-    );
-    let start = Instant::now();
-    while let Some(chunk) = reader.next_blocks_chunk().await.unwrap() {
-        for block in chunk.blocks_iter() {
-            let gates_in_block = get_block_num_gates(total_gates, block_idx);
-            block_idx += 1;
-            for i in 0..gates_in_block {
-                let gate = block.gates[i];
-                let gate_type = block.gate_type(i);
-                match gate_type {
-                    GateType::AND => {
-                        garb_instance.feed_and_gate(
-                            gate.in1 as usize,
-                            gate.in2 as usize,
-                            gate.out as usize,
-                        );
-                    }
-                    GateType::XOR => garb_instance.feed_xor_gate(
-                        gate.in1 as usize,
-                        gate.in2 as usize,
-                        gate.out as usize,
-                    ),
-                }
-            }
+    // Use HashWriter with sink() to discard output while still hashing.
+    let writer = HashWriter::new(sink());
 
-            total_gates_processed += gates_in_block as u64;
-            pb.inc(gates_in_block as u64);
-        }
+    let output = process_task(&task_with_progress, writer, &mut reader)
+        .await
+        .expect("garble_discard: process task");
 
-        let elapsed = start.elapsed();
-        if elapsed.as_secs_f64() > 0.0 {
-            let rate_m = (total_gates_processed as f64 / elapsed.as_secs_f64()) / 1_000_000.0;
-            let processed_b = total_gates_processed as f64 / 1_000_000_000.0;
-            let total_b = total_gates as f64 / 1_000_000_000.0;
-            pb.set_message(format!(
-                "{:.2}B / {:.2}B gates @ {:.0} M/s",
-                processed_b, total_b, rate_m
-            ));
-        }
-    }
-
-    pb.finish();
-
-    let output_wires = reader
-        .outputs()
-        .iter()
-        .map(|w| *w as u64)
-        .collect::<Vec<_>>();
-    let mut garbler_output_labels = vec![[0u8; 16]; output_wires.len()];
-    let output_values = BitVec::repeat(false, output_wires.len());
-    garb_instance.get_selected_labels(&output_wires, &output_values, &mut garbler_output_labels);
-
-    garbler_output_labels
+    output.garbler_output_labels
 }
