@@ -68,9 +68,14 @@ impl<'c, R: Read> CircuitTask for EvalTask<'c, R> {
                 GateType::AND => {
                     let mut ct_bytes = [0u8; 16];
                     state.ct_reader.read_exact(&mut ct_bytes)?;
-                    let ct = Ciphertext(unsafe {
-                        std::mem::transmute::<[u8; 16], std::arch::x86_64::__m128i>(ct_bytes)
-                    });
+
+                    // TODO make this more generic, so that the ciphertext
+                    // doesn't need to be transmuted manually like this
+                    #[expect(
+                        clippy::missing_transmute_annotations,
+                        reason = "arch-dependent import"
+                    )]
+                    let ct = Ciphertext(unsafe { std::mem::transmute::<[u8; 16], _>(ct_bytes) });
 
                     state.instance.feed_and_gate(
                         ginfo.in1 as usize,
