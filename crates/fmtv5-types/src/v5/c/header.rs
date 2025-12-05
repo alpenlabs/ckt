@@ -60,7 +60,7 @@ impl HeaderV5c {
 
     /// Get total number of blocks (including partial)
     pub fn total_blocks(&self) -> u64 {
-        (self.total_gates() + GATES_PER_BLOCK as u64 - 1) / GATES_PER_BLOCK as u64
+        self.total_gates().div_ceil(GATES_PER_BLOCK as u64)
     }
 
     /// Validate the header

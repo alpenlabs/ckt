@@ -251,12 +251,12 @@ async fn test_partial_last_block() {
 
     // Verify first block has full GATES_PER_BLOCK gates
     let blocks = unsafe { &*(buffer.as_ptr() as *const [Block; 16]) };
-    let block1 = &blocks[0];
+    let _block1 = &blocks[0];
     let gates_in_block1 = get_block_num_gates(header.total_gates(), 0);
     assert_eq!(gates_in_block1, GATES_PER_BLOCK);
 
     // Verify second block has partial gates
-    let block2 = &blocks[1];
+    let _block2 = &blocks[1];
     let gates_in_block2 = get_block_num_gates(header.total_gates(), 1);
     assert_eq!(gates_in_block2, GATES_PER_BLOCK / 2);
 
