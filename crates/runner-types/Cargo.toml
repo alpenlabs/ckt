@@ -9,7 +9,5 @@ repository.workspace = true
 [dependencies]
 ckt-fmtv5-types.workspace = true
 
-anyhow.workspace = true
-
 [lints]
 workspace = true

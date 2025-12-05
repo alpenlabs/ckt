@@ -8,7 +8,7 @@ pub const GATES_PER_BLOCK: usize = 21_620;
 pub const GATES_OFFSET: usize = 0;
 pub const GATES_SIZE: usize = GATES_PER_BLOCK * GATE_SIZE; // 259,440 bytes
 pub const TYPES_OFFSET: usize = GATES_SIZE; // 259,440
-pub const TYPES_SIZE: usize = (GATES_PER_BLOCK + 7) / 8; // 2,703 bytes
+pub const TYPES_SIZE: usize = GATES_PER_BLOCK.div_ceil(8); // 2,703 bytes
 pub const BLOCK_PADDING: usize = BLOCK_SIZE - GATES_SIZE - TYPES_SIZE; // 1 byte
 
 /// Size of a single gate (3 × u32 LE)
@@ -52,8 +52,14 @@ pub const CIPHERTEXT_VEC_SIZE: usize = CIPHERTEXTS_PER_BLOCK * 16; // 346,320 by
 
 // Compile-time assertions
 const _: () = assert!(GATES_SIZE + TYPES_SIZE + BLOCK_PADDING == BLOCK_SIZE);
-const _: () = assert!(GATES_SIZE % 8 == 0, "Gates size must be 8-byte aligned");
-const _: () = assert!(TYPES_OFFSET % 8 == 0, "Types must start at 8-byte boundary");
+const _: () = assert!(
+    GATES_SIZE.is_multiple_of(8),
+    "Gates size must be 8-byte aligned"
+);
+const _: () = assert!(
+    TYPES_OFFSET.is_multiple_of(8),
+    "Types must start at 8-byte boundary"
+);
 const _: () = assert!(BLOCKS_PER_DISK_BUFFER == 16);
 const _: () = assert!(
     CIPHERTEXT_VEC_SIZE < 512 * 1024,

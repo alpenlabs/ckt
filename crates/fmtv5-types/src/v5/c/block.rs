@@ -63,7 +63,7 @@ pub fn get_block_num_gates(total_gates: u64, block_index: usize) -> usize {
 
 /// Calculate padded size for alignment to 256 KiB boundaries
 pub fn padded_size(size: usize) -> usize {
-    ((size + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT
+    size.div_ceil(ALIGNMENT) * ALIGNMENT
 }
 
 /// Calculate the file size for a circuit
@@ -71,7 +71,7 @@ pub fn calculate_file_size(total_gates: u64, num_outputs: u64) -> u64 {
     let header_padded = ALIGNMENT as u64;
     let outputs_size = num_outputs * OUTPUT_ENTRY_SIZE as u64;
     let outputs_padded = padded_size(outputs_size as usize) as u64;
-    let num_blocks = (total_gates + GATES_PER_BLOCK as u64 - 1) / GATES_PER_BLOCK as u64;
+    let num_blocks = total_gates.div_ceil(GATES_PER_BLOCK as u64);
     let blocks_size = num_blocks * BLOCK_SIZE as u64;
 
     header_padded + outputs_padded + blocks_size

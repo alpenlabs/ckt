@@ -322,7 +322,6 @@ dependencies = [
 name = "ckt-runner-types"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "ckt-fmtv5-types",
 ]
 
