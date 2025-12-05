@@ -4,7 +4,7 @@ use std::io::BufReader;
 use bitvec::vec::BitVec;
 use ckt_fmtv5_types::v5::c::ReaderV5c;
 use ckt_gobble::traits::EvaluationInstanceConfig;
-use ckt_runner_exec::{EvalTask, process_task};
+use ckt_runner_exec::{CircuitReader, EvalTask, ReaderV5cWrapper, process_task};
 
 use crate::common::ProgressBarTask;
 
@@ -14,7 +14,7 @@ pub async fn eval(
     input_values_bits: &BitVec,
     input_labels: &[[u8; 16]],
 ) -> (Vec<[u8; 16]>, Vec<bool>) {
-    let mut reader = ReaderV5c::open(circuit_file).unwrap();
+    let mut reader = ReaderV5cWrapper::new(ReaderV5c::open(circuit_file).unwrap());
 
     let header = *reader.header();
 

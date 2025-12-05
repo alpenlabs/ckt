@@ -3,8 +3,8 @@
 use std::io::Write;
 
 use bitvec::vec::BitVec;
-use ckt_fmtv5_types::v5::c::HeaderV5c;
 use ckt_fmtv5_types::GateType;
+use ckt_fmtv5_types::v5::c::HeaderV5c;
 use ckt_gobble::{
     Engine, GarblingInstance as PlatformGarblingInstance,
     traits::{GarblingInstance, GarblingInstanceConfig, GobbleEngine},

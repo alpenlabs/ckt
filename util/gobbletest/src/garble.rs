@@ -4,7 +4,7 @@ use std::io::{BufWriter, sink};
 use bitvec::vec::BitVec;
 use ckt_fmtv5_types::v5::c::*;
 use ckt_gobble::traits::{GarblingInstance, GarblingInstanceConfig};
-use ckt_runner_exec::{GarbleTask, HashWriter, process_task};
+use ckt_runner_exec::{CircuitReader, GarbleTask, HashWriter, ReaderV5cWrapper, process_task};
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::RngCore;
 
@@ -16,7 +16,7 @@ pub async fn garble(
     output_file: &str,
     rng: &mut ChaCha20Rng,
 ) -> ([u8; 16], BitVec, Vec<[u8; 16]>, Vec<[u8; 16]>) {
-    let mut reader = ReaderV5c::open(circuit_file).unwrap();
+    let mut reader = ReaderV5cWrapper::new(ReaderV5c::open(circuit_file).unwrap());
 
     let header = *reader.header();
 
@@ -71,7 +71,7 @@ pub async fn garble(
 }
 
 pub async fn garble_discard(circuit_file: &str, rng: &mut ChaCha20Rng) -> Vec<[u8; 16]> {
-    let mut reader = ReaderV5c::open(circuit_file).unwrap();
+    let mut reader = ReaderV5cWrapper::new(ReaderV5c::open(circuit_file).unwrap());
 
     let header = *reader.header();
 

@@ -62,7 +62,11 @@ impl<T: CircuitTask> CircuitTask for ProgressBarTask<T> {
     type State = ProgressBarState<T::State>;
     type Output = T::Output;
 
-    fn initialize(&self, header: &HeaderV5c, init_input: Self::InitInput) -> Result<Self::State, Self::Error> {
+    fn initialize(
+        &self,
+        header: &HeaderV5c,
+        init_input: Self::InitInput,
+    ) -> Result<Self::State, Self::Error> {
         let inner_state = self.inner.initialize(header, init_input)?;
 
         let total_gates = header.total_gates();
