@@ -21,38 +21,29 @@ pub struct Block {
 }
 
 impl Block {
-    /// Get the type of a specific gate in this block
-    ///
-    /// Returns true for AND gate, false for XOR gate
+    /// Get the type of a specific gate in this block.
     #[inline]
     pub fn gate_type(&self, index: usize) -> GateType {
         debug_assert!(index < GATES_PER_BLOCK);
-        if get_gate_type(&self.types, index) {
-            GateType::AND
-        } else {
-            GateType::XOR
-        }
+        get_gate_type(&self.types, index)
     }
 }
 
-/// Helper function to get gate type from bit-packed types array
-///
-/// Returns true for AND gate, false for XOR gate
+/// Helper function to get gate type from bit-packed types array.
 #[inline]
-pub fn get_gate_type(types: &[u8], gate_index: usize) -> bool {
+pub fn get_gate_type(types: &[u8], gate_index: usize) -> GateType {
     let byte_index = gate_index / 8;
     let bit_index = gate_index % 8;
-    ((types[byte_index] >> bit_index) & 1) != 0
+    let bit = ((types[byte_index] >> bit_index) & 1) != 0;
+    GateType::from_bit(bit)
 }
 
-/// Helper function to set gate type in bit-packed types array
-///
-/// gate_type: true for AND gate, false for XOR gate
+/// Helper function to set gate type in bit-packed types array.
 #[inline]
-pub fn set_gate_type(types: &mut [u8], gate_index: usize, gate_type: bool) {
+pub fn set_gate_type(types: &mut [u8], gate_index: usize, gate_type: GateType) {
     let byte_index = gate_index / 8;
     let bit_index = gate_index % 8;
-    if gate_type {
+    if gate_type.to_bit() {
         types[byte_index] |= 1 << bit_index;
     } else {
         types[byte_index] &= !(1 << bit_index);
@@ -185,21 +176,23 @@ mod tests {
 
     #[test]
     fn test_gate_type_bits() {
+        use crate::GateType;
+
         let mut types = vec![0u8; TYPES_SIZE];
 
         // Set some gate types
-        set_gate_type(&mut types, 0, false); // XOR
-        set_gate_type(&mut types, 1, true); // AND
-        set_gate_type(&mut types, 7, true); // AND
-        set_gate_type(&mut types, 8, false); // XOR
-        set_gate_type(&mut types, 21619, true); // AND (last gate)
+        set_gate_type(&mut types, 0, GateType::XOR);
+        set_gate_type(&mut types, 1, GateType::AND);
+        set_gate_type(&mut types, 7, GateType::AND);
+        set_gate_type(&mut types, 8, GateType::XOR);
+        set_gate_type(&mut types, 21619, GateType::AND); // last gate
 
         // Verify
-        assert_eq!(get_gate_type(&types, 0), false);
-        assert_eq!(get_gate_type(&types, 1), true);
-        assert_eq!(get_gate_type(&types, 7), true);
-        assert_eq!(get_gate_type(&types, 8), false);
-        assert_eq!(get_gate_type(&types, 21619), true);
+        assert_eq!(get_gate_type(&types, 0), GateType::XOR);
+        assert_eq!(get_gate_type(&types, 1), GateType::AND);
+        assert_eq!(get_gate_type(&types, 7), GateType::AND);
+        assert_eq!(get_gate_type(&types, 8), GateType::XOR);
+        assert_eq!(get_gate_type(&types, 21619), GateType::AND);
     }
 
     #[test]

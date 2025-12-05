@@ -4,12 +4,9 @@
 #![allow(unreachable_pub, reason = "pleeeeease let me merge")] // clippy is wrong about this being unfulfilled
 #![expect(missing_debug_implementations, reason = "merge pls")]
 
+mod gate_type;
+
 #[cfg(feature = "v5")]
 pub mod v5;
 
-/// Gate type enumeration shared across v3, v4, and v5 variants
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GateType {
-    XOR,
-    AND,
-}
+pub use gate_type::GateType;
