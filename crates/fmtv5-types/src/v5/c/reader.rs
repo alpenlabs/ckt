@@ -156,7 +156,7 @@ impl ReaderV5c {
     ///     // Process blocks[0..num_blocks]
     /// }
     /// ```
-    pub async fn next_blocks_ref(&mut self) -> Result<Option<(&[u8], usize)>> {
+    pub(crate) async fn next_blocks_ref(&mut self) -> Result<Option<(&[u8], usize)>> {
         if self.bytes_remaining == 0 {
             return Ok(None);
         }
@@ -205,7 +205,8 @@ impl ReaderV5c {
     /// # Returns
     /// * `Ok(n)` - Number of valid blocks read (0 means no more data)
     /// * `Err(_)` - I/O error or buffer too small
-    pub async fn read_blocks(&mut self, buffer: &mut [u8]) -> Result<usize> {
+    #[cfg(test)]
+    pub(crate) async fn read_blocks(&mut self, buffer: &mut [u8]) -> Result<usize> {
         if self.bytes_remaining == 0 {
             return Ok(0);
         }
