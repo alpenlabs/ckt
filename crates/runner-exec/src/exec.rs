@@ -1,7 +1,7 @@
 //! Execution task implementation.
 
-use ckt_fmtv5_types::v5::c::HeaderV5c;
 use ckt_fmtv5_types::GateType;
+use ckt_fmtv5_types::v5::c::HeaderV5c;
 use ckt_gobble::{
     Engine, ExecutionInstance as PlatformExecutionInstance,
     traits::{ExecutionInstance, ExecutionInstanceConfig, GobbleEngine},

@@ -2,8 +2,8 @@
 
 use std::io::Read;
 
-use ckt_fmtv5_types::v5::c::HeaderV5c;
 use ckt_fmtv5_types::GateType;
+use ckt_fmtv5_types::v5::c::HeaderV5c;
 use ckt_gobble::{
     Ciphertext, Engine, EvaluationInstance as PlatformEvaluationInstance,
     traits::{EvaluationInstance, EvaluationInstanceConfig, GobbleEngine},

@@ -46,8 +46,8 @@ debug = true
 ckt-fmtv5-types = { path = "crates/fmtv5-types" }
 ckt-gobble = { path = "crates/gobble" }
 ckt-lvl = { path = "crates/lvl" }
-ckt-runner-types = { path = "crates/runner-types" }
 ckt-runner-exec = { path = "crates/runner-exec" }
+ckt-runner-types = { path = "crates/runner-types" }
 
 aes = "0.8.4"
 ahash = "0.8.12"
