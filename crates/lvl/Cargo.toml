@@ -7,13 +7,9 @@ edition = "2021"
 ahash.workspace = true
 ckt-fmtv5-types = { workspace = true, features = ["v5"] }
 clap.workspace = true
-cynosure.workspace = true
-fixedbitset.workspace = true
-indexmap.workspace = true
 indicatif.workspace = true
 mimalloc.workspace = true
 monoio.workspace = true
-nohash-hasher.workspace = true
 roaring.workspace = true
 
 [[bin]]

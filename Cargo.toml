@@ -7,7 +7,6 @@ members = [
   "crates/runner-types",
   "util/bench",
   "util/dupecheck",
-  "util/exectest",
   "util/adder",
   "util/gobbletest",
 ]
