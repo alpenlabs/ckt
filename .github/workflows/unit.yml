@@ -24,11 +24,7 @@ jobs:
       matrix:
         include:
           - runner: ubuntu-24.04
-            bitcoind_arch: "x86_64-linux-gnu"
-            shasum: "a681e4f6ce524c338a105f214613605bac6c33d58c31dc5135bbc02bc458bb6c"
           - runner: ubuntu-24.04-arm
-            bitcoind_arch: "aarch64-linux-gnu"
-            shasum: "7922ac99363dd28f79e57ef7098581fd48ebd1119b412b07e73b1fd19fd0443f"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60 # better fail-safe than the default 360 in github actions
     permissions:
