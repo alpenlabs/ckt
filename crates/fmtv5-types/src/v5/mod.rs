@@ -1,15 +1,13 @@
 //! CKT Format v5 - Fixed-width encoding with Structure-of-Arrays layout
 //!
-//! This module implements the v5 format specification with three variants:
+//! This module implements the v5 format specification with two variants:
 //! - v5a: Intermediate format with 34-bit wire IDs and 24-bit credits
-//! - v5b: Production format with 32-bit memory addresses and level organization
 //! - v5c: Flat production format with 32-bit memory addresses (execution order)
 //!
 //! All formats use fixed-width encoding for optimal performance with
 //! AVX-512 SIMD processing and io_uring I/O.
 
 pub mod a;
-pub mod b;
 pub mod c;
 pub mod scalar;
 
@@ -29,8 +27,6 @@ pub const VERSION: u8 = 0x05;
 pub enum FormatType {
     /// Type A: Intermediate format with wire IDs and credits
     TypeA = 0x00,
-    /// Type B: Production format with memory addresses and levels
-    TypeB = 0x01,
     /// Type C: Flat production format with memory addresses (execution order)
     TypeC = 0x02,
 }
@@ -40,7 +36,6 @@ impl FormatType {
     pub fn from_byte(value: u8) -> Option<Self> {
         match value {
             0x00 => Some(FormatType::TypeA),
-            0x01 => Some(FormatType::TypeB),
             0x02 => Some(FormatType::TypeC),
             _ => None,
         }
@@ -187,11 +182,10 @@ mod tests {
     #[test]
     fn test_format_type() {
         assert_eq!(FormatType::TypeA.to_byte(), 0x00);
-        assert_eq!(FormatType::TypeB.to_byte(), 0x01);
         assert_eq!(FormatType::TypeC.to_byte(), 0x02);
 
         assert_eq!(FormatType::from_byte(0x00), Some(FormatType::TypeA));
-        assert_eq!(FormatType::from_byte(0x01), Some(FormatType::TypeB));
+        assert_eq!(FormatType::from_byte(0x01), None); // v5b removed
         assert_eq!(FormatType::from_byte(0x02), Some(FormatType::TypeC));
         assert_eq!(FormatType::from_byte(0xFF), None);
     }
