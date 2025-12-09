@@ -16,3 +16,4 @@
 
 pub mod prealloc;
 pub mod slab;
+pub mod types;
