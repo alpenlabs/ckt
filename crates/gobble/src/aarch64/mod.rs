@@ -220,7 +220,7 @@ pub fn encode(input: Vec<bool>, false_input_labels: Vec<Label>, delta: Label) ->
 /// TCCR hash function via fixed-key AES: H(x, tweak) = AES(AES(x) ⊕ tweak) ⊕ AES(x).
 ///
 /// Tweakable circular correlation robust (TCCR) hash function.
-/// Referenced from Section 7.4 of [GKWY20] <https://eprint.iacr.org/2019/074>.
+/// Referenced from Section 7.4 of GKWY20 <https://eprint.iacr.org/2019/074>.
 ///
 /// # Safety
 /// - The caller must ensure that the CPU supports the `aes` and `neon` target features
