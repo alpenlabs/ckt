@@ -15,6 +15,7 @@ pub struct Aarch64GarblingInstance {
     delta: uint8x16_t,
 }
 
+/// Implements the GarblingInstance trait for Aarch64 using the privacy-free half-gates construction from [ZRE15] <https://eprint.iacr.org/2014/756>.
 impl GarblingInstance for Aarch64GarblingInstance {
     type Ciphertext = Ciphertext;
 

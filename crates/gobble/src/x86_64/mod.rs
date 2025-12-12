@@ -178,10 +178,16 @@ pub fn encode(input: Vec<bool>, false_input_labels: Vec<Label>, delta: Label) ->
     selected_input_labels
 }
 
-/// H(x, tweak) = AES(AES(x) ⊕ tweak) ⊕ AES(x)
+/// Tweakable circular correlation robust (TCCR) hash function instantiated via fixed-key AES as H(x, tweak) = AES(AES(x) ⊕ tweak) ⊕ AES(x) 
+/// Referenced from Section 7.4 of [GKWY20] <https://eprint.iacr.org/2019/074>.
 ///
 /// # Safety
-/// This function is safe to call without additional preconditions as it uses standard intrinsics and transmutes that are always valid for __m128i types.
+/// - The caller must ensure that the CPU supports the `aes` and `sse2` target features
+///   before invoking this function.
+/// - `x` and `tweak` must be valid 128-bit values; no further validation is performed.
+/// - This function uses unsafe x86 AES-NI intrinsics (`_mm_aesenc_si128`, `_mm_aesenclast_si128`, `_mm_xor_si128`)
+///   and untyped transmute operations internally. Improper use may lead to undefined behavior.
+/// - Do not call this function on unsupported hardware or with uninitialized data.
 #[target_feature(enable = "aes")]
 #[target_feature(enable = "sse2")]
 pub unsafe fn hash(x: __m128i, tweak: __m128i) -> __m128i {
