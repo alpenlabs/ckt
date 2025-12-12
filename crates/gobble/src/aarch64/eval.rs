@@ -22,6 +22,7 @@ pub struct Aarch64EvaluationInstance {
     working_space_bits: BitVec,
 }
 
+/// Implements the EvaluationInstance trait for Aarch64 using the privacy-free half-gates construction from [ZRE15] <https://eprint.iacr.org/2014/756>.
 impl EvaluationInstance for Aarch64EvaluationInstance {
     type Ciphertext = Ciphertext;
 

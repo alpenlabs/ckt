@@ -20,6 +20,7 @@ pub struct X86_64EvaluationInstance {
     working_space_bits: BitVec,
 }
 
+/// Implements the EvaluationInstance trait for x86_64 using the privacy-free half-gates construction from [ZRE15] <https://eprint.iacr.org/2014/756>.
 impl EvaluationInstance for X86_64EvaluationInstance {
     type Ciphertext = Ciphertext;
 

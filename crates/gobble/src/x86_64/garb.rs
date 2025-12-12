@@ -16,6 +16,7 @@ pub struct X86_64GarblingInstance {
     delta: __m128i,
 }
 
+/// Implements the GarblingInstance trait for x86_64 using the privacy-free half-gates construction from [ZRE15] <https://eprint.iacr.org/2014/756>.
 impl GarblingInstance for X86_64GarblingInstance {
     type Ciphertext = Ciphertext;
 
