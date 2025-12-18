@@ -1,5 +1,7 @@
 //! Benchmark for the MITCCRH hash function.
 
+#![allow(unused_crate_dependencies)]
+
 #[cfg(target_arch = "x86_64")]
 mod bench {
     use criterion::{Criterion, black_box, criterion_group};
