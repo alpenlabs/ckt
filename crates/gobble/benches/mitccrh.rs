@@ -2,7 +2,7 @@
 
 #[cfg(target_arch = "x86_64")]
 mod bench {
-    use criterion::{black_box, criterion_group, Criterion};
+    use criterion::{Criterion, black_box, criterion_group};
     use std::arch::x86_64::*;
 
     use ckt_gobble::x86_64::mitccrh::{block, hash_with_rk};
@@ -42,7 +42,9 @@ mod bench {
 
     pub(crate) fn main() {
         benches();
-        criterion::Criterion::default().configure_from_args().final_summary();
+        criterion::Criterion::default()
+            .configure_from_args()
+            .final_summary();
     }
 }
 
