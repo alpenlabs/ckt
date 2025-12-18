@@ -12,7 +12,7 @@ pub use mitccrh_x86::{block, hash_with_rk};
 mod mitccrh_x86 {
     use core::arch::x86_64::*;
 
-    use crate::x86_64::key_schedule::aes_opt_x86::{aes_opt_key_schedule, para_enc, AESKey};
+    use crate::x86_64::key_schedule::aes_opt_x86::{AESKey, aes_opt_key_schedule, para_enc};
 
     /// A 128-bit block (AES block size).
     pub type block = __m128i;

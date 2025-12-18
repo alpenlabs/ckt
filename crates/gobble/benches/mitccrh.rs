@@ -2,7 +2,7 @@
 
 #![cfg(target_arch = "x86_64")]
 
-use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, black_box, criterion_group, criterion_main};
 use std::arch::x86_64::*;
 
 use ckt_gobble::x86_64::mitccrh::{block, hash_with_rk};
