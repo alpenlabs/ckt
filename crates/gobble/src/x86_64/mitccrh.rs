@@ -1,7 +1,7 @@
 //! MITCCRH: Multi-Instance Tweakable Circular Correlation Robust Hash
 //!
 //! Simplified API for AES-based hashing with fresh key scheduling.
-//! Refactored port of EMP Toolkit: https://github.com/emp-toolkit/emp-tool/blob/master/emp-tool/utils/mitccrh.h
+//! Refactored port of EMP Toolkit: <https://github.com/emp-toolkit/emp-tool/blob/master/emp-tool/utils/mitccrh.h>
 
 #![allow(non_camel_case_types)]
 

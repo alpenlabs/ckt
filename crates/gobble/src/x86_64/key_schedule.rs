@@ -1,6 +1,6 @@
 //! AES key scheduling for NUM_KEYS AES-128 keys.
 //!
-//! Port of EMP Toolkit: https://github.com/emp-toolkit/emp-tool/blob/master/emp-tool/utils/aes_opt.h
+//! Port of EMP Toolkit: <https://github.com/emp-toolkit/emp-tool/blob/master/emp-tool/utils/aes_opt.h>
 
 #![allow(non_camel_case_types)]
 
