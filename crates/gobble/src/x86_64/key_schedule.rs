@@ -37,10 +37,10 @@ pub(crate) mod aes_opt_x86 {
         mask: block,
         r: usize,
     ) {
-        debug_assert!(r >= 1 && r <= 10);
+        debug_assert!((1..=10).contains(&r));
 
-        for i in 0..NUM_KEYS {
-            let mut key = keys[i].rd_key[r - 1];
+        for aes_key in keys.iter_mut() {
+            let mut key = aes_key.rd_key[r - 1];
 
             // x2 = shuffle(key, mask)
             let x2 = _mm_shuffle_epi8(key, mask);
@@ -57,7 +57,7 @@ pub(crate) mod aes_opt_x86 {
             key = _mm_xor_si128(glob_aux, key);
 
             // rd_key[r] = aux ^ key
-            keys[i].rd_key[r] = _mm_xor_si128(aux, key);
+            aes_key.rd_key[r] = _mm_xor_si128(aux, key);
         }
     }
 
@@ -79,9 +79,9 @@ pub(crate) mod aes_opt_x86 {
             );
             let mask = _mm_set_epi32(0x0c0f0e0d, 0x0c0f0e0d, 0x0c0f0e0d, 0x0c0f0e0d);
 
-            for i in 0..NUM_KEYS {
-                keys[i].rounds = 10;
-                keys[i].rd_key[0] = user_key[i];
+            for (aes_key, &ukey) in keys.iter_mut().zip(user_key.iter()) {
+                aes_key.rounds = 10;
+                aes_key.rd_key[0] = ukey;
             }
 
             ks_rounds::<NUM_KEYS>(keys, con, con3, mask, 1);
@@ -131,8 +131,8 @@ pub(crate) mod aes_opt_x86 {
         // Initial AddRoundKey for each key's block batch
         {
             let mut idx = 0usize;
-            for i in 0..NUM_KEYS {
-                let k0 = keys[i].rd_key[0];
+            for key in keys {
+                let k0 = key.rd_key[0];
                 for _j in 0..NUM_ENCS {
                     blks[idx] = _mm_xor_si128(blks[idx], k0);
                     idx += 1;
@@ -143,8 +143,8 @@ pub(crate) mod aes_opt_x86 {
         // Rounds 1..9: aesenc
         for r in 1..10 {
             let mut idx = 0usize;
-            for i in 0..NUM_KEYS {
-                let kr = keys[i].rd_key[r];
+            for key in keys {
+                let kr = key.rd_key[r];
                 for _j in 0..NUM_ENCS {
                     blks[idx] = _mm_aesenc_si128(blks[idx], kr);
                     idx += 1;
@@ -155,8 +155,8 @@ pub(crate) mod aes_opt_x86 {
         // Final round: aesenclast with round key 10
         {
             let mut idx = 0usize;
-            for i in 0..NUM_KEYS {
-                let k10 = keys[i].rd_key[10];
+            for key in keys {
+                let k10 = key.rd_key[10];
                 for _j in 0..NUM_ENCS {
                     blks[idx] = _mm_aesenclast_si128(blks[idx], k10);
                     idx += 1;
