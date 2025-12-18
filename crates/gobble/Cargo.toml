@@ -20,5 +20,9 @@ criterion.workspace = true
 name = "garbling"
 harness = false
 
+[[bench]]
+name = "mitccrh"
+harness = false
+
 [lints]
 workspace = true
