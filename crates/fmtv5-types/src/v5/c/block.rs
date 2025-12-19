@@ -7,7 +7,7 @@ use super::gate::GateV5c;
 ///
 /// This struct is #[repr(C)] with exact layout matching the file format.
 /// It can be safely cast from aligned byte buffers.
-#[repr(C)]
+#[repr(C, align(8))]
 pub struct Block {
     /// Gates in execution order (21,620 gates × 12 bytes = 259,440 bytes)
     pub gates: [GateV5c; GATES_PER_BLOCK],
