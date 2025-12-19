@@ -104,7 +104,7 @@ fn lookup_wire<const IGNORE_CREDS: bool>(
     wire: AbsoluteWireId,
     primary_inputs: u64,
 ) -> Option<usize> {
-    if wire <= primary_inputs + 2 {
+    if wire < primary_inputs + 2 {
         return Some(wire as usize);
     }
     let Entry::Occupied(mut entry) = map.entry(wire) else {
