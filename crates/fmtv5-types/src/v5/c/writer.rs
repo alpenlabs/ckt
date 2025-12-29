@@ -283,8 +283,9 @@ impl WriterV5c {
             res?;
         }
 
-        // Sync to disk
+        // Sync to disk and close
         self.file.sync_all().await?;
+        self.file.close().await?;
 
         Ok(CircuitStats {
             total_gates: self.xor_gates_written + self.and_gates_written,

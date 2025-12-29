@@ -299,8 +299,9 @@ impl CircuitWriterV5a {
             let (res, _) = self.file.write_all_at(header_bytes.to_vec(), 0).await;
             res?;
         }
-        // Ensure all data is on disk
+        // Ensure all data is on disk and close
         self.file.sync_all().await?;
+        self.file.close().await?;
 
         let stats = CircuitStats {
             total_gates: self.xor_gates_written + self.and_gates_written,
