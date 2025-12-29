@@ -70,7 +70,9 @@ pub struct HeaderV5a {
 
 impl HeaderV5a {
     pub fn total_gates(&self) -> u64 {
-        self.xor_gates + self.and_gates
+        self.xor_gates
+            .checked_add(self.and_gates)
+            .expect("total gate overflow")
     }
 }
 
