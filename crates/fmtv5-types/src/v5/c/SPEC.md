@@ -393,7 +393,7 @@ total_size = header_padded + outputs_padded + blocks_size
 5. **Reserved fields**: Must be zero
 6. **Gate counts**: `xor_gates + and_gates` must not overflow u64
 7. **Scratch space**: Must be ≤ 2³² (4,294,967,296)
-8. **Outputs**: `num_outputs` should be reasonable (< total_gates)
+8. **Outputs**: `num_outputs` must not exceed the sum of primary inputs and total gates
 
 ### Block Validation
 
