@@ -405,8 +405,8 @@ total_size = header_padded + outputs_padded + blocks_size
 
 ### Checksum Verification
 
-1. Read all gate blocks (excluding padding)
-2. Read outputs (excluding padding)
+1. Read all gate blocks (including padding)
+2. Read outputs (including padding)
 3. Read header tail (bytes 40..88)
 4. Compute BLAKE3 hash in the specified order
 5. Compare with header checksum field
