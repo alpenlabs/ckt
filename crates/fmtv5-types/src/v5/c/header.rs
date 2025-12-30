@@ -110,6 +110,11 @@ impl HeaderV5c {
             return Err("Total gate count would overflow".to_string());
         }
 
+        // Check number of outputs
+        if self.num_outputs > self.total_gates() + self.primary_inputs {
+            return Err("Too many outputs for gate and input count".to_string());
+        }
+
         // Validate scratch space
         if self.scratch_space > MAX_MEMORY_ADDRESS {
             return Err(format!(
