@@ -343,7 +343,10 @@ impl CircuitWriterV5a {
         res?;
         self.io_buf = buf; // reuse allocation
         self.io_buf.clear(); // clear the buffer after reuse
-        self.next_offset += len as u64;
+        self.next_offset = self
+            .next_offset
+            .checked_add(len as u64)
+            .expect("file offset overflow");
         Ok(())
     }
 }
