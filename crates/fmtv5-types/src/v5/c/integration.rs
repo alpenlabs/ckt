@@ -171,8 +171,8 @@ async fn test_large_outputs() {
 
     let mut writer = WriterV5c::new(path, 10, num_outputs as u64).await.unwrap();
 
-    // Write some gates
-    for i in 0..1000 {
+    // Write some gates (just enough to be valid for the output count)
+    for i in 0..99_990 {
         writer
             .write_gate(GateV5c::new(10, 11, 1000 + i), GateType::XOR)
             .await
