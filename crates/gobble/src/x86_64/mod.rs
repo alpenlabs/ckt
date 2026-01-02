@@ -1,5 +1,8 @@
 //! x86_64-specific implementation of the GobbleEngine trait.
 
+pub(crate) mod key_schedule;
+pub mod mitccrh;
+
 pub mod eval;
 pub mod exec;
 pub mod garb;
