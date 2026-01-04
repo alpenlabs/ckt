@@ -6,6 +6,7 @@ Cargo.lock
 *.ptx
 inputs.txt
 *~
+.vscode
 
 # macos, gross
 .DS_Store

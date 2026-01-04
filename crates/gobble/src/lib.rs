@@ -40,6 +40,7 @@ mod arch {
         eval::Aarch64EvaluationInstance as EvaluationInstance,
         exec::Aarch64ExecutionInstance as ExecutionInstance,
         garb::Aarch64GarblingInstance as GarblingInstance,
+        translate::{BitLabel, ByteLabel, TranslationMaterial, generate_translation_material, translate, wide_hash},
     };
 }
 
@@ -51,6 +52,7 @@ mod arch {
         eval::X86_64EvaluationInstance as EvaluationInstance,
         exec::X86_64ExecutionInstance as ExecutionInstance,
         garb::X86_64GarblingInstance as GarblingInstance,
+        translate::{BitLabel, ByteLabel, TranslationMaterial, generate_translation_material, translate, wide_hash},
     };
 }
 

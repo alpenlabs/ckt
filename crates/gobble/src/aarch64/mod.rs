@@ -3,6 +3,7 @@
 pub mod eval;
 pub mod exec;
 pub mod garb;
+pub mod translate;
 
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::RngCore;
@@ -39,6 +40,18 @@ impl Label {
     /// Returns public constant label for one
     pub const fn one() -> Self {
         LABEL_ONE
+    }
+}
+
+impl From<[u8; 16]> for Label {
+    fn from(bytes: [u8; 16]) -> Self {
+        Label(unsafe { transmute::<[u8; 16], uint8x16_t>(bytes) })
+    }
+}
+
+impl From<Label> for [u8; 16] {
+    fn from(label: Label) -> Self {
+        unsafe { transmute::<uint8x16_t, [u8; 16]>(label.0) }
     }
 }
 

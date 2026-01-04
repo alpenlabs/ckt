@@ -1,9 +1,12 @@
 use bitvec::vec::BitVec;
 use ckt_fmtv5_types::v5::c::HeaderV5c;
+use ckt_gobble::{ByteLabel, Label, TranslationMaterial, Ciphertext};
 use ckt_runner_types::{CircuitTask, GateBlock};
 use indicatif::{ProgressBar, ProgressStyle};
+use rand_chacha::ChaCha20Rng;
+use rand_chacha::rand_core::RngCore;
 use std::fs::File;
-use std::io::{BufReader, Read};
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::time::Instant;
 
 /// Read input bits from a text file containing 0s and 1s
@@ -34,6 +37,109 @@ pub fn read_inputs(input_file: &str, expected_num_inputs: usize) -> BitVec {
     }
 
     input_values_bits
+}
+
+/// Read input bytes from a text file (space-separated or one per line)
+/// Example: "0 255 42" or "0\n255\n42"
+pub fn read_inputs_bytes(input_file: &str, expected_num_bytes: usize) -> Vec<u8> {
+    let mut input_string = String::new();
+    let file = File::open(input_file)
+        .unwrap_or_else(|_| panic!("Failed to open input file: {}", input_file));
+    let mut reader = BufReader::new(file);
+    reader.read_to_string(&mut input_string).unwrap();
+
+    let input_string = input_string.trim();
+    
+    // Parse bytes - support both space-separated and newline-separated
+    let bytes: Vec<u8> = input_string
+        .split_whitespace()
+        .map(|s| {
+            s.parse::<u8>()
+                .unwrap_or_else(|_| panic!("Invalid byte value: {}", s))
+        })
+        .collect();
+
+    assert_eq!(
+        bytes.len(),
+        expected_num_bytes,
+        "Input file has {} bytes but expected {}",
+        bytes.len(),
+        expected_num_bytes
+    );
+
+    bytes
+}
+
+/// Generate byte labels using RNG (for testing).
+/// In practice, these may come from an outer protocol with specific correlations.
+pub fn generate_byte_labels(
+    num_bytes: usize,
+    rng: &mut ChaCha20Rng,
+) -> Vec<ByteLabel> {
+    let mut byte_labels_vec = Vec::new();
+    for _ in 0..num_bytes {
+        let mut byte_label_array = [Label::from([0u8; 16]); 256];
+        for i in 0..256 {
+            let mut label_bytes = [0u8; 16];
+            rng.fill_bytes(&mut label_bytes);
+            byte_label_array[i] = Label::from(label_bytes);
+        }
+        byte_labels_vec.push(ByteLabel::new(byte_label_array));
+    }
+    byte_labels_vec
+}
+
+/// Write translation material to a file.
+/// Format: Sequential write for each byte_position (0..num_bytes):
+///   For each byte_value (0..255):
+///     For each bit_position (0..7):
+///       Write 16 bytes (ciphertext)
+pub fn write_translation_material(
+    translation_file: &str,
+    translation_material: &[TranslationMaterial],
+) {
+    let mut writer = BufWriter::new(File::create(translation_file).unwrap());
+    for material in translation_material {
+        for byte_value in 0..256 {
+            for bit_position in 0..8 {
+                let ct_bytes: [u8; 16] = material[byte_value][bit_position].into();
+                writer
+                    .write_all(&ct_bytes)
+                    .expect("Failed to write translation material");
+            }
+        }
+    }
+    writer
+        .flush()
+        .expect("Failed to flush translation material");
+}
+
+/// Read translation material from a file.
+/// Format: Sequential read for each byte_position (0..num_bytes):
+///   For each byte_value (0..255):
+///     For each bit_position (0..7):
+///       Read 16 bytes (ciphertext)
+pub fn read_translation_material(
+    translation_file: &str,
+    num_bytes: usize,
+) -> Vec<TranslationMaterial> {
+    let mut reader = BufReader::new(File::open(translation_file).unwrap());
+    let mut translation_material = Vec::new();
+
+    for _ in 0..num_bytes {
+        let mut material = [[Ciphertext::from([0u8; 16]); 8]; 256];
+        for byte_value in 0..256 {
+            for bit_position in 0..8 {
+                let mut ct_bytes = [0u8; 16];
+                reader
+                    .read_exact(&mut ct_bytes)
+                    .expect("Failed to read translation material");
+                material[byte_value][bit_position] = Ciphertext::from(ct_bytes);
+            }
+        }
+        translation_material.push(material);
+    }
+    translation_material
 }
 
 /// Wrapper that adds progress bar reporting to a CircuitTask implementation.
