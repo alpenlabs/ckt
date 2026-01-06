@@ -45,7 +45,9 @@ impl HeaderV5c {
 
     /// Get total number of gates
     pub fn total_gates(&self) -> u64 {
-        self.xor_gates.saturating_add(self.and_gates)
+        self.xor_gates
+            .checked_add(self.and_gates)
+            .expect("total gate overflow")
     }
 
     /// Get the number of full blocks
