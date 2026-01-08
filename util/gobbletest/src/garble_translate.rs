@@ -82,11 +82,12 @@ pub async fn garble_with_translation(
 
     // Generate translation material
     let mut translation_material = Vec::new();
-    for _byte_position in 0..num_bytes {
+    for byte_position in 0..num_bytes {
         let material = unsafe {
             generate_translation_material(
-                byte_labels_vec[_byte_position],
-                bit_labels_vec[_byte_position],
+                byte_position as u64,
+                byte_labels_vec[byte_position],
+                bit_labels_vec[byte_position],
             )
         };
         translation_material.push(material);

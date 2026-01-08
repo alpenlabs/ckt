@@ -54,6 +54,7 @@ pub async fn eval_with_translation(
         // Translate: byte_label → 8 bit labels
         let translated_bits = unsafe {
             translate(
+                byte_position as u64,
                 byte_label,
                 byte_value,
                 translation_material[byte_position],

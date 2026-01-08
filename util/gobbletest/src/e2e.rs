@@ -88,15 +88,19 @@ fn xor_labels(a: &[u8; 16], b: &[u8; 16]) -> [u8; 16] {
     result
 }
 
-/// Helper to convert bytes to bits for exec step
-fn bytes_to_bits(bytes: &[u8]) -> Vec<bool> {
-    let mut bits = Vec::new();
-    for byte in bytes {
-        for bit_position in 0..8 {
-            bits.push(((byte >> bit_position) & 1) == 1);
+/// Helper to convert bits to bytes for garble/eval translation steps
+fn bits_to_bytes(bits: &bitvec::vec::BitVec, num_bytes: usize) -> Vec<u8> {
+    let mut bytes = vec![0u8; num_bytes];
+    for (bit_idx, bit) in bits.iter().enumerate() {
+        if *bit {
+            let byte_idx = bit_idx / 8;
+            let bit_position = bit_idx % 8;
+            if byte_idx < num_bytes {
+                bytes[byte_idx] |= 1 << bit_position;
+            }
         }
     }
-    bits
+    bytes
 }
 
 pub async fn test_end_to_end_translate(
@@ -110,32 +114,35 @@ pub async fn test_end_to_end_translate(
     println!("🦃 Running end-to-end test with translation: exec → garble → eval\n");
 
     // Step 1: Execute in cleartext to get expected outputs
-    // Need to convert bytes to bits for exec step
+    // Input file is already in bits format
     println!("📊 Step 1: Executing circuit in cleartext...");
-    use crate::common::read_inputs_bytes;
+    use crate::common::read_inputs;
     use ckt_fmtv5_types::v5::c::ReaderV5c;
+    use std::fs;
     let reader = ReaderV5c::open(circuit_file).unwrap();
     let header = *reader.header();
-    let num_bytes = (header.primary_inputs as usize + 7) / 8;
-    let input_bytes = read_inputs_bytes(input_file, num_bytes);
+    let num_bits = header.primary_inputs as usize;
+    let num_bytes = (num_bits + 7) / 8;
     
-    // Convert bytes to bits for exec
-    let input_bits: Vec<bool> = bytes_to_bits(&input_bytes);
-    // Write bits to temp file for exec
-    use std::fs;
-    let temp_input_file = "/tmp/gobbletest_input_bits.txt";
-    let bit_string: String = input_bits.iter().map(|&b| if b { '1' } else { '0' }).collect();
-    fs::write(temp_input_file, bit_string).unwrap();
+    // Read input file as bits directly
+    let input_bits = read_inputs(input_file, num_bits);
     
-    let cleartext_outputs = exec::exec(circuit_file, temp_input_file).await;
-    fs::remove_file(temp_input_file).ok(); // Clean up temp file
+    let cleartext_outputs = exec::exec(circuit_file, input_file).await;
+
+    // Convert bits to bytes for garble/eval translation steps
+    let input_bytes = bits_to_bytes(&input_bits, num_bytes);
+    
+    // Write bytes to temp file for garble_with_translation and eval_with_translation
+    let temp_bytes_file = "/tmp/gobbletest_input_bytes.txt";
+    let bytes_string: String = input_bytes.iter().map(|b| b.to_string()).collect::<Vec<_>>().join(" ");
+    fs::write(temp_bytes_file, bytes_string).unwrap();
 
     // Step 2: Garble the circuit with translation
     println!("\n🔒 Step 2: Garbling circuit with translation...");
     let (delta, byte_labels, translation_file, garbler_output_labels) =
         garble_translate::garble_with_translation(
             circuit_file,
-            input_file,
+            temp_bytes_file,
             garbled_file,
             rng,
             None, // Generate byte labels with RNG
@@ -148,10 +155,12 @@ pub async fn test_end_to_end_translate(
         circuit_file,
         garbled_file,
         &translation_file,
-        input_file,
+        temp_bytes_file,
         &byte_labels,
     )
     .await;
+    
+    fs::remove_file(temp_bytes_file).ok(); // Clean up temp file
 
     // Step 4: Verify correctness
     println!("\n✅ Step 4: Verifying correctness...\n");
