@@ -3,7 +3,6 @@
 pub mod eval;
 pub mod exec;
 pub mod garb;
-pub mod translate;
 
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::RngCore;
@@ -34,6 +33,12 @@ impl From<[u8; 16]> for Label {
 impl From<Label> for [u8; 16] {
     fn from(label: Label) -> Self {
         unsafe { transmute::<__m128i, [u8; 16]>(label.0) }
+    }
+}
+
+impl Default for Label {
+    fn default() -> Self {
+        Label(unsafe { transmute::<[u8; 16], __m128i>([0u8; 16]) })
     }
 }
 
