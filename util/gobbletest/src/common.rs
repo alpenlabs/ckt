@@ -39,34 +39,18 @@ pub fn read_inputs(input_file: &str, expected_num_inputs: usize) -> BitVec {
     input_values_bits
 }
 
-/// Read input bytes from a text file (space-separated or one per line)
-/// Example: "0 255 42" or "0\n255\n42"
-pub fn read_inputs_bytes(input_file: &str, expected_num_bytes: usize) -> Vec<u8> {
-    let mut input_string = String::new();
-    let file = File::open(input_file)
-        .unwrap_or_else(|_| panic!("Failed to open input file: {}", input_file));
-    let mut reader = BufReader::new(file);
-    reader.read_to_string(&mut input_string).unwrap();
-
-    let input_string = input_string.trim();
-    
-    // Parse bytes - support both space-separated and newline-separated
-    let bytes: Vec<u8> = input_string
-        .split_whitespace()
-        .map(|s| {
-            s.parse::<u8>()
-                .unwrap_or_else(|_| panic!("Invalid byte value: {}", s))
-        })
-        .collect();
-
-    assert_eq!(
-        bytes.len(),
-        expected_num_bytes,
-        "Input file has {} bytes but expected {}",
-        bytes.len(),
-        expected_num_bytes
-    );
-
+/// Convert bits to bytes (LSB-first within each byte)
+pub fn bits_to_bytes(bits: &BitVec, num_bytes: usize) -> Vec<u8> {
+    let mut bytes = vec![0u8; num_bytes];
+    for (bit_idx, bit) in bits.iter().enumerate() {
+        if *bit {
+            let byte_idx = bit_idx / 8;
+            let bit_position = bit_idx % 8;
+            if byte_idx < num_bytes {
+                bytes[byte_idx] |= 1 << bit_position;
+            }
+        }
+    }
     bytes
 }
 

@@ -10,7 +10,7 @@ use ckt_gobble::{
 use ckt_runner_exec::{CircuitReader, EvalTask, ReaderV5cWrapper, process_task};
 
 use crate::common::{
-    ProgressBarTask, read_inputs_bytes, read_translation_material,
+    ProgressBarTask, read_inputs, bits_to_bytes, read_translation_material,
 };
 
 /// Evaluation with translation support.
@@ -26,9 +26,11 @@ pub async fn eval_with_translation(
     let mut reader = ReaderV5cWrapper::new(ReaderV5c::open(circuit_file).unwrap());
     let header = *reader.header();
 
-    // Read inputs as bytes (needed to know byte values for translation)
-    let num_bytes = (header.primary_inputs as usize + 7) / 8; // Round up division
-    let input_bytes = read_inputs_bytes(input_file, num_bytes);
+    // Read inputs as bits and convert to bytes (needed to know byte values for translation)
+    let num_bits = header.primary_inputs as usize;
+    let num_bytes = (num_bits + 7) / 8; // Round up division
+    let input_bits = read_inputs(input_file, num_bits);
+    let input_bytes = bits_to_bytes(&input_bits, num_bytes);
 
     assert_eq!(
         byte_labels.len(),

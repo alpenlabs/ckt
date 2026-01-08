@@ -11,7 +11,7 @@ use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::RngCore;
 
 use crate::common::{
-    ProgressBarTask, read_inputs_bytes, generate_byte_labels, write_translation_material,
+    ProgressBarTask, read_inputs, bits_to_bytes, generate_byte_labels, write_translation_material,
 };
 
 /// Garbling with translation support.
@@ -27,9 +27,11 @@ pub async fn garble_with_translation(
     let mut reader = ReaderV5cWrapper::new(ReaderV5c::open(circuit_file).unwrap());
     let header = *reader.header();
 
-    // Read inputs as bytes
-    let num_bytes = (header.primary_inputs as usize + 7) / 8; // Round up division
-    let input_bytes = read_inputs_bytes(input_file, num_bytes);
+    // Read inputs as bits and convert to bytes
+    let num_bits = header.primary_inputs as usize;
+    let num_bytes = (num_bits + 7) / 8; // Round up division
+    let input_bits = read_inputs(input_file, num_bits);
+    let input_bytes = bits_to_bytes(&input_bits, num_bytes);
 
     // Generate or use provided byte labels
     let byte_labels_vec = byte_labels.unwrap_or_else(|| {
