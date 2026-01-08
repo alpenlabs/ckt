@@ -60,10 +60,10 @@ pub fn generate_byte_labels(num_bytes: usize, rng: &mut ChaCha20Rng) -> Vec<Byte
     let mut byte_labels_vec = Vec::new();
     for _ in 0..num_bytes {
         let mut byte_label_array = [Label::from([0u8; 16]); 256];
-        for i in 0..256 {
+        for label in &mut byte_label_array {
             let mut label_bytes = [0u8; 16];
             rng.fill_bytes(&mut label_bytes);
-            byte_label_array[i] = Label::from(label_bytes);
+            *label = Label::from(label_bytes);
         }
         byte_labels_vec.push(ByteLabel::new(byte_label_array));
     }
@@ -81,9 +81,9 @@ pub fn write_translation_material(
 ) {
     let mut writer = BufWriter::new(File::create(translation_file).unwrap());
     for material in translation_material {
-        for byte_value in 0..256 {
-            for bit_position in 0..8 {
-                let ct_bytes: [u8; 16] = material[byte_value][bit_position].into();
+        for byte_row in material {
+            for ciphertext in byte_row {
+                let ct_bytes: [u8; 16] = (*ciphertext).into();
                 writer
                     .write_all(&ct_bytes)
                     .expect("Failed to write translation material");
@@ -109,13 +109,13 @@ pub fn read_translation_material(
 
     for _ in 0..num_bytes {
         let mut material = [[Ciphertext::from([0u8; 16]); 8]; 256];
-        for byte_value in 0..256 {
-            for bit_position in 0..8 {
+        for byte_row in &mut material {
+            for ciphertext in byte_row {
                 let mut ct_bytes = [0u8; 16];
                 reader
                     .read_exact(&mut ct_bytes)
                     .expect("Failed to read translation material");
-                material[byte_value][bit_position] = Ciphertext::from(ct_bytes);
+                *ciphertext = Ciphertext::from(ct_bytes);
             }
         }
         translation_material.push(material);

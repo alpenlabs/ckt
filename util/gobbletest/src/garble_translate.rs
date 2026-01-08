@@ -28,7 +28,7 @@ pub async fn garble_with_translation(
 
     // Read inputs as bits and convert to bytes
     let num_bits = header.primary_inputs as usize;
-    let num_bytes = (num_bits + 7) / 8; // Round up division
+    let num_bytes = num_bits.div_ceil(8);
     let input_bits = read_inputs(input_file, num_bits);
     let input_bytes = bits_to_bytes(&input_bits, num_bytes);
 
@@ -64,7 +64,7 @@ pub async fn garble_with_translation(
         let default_label = Label::from([0u8; 16]);
         let mut bit_labels_array = [BitLabel::new([default_label, default_label]); 8];
 
-        for bit_position in 0..8 {
+        for bit_label in &mut bit_labels_array {
             // Generate false label (for bit value 0)
             let mut false_label_bytes = [0u8; 16];
             rng.fill_bytes(&mut false_label_bytes);
@@ -74,7 +74,7 @@ pub async fn garble_with_translation(
             // This ensures global delta correlation for FreeXOR optimization
             let true_label = Label(unsafe { xor128(false_label.0, delta.0) });
 
-            bit_labels_array[bit_position] = BitLabel::new([false_label, true_label]);
+            *bit_label = BitLabel::new([false_label, true_label]);
         }
         bit_labels_vec.push(bit_labels_array);
     }
@@ -105,19 +105,16 @@ pub async fn garble_with_translation(
     // Note: Only generate exactly primary_inputs bits (may be less than num_bytes * 8)
     let mut primary_input_false_labels = Vec::new();
     let mut bit_count = 0;
-    for byte_position in 0..num_bytes {
-        for bit_position in 0..8 {
+    'outer: for bit_labels_array in &bit_labels_vec {
+        for bit_label in bit_labels_array {
             if bit_count >= header.primary_inputs as usize {
-                break;
+                break 'outer;
             }
             // Get false label (index 0) from BitLabel
-            let false_label = bit_labels_vec[byte_position][bit_position].get_label(false);
+            let false_label = bit_label.get_label(false);
             let label_bytes: [u8; 16] = false_label.into();
             primary_input_false_labels.push(label_bytes);
             bit_count += 1;
-        }
-        if bit_count >= header.primary_inputs as usize {
-            break;
         }
     }
 

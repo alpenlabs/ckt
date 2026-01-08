@@ -42,10 +42,11 @@ impl ByteLabel {
     }
 }
 
-/// Translation material: [[Ciphertext; 8]; 256]
+/// Translation material: `[[Ciphertext; 8]; 256]`
+///
 /// - 256 possible byte values (0..255)
 /// - 8 ciphertexts per byte value (one per input bit position)
-/// Size: 256 × 8 × 16 bytes = 32KB per byte position
+/// - Size: 256 × 8 × 16 bytes = 32KB per byte position
 pub type TranslationMaterial = [[Ciphertext; 8]; 256];
 
 /// Macro to generate translation functions with architecture-specific target features.
@@ -53,6 +54,10 @@ pub type TranslationMaterial = [[Ciphertext; 8]; 256];
 macro_rules! impl_translation_fns {
     ($($target_feature:literal),+) => {
         /// Expands hash to 8x width using Fixed Key AES and different tweaks for each bit position.
+        ///
+        /// # Safety
+        ///
+        /// The caller must ensure the CPU supports the required target features (AES and NEON/SSE2).
         $(#[target_feature(enable = $target_feature)])+
         pub unsafe fn wide_hash(label: Label, index: u64) -> [Label; 8] {
             let mut labels = [Label::default(); 8];
@@ -63,6 +68,10 @@ macro_rules! impl_translation_fns {
         }
 
         /// Generates garbled material required to translate ByteLabel component to BitLabel components.
+        ///
+        /// # Safety
+        ///
+        /// The caller must ensure the CPU supports the required target features (AES and NEON/SSE2).
         $(#[target_feature(enable = $target_feature)])+
         pub unsafe fn generate_translation_material(
             byte_position: u64,
@@ -101,6 +110,10 @@ macro_rules! impl_translation_fns {
         ///
         /// Given a label for a specific byte value, this function recovers the 8 bit labels
         /// corresponding to each bit of that byte value.
+        ///
+        /// # Safety
+        ///
+        /// The caller must ensure the CPU supports the required target features (AES and NEON/SSE2).
         $(#[target_feature(enable = $target_feature)])+
         pub unsafe fn translate(
             byte_position: u64,

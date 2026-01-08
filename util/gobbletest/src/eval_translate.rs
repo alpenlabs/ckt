@@ -23,7 +23,7 @@ pub async fn eval_with_translation(
 
     // Read inputs as bits and convert to bytes (need to know byte values for translation)
     let num_bits = header.primary_inputs as usize;
-    let num_bytes = (num_bits + 7) / 8; // Round up division
+    let num_bytes = num_bits.div_ceil(8);
     let input_bits = read_inputs(input_file, num_bits);
     let input_bytes = bits_to_bytes(&input_bits, num_bytes);
 
@@ -59,14 +59,14 @@ pub async fn eval_with_translation(
         };
 
         // Extract bit values and labels
-        for bit_position in 0..8 {
+        for (bit_position, translated_label) in translated_bit_labels.iter().enumerate() {
             if bit_count >= header.primary_inputs as usize {
                 break;
             }
             let bit_value = ((byte_value >> bit_position) & 1) == 1;
             input_values_bits.push(bit_value);
 
-            let label_bytes: [u8; 16] = translated_bit_labels[bit_position].into();
+            let label_bytes: [u8; 16] = (*translated_label).into();
             bit_labels.push(label_bytes);
             bit_count += 1;
         }
