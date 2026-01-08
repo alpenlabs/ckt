@@ -26,7 +26,7 @@ pub async fn eval_with_translation(
     let mut reader = ReaderV5cWrapper::new(ReaderV5c::open(circuit_file).unwrap());
     let header = *reader.header();
 
-    // Read inputs as bits and convert to bytes (needed to know byte values for translation)
+    // Read inputs as bits and convert to bytes (need to know byte values for translation)
     let num_bits = header.primary_inputs as usize;
     let num_bytes = (num_bits + 7) / 8; // Round up division
     let input_bits = read_inputs(input_file, num_bits);
@@ -43,7 +43,7 @@ pub async fn eval_with_translation(
     // Read translation material from file
     let translation_material = read_translation_material(translation_file, num_bytes);
 
-    // Translate byte labels → bit labels
+    // Translate byte labels to bit labels
     // Only translate exactly primary_inputs bits (may be less than num_bytes * 8)
     let mut bit_labels = Vec::new();
     let mut input_values_bits = BitVec::new();
@@ -53,8 +53,8 @@ pub async fn eval_with_translation(
         let byte_label = Label::from(byte_labels[byte_position]);
         let byte_value = input_bytes[byte_position];
 
-        // Translate: byte_label → 8 bit labels
-        let translated_bits = unsafe {
+        // Translate: byte_label to 8 bit labels
+        let translated_bit_labels = unsafe {
             translate(
                 byte_position as u64,
                 byte_label,
@@ -71,7 +71,7 @@ pub async fn eval_with_translation(
             let bit_value = ((byte_value >> bit_position) & 1) == 1;
             input_values_bits.push(bit_value);
 
-            let label_bytes: [u8; 16] = translated_bits[bit_position].into();
+            let label_bytes: [u8; 16] = translated_bit_labels[bit_position].into();
             bit_labels.push(label_bytes);
             bit_count += 1;
         }
