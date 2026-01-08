@@ -3,18 +3,13 @@ use std::io::BufReader;
 
 use bitvec::vec::BitVec;
 use ckt_fmtv5_types::v5::c::ReaderV5c;
-use ckt_gobble::{
-    traits::EvaluationInstanceConfig,
-    Label, translate,
-};
+use ckt_gobble::{Label, traits::EvaluationInstanceConfig, translate};
 use ckt_runner_exec::{CircuitReader, EvalTask, ReaderV5cWrapper, process_task};
 
-use crate::common::{
-    ProgressBarTask, read_inputs, bits_to_bytes, read_translation_material,
-};
+use crate::common::{ProgressBarTask, bits_to_bytes, read_inputs, read_translation_material};
 
 /// Evaluation with translation support.
-/// 
+///
 /// Translates byte labels to bit labels using translation material, then runs standard evaluation.
 pub async fn eval_with_translation(
     circuit_file: &str,
@@ -79,7 +74,7 @@ pub async fn eval_with_translation(
             break;
         }
     }
-    
+
     assert_eq!(
         bit_labels.len(),
         header.primary_inputs as usize,

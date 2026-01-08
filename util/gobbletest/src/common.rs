@@ -1,6 +1,6 @@
 use bitvec::vec::BitVec;
 use ckt_fmtv5_types::v5::c::HeaderV5c;
-use ckt_gobble::{ByteLabel, Label, TranslationMaterial, Ciphertext};
+use ckt_gobble::{ByteLabel, Ciphertext, Label, TranslationMaterial};
 use ckt_runner_types::{CircuitTask, GateBlock};
 use indicatif::{ProgressBar, ProgressStyle};
 use rand_chacha::ChaCha20Rng;
@@ -56,10 +56,7 @@ pub fn bits_to_bytes(bits: &BitVec, num_bytes: usize) -> Vec<u8> {
 
 /// Generate byte labels using RNG (for testing).
 /// In practice, these may come from an outer protocol with specific correlations.
-pub fn generate_byte_labels(
-    num_bytes: usize,
-    rng: &mut ChaCha20Rng,
-) -> Vec<ByteLabel> {
+pub fn generate_byte_labels(num_bytes: usize, rng: &mut ChaCha20Rng) -> Vec<ByteLabel> {
     let mut byte_labels_vec = Vec::new();
     for _ in 0..num_bytes {
         let mut byte_label_array = [Label::from([0u8; 16]); 256];

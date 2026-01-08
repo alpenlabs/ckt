@@ -3,19 +3,18 @@ use std::io::BufWriter;
 
 use ckt_fmtv5_types::v5::c::*;
 use ckt_gobble::{
-    traits::GarblingInstanceConfig,
-    BitLabel, ByteLabel, Label, generate_translation_material,
+    BitLabel, ByteLabel, Label, generate_translation_material, traits::GarblingInstanceConfig,
 };
 use ckt_runner_exec::{CircuitReader, GarbleTask, ReaderV5cWrapper, process_task};
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::RngCore;
 
 use crate::common::{
-    ProgressBarTask, read_inputs, bits_to_bytes, generate_byte_labels, write_translation_material,
+    ProgressBarTask, bits_to_bytes, generate_byte_labels, read_inputs, write_translation_material,
 };
 
 /// Garbling with translation support.
-/// 
+///
 /// Returns: (delta, byte_labels, translation_file_path, garbler_output_labels)
 pub async fn garble_with_translation(
     circuit_file: &str,
@@ -34,9 +33,7 @@ pub async fn garble_with_translation(
     let input_bytes = bits_to_bytes(&input_bits, num_bytes);
 
     // Generate or use provided byte labels
-    let byte_labels_vec = byte_labels.unwrap_or_else(|| {
-        generate_byte_labels(num_bytes, rng)
-    });
+    let byte_labels_vec = byte_labels.unwrap_or_else(|| generate_byte_labels(num_bytes, rng));
 
     assert_eq!(
         byte_labels_vec.len(),
@@ -123,7 +120,7 @@ pub async fn garble_with_translation(
             break;
         }
     }
-    
+
     assert_eq!(
         primary_input_false_labels.len(),
         header.primary_inputs as usize,
@@ -168,4 +165,3 @@ pub async fn garble_with_translation(
         output.garbler_output_labels,
     )
 }
-

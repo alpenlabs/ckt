@@ -22,11 +22,7 @@ impl BitLabel {
 
     /// Returns the label for the given bit value
     pub const fn get_label(&self, value: bool) -> Label {
-        if value {
-            self.0[1]
-        } else {
-            self.0[0]
-        }
+        if value { self.0[1] } else { self.0[0] }
     }
 }
 
@@ -165,7 +161,8 @@ mod tests {
         }
 
         // Generate translation material
-        let translation_material = unsafe { generate_translation_material(0, byte_label, bit_labels) };
+        let translation_material =
+            unsafe { generate_translation_material(0, byte_label, bit_labels) };
 
         // Test translation for various byte values
         for test_value in [0u8, 1, 7, 15, 42, 128, 255] {
@@ -173,9 +170,8 @@ mod tests {
             let byte_label_component = byte_label.get_label(test_value);
 
             // Translate to get 8 bit labels
-            let recovered_labels = unsafe {
-                translate(0, byte_label_component, test_value, translation_material)
-            };
+            let recovered_labels =
+                unsafe { translate(0, byte_label_component, test_value, translation_material) };
 
             // Verify each bit label matches the expected value
             for bit_position in 0..8 {
@@ -213,14 +209,14 @@ mod tests {
             bit_labels[i] = BitLabel::new([bit_labels_flat[i * 2], bit_labels_flat[i * 2 + 1]]);
         }
 
-        let translation_material = unsafe { generate_translation_material(0, byte_label, bit_labels) };
+        let translation_material =
+            unsafe { generate_translation_material(0, byte_label, bit_labels) };
 
         // Test all 256 possible byte values
         for test_value in 0u8..=255 {
             let byte_label_component = byte_label.get_label(test_value);
-            let recovered_labels = unsafe {
-                translate(0, byte_label_component, test_value, translation_material)
-            };
+            let recovered_labels =
+                unsafe { translate(0, byte_label_component, test_value, translation_material) };
 
             // Verify all 8 bits
             for bit_position in 0..8 {
@@ -254,7 +250,8 @@ mod tests {
             bit_labels[i] = BitLabel::new([bit_labels_flat[i * 2], bit_labels_flat[i * 2 + 1]]);
         }
 
-        let translation_material = unsafe { generate_translation_material(0, byte_label, bit_labels) };
+        let translation_material =
+            unsafe { generate_translation_material(0, byte_label, bit_labels) };
 
         // Test specific patterns
         let test_patterns = [
@@ -268,9 +265,8 @@ mod tests {
 
         for &test_value in &test_patterns {
             let byte_label_component = byte_label.get_label(test_value);
-            let recovered_labels = unsafe {
-                translate(0, byte_label_component, test_value, translation_material)
-            };
+            let recovered_labels =
+                unsafe { translate(0, byte_label_component, test_value, translation_material) };
 
             for bit_position in 0..8 {
                 let bit_value = ((test_value >> bit_position) & 1) == 1;
