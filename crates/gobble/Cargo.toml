@@ -9,7 +9,6 @@ repository.workspace = true
 [dependencies]
 bitvec.workspace = true
 hex-literal.workspace = true
-rand_chacha.workspace = true
 
 [dev-dependencies]
 aes.workspace = true

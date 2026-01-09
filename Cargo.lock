@@ -286,7 +286,6 @@ dependencies = [
  "criterion",
  "hex-literal",
  "rand",
- "rand_chacha",
 ]
 
 [[package]]

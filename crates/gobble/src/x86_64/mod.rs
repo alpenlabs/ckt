@@ -32,7 +32,7 @@ const AES128_ROUND_KEYS: [__m128i; 11] = [
 /// The caller must ensure that the CPU supports the `sse2` target feature.
 #[inline]
 pub unsafe fn get_permute_bit(label: __m128i) -> bool {
-    let bytes: [u8; 16] = transmute(label);
+    let bytes: [u8; 16] = unsafe { transmute(label) };
     (bytes[0] & 1) == 1
 }
 
@@ -43,7 +43,7 @@ pub unsafe fn get_permute_bit(label: __m128i) -> bool {
 /// The caller must ensure that the CPU supports the `sse2` target feature.
 #[inline]
 pub unsafe fn xor128(a: __m128i, b: __m128i) -> __m128i {
-    _mm_xor_si128(a, b)
+    unsafe { _mm_xor_si128(a, b) }
 }
 
 /// Convert gate index to tweak value.
@@ -55,7 +55,7 @@ pub unsafe fn xor128(a: __m128i, b: __m128i) -> __m128i {
 pub unsafe fn index_to_tweak(index: u64) -> __m128i {
     let mut bytes = [0u8; 16];
     bytes[0..8].copy_from_slice(&index.to_le_bytes());
-    transmute(bytes)
+    unsafe { transmute(bytes) }
 }
 
 /// AES-128 encryption using x86 AES-NI instructions.
@@ -96,8 +96,8 @@ pub unsafe fn aes_encrypt(block: __m128i) -> __m128i {
 #[target_feature(enable = "aes")]
 #[target_feature(enable = "sse2")]
 pub unsafe fn hash(x: __m128i, tweak: __m128i) -> __m128i {
-    let aes_x = aes_encrypt(x);
-    xor128(aes_encrypt(xor128(aes_x, tweak)), aes_x)
+    let aes_x = unsafe { aes_encrypt(x) };
+    unsafe { xor128(aes_encrypt(xor128(aes_x, tweak)), aes_x) }
 }
 
 #[cfg(test)]
