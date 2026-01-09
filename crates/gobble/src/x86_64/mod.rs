@@ -1,7 +1,6 @@
 //! x86_64-specific intrinsics and AES implementation.
 //!
-//! This module contains only the architecture-specific low-level operations.
-//! All higher-level logic (garbling, evaluation, execution) is in the unified modules.
+//! This module contains architecture-specific low-level operations.
 
 use std::arch::x86_64::*;
 use std::mem::transmute;
