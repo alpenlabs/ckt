@@ -5,9 +5,9 @@
 use std::mem::transmute;
 
 #[cfg(target_arch = "x86_64")]
-type Vector128 = std::arch::x86_64::__m128i;
+type Inner = std::arch::x86_64::__m128i;
 #[cfg(target_arch = "aarch64")]
-type Vector128 = std::arch::aarch64::uint8x16_t;
+type Inner = std::arch::aarch64::uint8x16_t;
 
 use bitvec::vec::BitVec;
 use ckt_gobble::{
@@ -205,8 +205,8 @@ fn bench_xor128(c: &mut Criterion) {
     c.bench_function("xor128", |bencher| unsafe {
         let a_bytes = [0x42u8; 16];
         let b_bytes = [0x99u8; 16];
-        let a = transmute::<[u8; 16], Vector128>(a_bytes);
-        let b = transmute::<[u8; 16], Vector128>(b_bytes);
+        let a = transmute::<[u8; 16], Inner>(a_bytes);
+        let b = transmute::<[u8; 16], Inner>(b_bytes);
 
         bencher.iter(|| {
             let result = xor128(black_box(a), black_box(b));
@@ -218,7 +218,7 @@ fn bench_xor128(c: &mut Criterion) {
 fn bench_get_permute_bit(c: &mut Criterion) {
     c.bench_function("get_permute_bit", |b| unsafe {
         let label_bytes = [0x42u8; 16];
-        let label = transmute::<[u8; 16], Vector128>(label_bytes);
+        let label = transmute::<[u8; 16], Inner>(label_bytes);
 
         b.iter(|| {
             let result = get_permute_bit(black_box(label));
