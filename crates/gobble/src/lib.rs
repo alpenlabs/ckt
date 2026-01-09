@@ -1,12 +1,19 @@
 //! Core crate for garbling, executing and evaluating garbled/boolean circuits.
 
 pub mod traits;
+pub mod types;
 
+// Architecture-specific intrinsics
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
 
 #[cfg(target_arch = "x86_64")]
 pub mod x86_64;
+
+// Unified implementations (architecture-independent logic)
+pub mod eval;
+pub mod exec;
+pub mod garb;
 
 use hex_literal::hex;
 
@@ -32,29 +39,54 @@ pub const AES128_ROUND_KEY_BYTES: [[u8; 16]; 10] = [
     hex!("d014f9a8c9ee2589e13f0cc8b6630ca6"),
 ];
 
-/// Architecture-specific types re-exported at a consistent path.
-#[cfg(target_arch = "aarch64")]
-mod arch {
-    pub use crate::aarch64::{
-        Aarch64GobbleEngine as Engine, Ciphertext, Label,
-        eval::Aarch64EvaluationInstance as EvaluationInstance,
-        exec::Aarch64ExecutionInstance as ExecutionInstance,
-        garb::Aarch64GarblingInstance as GarblingInstance,
-    };
-}
+// Re-export types at crate root
+pub use types::{Ciphertext, Label};
+pub use eval::EvaluationInstanceImpl as EvaluationInstance;
+pub use exec::CleartextExecutionInstance as ExecutionInstance;
+pub use garb::GarblingInstanceImpl as GarblingInstance;
 
-/// Architecture-specific types re-exported at a consistent path.
-#[cfg(target_arch = "x86_64")]
-mod arch {
-    pub use crate::x86_64::{
-        Ciphertext, Label, X86_64GobbleEngine as Engine,
-        eval::X86_64EvaluationInstance as EvaluationInstance,
-        exec::X86_64ExecutionInstance as ExecutionInstance,
-        garb::X86_64GarblingInstance as GarblingInstance,
-    };
-}
+use traits::{
+    EvaluationInstanceConfig, ExecutionInstanceConfig, GarblingInstanceConfig, GobbleEngine,
+};
 
-pub use arch::*;
+/// Primary engine for garbling, executing, and evaluating circuits.
+///
+/// This is the main entry point for using the gobble crate. It implements
+/// the [`GobbleEngine`] trait and provides factory methods for creating
+/// garbling, execution, and evaluation instances.
+#[derive(Debug)]
+pub struct Engine;
+
+impl GobbleEngine for Engine {
+    fn new() -> Self {
+        Self
+    }
+
+    type GarblingInstance = GarblingInstance;
+    type EvaluationInstance = EvaluationInstance;
+    type ExecutionInstance = ExecutionInstance;
+
+    fn new_garbling_instance<'labels>(
+        &self,
+        config: GarblingInstanceConfig<'labels>,
+    ) -> Self::GarblingInstance {
+        GarblingInstance::new(config)
+    }
+
+    fn new_execution_instance<'values>(
+        &self,
+        config: ExecutionInstanceConfig<'values>,
+    ) -> Self::ExecutionInstance {
+        ExecutionInstance::new(config)
+    }
+
+    fn new_evaluation_instance<'labels>(
+        &self,
+        config: EvaluationInstanceConfig<'labels>,
+    ) -> Self::EvaluationInstance {
+        EvaluationInstance::new(config)
+    }
+}
 
 #[cfg(test)]
 mod tests {
