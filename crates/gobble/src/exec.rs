@@ -1,4 +1,6 @@
 //! Cleartext circuit execution implementation.
+//!
+//! This module is completely architecture-independent as it only operates on bits.
 
 use bitvec::vec::BitVec;
 
