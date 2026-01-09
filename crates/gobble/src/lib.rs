@@ -40,10 +40,10 @@ pub const AES128_ROUND_KEY_BYTES: [[u8; 16]; 10] = [
 ];
 
 // Re-export types at crate root
-pub use types::{Ciphertext, Label};
 pub use eval::EvaluationInstanceImpl as EvaluationInstance;
 pub use exec::CleartextExecutionInstance as ExecutionInstance;
 pub use garb::GarblingInstanceImpl as GarblingInstance;
+pub use types::{Ciphertext, Label};
 
 use traits::{
     EvaluationInstanceConfig, ExecutionInstanceConfig, GarblingInstanceConfig, GobbleEngine,

@@ -38,9 +38,8 @@ impl GarblingInstanceImpl {
 
         // Wire 0 is constant false label, wire 1 is constant true label
         working_space[0] = Label::zero();
-        working_space[1] = Label(unsafe {
-            xor128(Label::one().0, transmute::<[u8; 16], Inner>(config.delta))
-        });
+        working_space[1] =
+            Label(unsafe { xor128(Label::one().0, transmute::<[u8; 16], Inner>(config.delta)) });
 
         // Set primary input labels starting at position 2
         for (label, i) in config.primary_input_false_labels.iter().zip(2..) {
