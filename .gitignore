@@ -10,6 +10,9 @@ inputs.txt
 # macos, gross
 .DS_Store
 
+# vscode
+.vscode/
+
 # emacs, yay!
 *~
 \#*\#
