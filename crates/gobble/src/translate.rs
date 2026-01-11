@@ -147,6 +147,50 @@ impl_translation_fns!("aes", "neon");
 #[cfg(target_arch = "x86_64")]
 impl_translation_fns!("aes", "sse2");
 
+use blake3;
+
+/// Expands hash to 8x width using Blake3 XOF (extendable output function).
+///
+/// This is an alternative implementation to `wide_hash` that uses Blake3's
+/// standard XOF instead of Fixed Key AES with tweaks.
+///
+/// The implementation uses Blake3's XOF to generate 128 bytes (8 labels * 16 bytes)
+/// with proper domain separation via the index parameter.
+///
+/// # Arguments
+///
+/// * `label` - Input label (128 bits)
+/// * `index` - Index value for domain separation
+///
+/// # Returns
+///
+/// Array of 8 labels, each 128 bits (16 bytes)
+pub fn wide_hash_blake3(label: Label, index: u64) -> [Label; 8] {
+    // Convert label to bytes
+    let label_bytes: [u8; 16] = label.into();
+
+    // Create input: label (16 bytes) + index (8 bytes, little-endian)
+    let mut input = [0u8; 24];
+    input[0..16].copy_from_slice(&label_bytes);
+    input[16..24].copy_from_slice(&index.to_le_bytes());
+
+    // Hash using Blake3 and get XOF output (128 bytes = 8 labels * 16 bytes)
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(&input);
+    let mut output = [0u8; 128]; // 8 labels * 16 bytes
+    hasher.finalize_xof().fill(&mut output);
+
+    // Split into 8 labels
+    let mut labels = [Label::default(); 8];
+    for i in 0..8 {
+        let mut label_bytes = [0u8; 16];
+        label_bytes.copy_from_slice(&output[i * 16..(i + 1) * 16]);
+        labels[i] = Label::from(label_bytes);
+    }
+
+    labels
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

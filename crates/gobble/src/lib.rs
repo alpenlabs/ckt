@@ -58,6 +58,7 @@ mod arch {
 // Re-export translation types at crate root
 pub use translate::{
     BitLabel, ByteLabel, TranslationMaterial, generate_translation_material, translate, wide_hash,
+    wide_hash_blake3,
 };
 
 pub use arch::*;
