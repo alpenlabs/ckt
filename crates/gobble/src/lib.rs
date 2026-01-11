@@ -1,6 +1,7 @@
 //! Core crate for garbling, executing and evaluating garbled/boolean circuits.
 
 pub mod traits;
+pub mod translate;
 
 #[cfg(target_arch = "aarch64")]
 pub mod aarch64;
@@ -53,6 +54,12 @@ mod arch {
         garb::X86_64GarblingInstance as GarblingInstance,
     };
 }
+
+// Re-export translation types at crate root
+pub use translate::{
+    BitLabel, ByteLabel, TranslationMaterial, generate_translation_material, translate, wide_hash,
+    wide_hash_blake3,
+};
 
 pub use arch::*;
 

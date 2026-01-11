@@ -42,6 +42,24 @@ impl Label {
     }
 }
 
+impl From<[u8; 16]> for Label {
+    fn from(bytes: [u8; 16]) -> Self {
+        Label(unsafe { transmute::<[u8; 16], uint8x16_t>(bytes) })
+    }
+}
+
+impl From<Label> for [u8; 16] {
+    fn from(label: Label) -> Self {
+        unsafe { transmute::<uint8x16_t, [u8; 16]>(label.0) }
+    }
+}
+
+impl Default for Label {
+    fn default() -> Self {
+        Label(unsafe { transmute::<[u8; 16], uint8x16_t>([0u8; 16]) })
+    }
+}
+
 /// Aarch64-specific ciphertext type.
 #[derive(Debug, Clone, Copy)]
 pub struct Ciphertext(pub uint8x16_t);

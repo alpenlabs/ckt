@@ -24,6 +24,24 @@ use crate::{AES128_KEY_BYTES, AES128_ROUND_KEY_BYTES};
 #[derive(Debug, Clone, Copy)]
 pub struct Label(pub __m128i);
 
+impl From<[u8; 16]> for Label {
+    fn from(bytes: [u8; 16]) -> Self {
+        Label(unsafe { transmute::<[u8; 16], __m128i>(bytes) })
+    }
+}
+
+impl From<Label> for [u8; 16] {
+    fn from(label: Label) -> Self {
+        unsafe { transmute::<__m128i, [u8; 16]>(label.0) }
+    }
+}
+
+impl Default for Label {
+    fn default() -> Self {
+        Label(unsafe { transmute::<[u8; 16], __m128i>([0u8; 16]) })
+    }
+}
+
 /// x86_64-specific ciphertext type.
 #[derive(Debug, Clone, Copy)]
 pub struct Ciphertext(pub __m128i);

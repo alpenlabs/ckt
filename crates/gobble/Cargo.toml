@@ -8,6 +8,7 @@ repository.workspace = true
 
 [dependencies]
 bitvec.workspace = true
+blake3.workspace = true
 hex-literal.workspace = true
 rand_chacha.workspace = true
 
@@ -18,6 +19,10 @@ criterion.workspace = true
 
 [[bench]]
 name = "garbling"
+harness = false
+
+[[bench]]
+name = "translate"
 harness = false
 
 [lints]
