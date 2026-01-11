@@ -13,6 +13,7 @@ pub(crate) type Inner = std::arch::aarch64::uint8x16_t;
 pub(crate) type Inner = std::arch::x86_64::__m128i;
 
 // Constants for Label::zero() and Label::one()
+// These are currently picked arbitrarily.
 const LABEL_ZERO_BYTES: [u8; 16] = [98u8; 16];
 const LABEL_ONE_BYTES: [u8; 16] = [25u8; 16];
 
