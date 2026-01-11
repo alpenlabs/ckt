@@ -29,7 +29,9 @@ const AES128_ROUND_KEYS: [uint8x16_t; 11] = [
 ///
 /// # Safety
 ///
-/// The caller must ensure that the CPU supports the `neon` target feature.
+/// The caller must ensure that:
+/// - The CPU supports the `neon` target feature.
+/// - The `label` parameter contains initialized data (not uninitialized memory).
 #[inline]
 pub unsafe fn get_permute_bit(label: uint8x16_t) -> bool {
     let bytes: [u8; 16] = unsafe { transmute(label) };
@@ -40,7 +42,9 @@ pub unsafe fn get_permute_bit(label: uint8x16_t) -> bool {
 ///
 /// # Safety
 ///
-/// The caller must ensure that the CPU supports the `neon` target feature.
+/// The caller must ensure that:
+/// - The CPU supports the `neon` target feature.
+/// - The `a` and `b` parameters contain initialized data (not uninitialized memory).
 #[inline]
 pub unsafe fn xor128(a: uint8x16_t, b: uint8x16_t) -> uint8x16_t {
     unsafe { veorq_u8(a, b) }
@@ -67,7 +71,9 @@ pub unsafe fn index_to_tweak(index: u64) -> uint8x16_t {
 ///
 /// # Safety
 ///
-/// The caller must ensure that the CPU supports the `aes` and `neon` target features.
+/// The caller must ensure that:
+/// - The CPU supports the `aes` and `neon` target features.
+/// - The `block` parameter contains initialized data (not uninitialized memory).
 #[target_feature(enable = "aes")]
 #[target_feature(enable = "neon")]
 pub unsafe fn aes_encrypt(block: uint8x16_t) -> uint8x16_t {
@@ -97,7 +103,9 @@ pub unsafe fn aes_encrypt(block: uint8x16_t) -> uint8x16_t {
 ///
 /// # Safety
 ///
-/// The caller must ensure that the CPU supports the `aes` and `neon` target features.
+/// The caller must ensure that:
+/// - The CPU supports the `aes` and `neon` target features.
+/// - The `x` and `tweak` parameters contain initialized data (not uninitialized memory).
 #[target_feature(enable = "aes")]
 #[target_feature(enable = "neon")]
 pub unsafe fn hash(x: uint8x16_t, tweak: uint8x16_t) -> uint8x16_t {

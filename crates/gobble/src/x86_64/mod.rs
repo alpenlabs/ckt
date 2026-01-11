@@ -29,7 +29,9 @@ const AES128_ROUND_KEYS: [__m128i; 11] = [
 ///
 /// # Safety
 ///
-/// The caller must ensure that the CPU supports the `sse2` target feature.
+/// The caller must ensure that:
+/// - The CPU supports the `sse2` target feature.
+/// - The `label` parameter contains initialized data (not uninitialized memory).
 #[inline]
 pub unsafe fn get_permute_bit(label: __m128i) -> bool {
     let bytes: [u8; 16] = unsafe { transmute(label) };
@@ -40,7 +42,9 @@ pub unsafe fn get_permute_bit(label: __m128i) -> bool {
 ///
 /// # Safety
 ///
-/// The caller must ensure that the CPU supports the `sse2` target feature.
+/// The caller must ensure that:
+/// - The CPU supports the `sse2` target feature.
+/// - The `a` and `b` parameters contain initialized data (not uninitialized memory).
 #[inline]
 pub unsafe fn xor128(a: __m128i, b: __m128i) -> __m128i {
     unsafe { _mm_xor_si128(a, b) }
@@ -67,7 +71,9 @@ pub unsafe fn index_to_tweak(index: u64) -> __m128i {
 ///
 /// # Safety
 ///
-/// The caller must ensure that the CPU supports the `aes` and `sse2` target features.
+/// The caller must ensure that:
+/// - The CPU supports the `aes` and `sse2` target features.
+/// - The `block` parameter contains initialized data (not uninitialized memory).
 #[target_feature(enable = "aes")]
 #[target_feature(enable = "sse2")]
 pub unsafe fn aes_encrypt(block: __m128i) -> __m128i {
@@ -92,7 +98,9 @@ pub unsafe fn aes_encrypt(block: __m128i) -> __m128i {
 ///
 /// # Safety
 ///
-/// The caller must ensure that the CPU supports the `aes` and `sse2` target features.
+/// The caller must ensure that:
+/// - The CPU supports the `aes` and `sse2` target features.
+/// - The `x` and `tweak` parameters contain initialized data (not uninitialized memory).
 #[target_feature(enable = "aes")]
 #[target_feature(enable = "sse2")]
 pub unsafe fn hash(x: __m128i, tweak: __m128i) -> __m128i {
