@@ -5,7 +5,7 @@
 use std::arch::x86_64::*;
 use std::mem::transmute;
 
-use crate::{AES128_KEY_BYTES, AES128_ROUND_KEY_BYTES};
+use crate::{AES128_KEY_BYTES, AES128_ROUND_KEY_BYTES, S_BYTES};
 
 // Re-export the unified types
 pub use crate::types::{Ciphertext, Label};
@@ -24,6 +24,8 @@ const AES128_ROUND_KEYS: [__m128i; 11] = [
     unsafe { transmute::<[u8; 16], __m128i>(AES128_ROUND_KEY_BYTES[8]) },
     unsafe { transmute::<[u8; 16], __m128i>(AES128_ROUND_KEY_BYTES[9]) },
 ];
+
+const S: __m128i = unsafe { transmute(S_BYTES) };
 
 /// Extract the point-and-permute bit (LSB) from a label.
 ///
@@ -106,6 +108,45 @@ pub unsafe fn aes_encrypt(block: __m128i) -> __m128i {
 pub unsafe fn hash(x: __m128i, tweak: __m128i) -> __m128i {
     let aes_x = unsafe { aes_encrypt(x) };
     unsafe { xor128(aes_encrypt(xor128(aes_x, tweak)), aes_x) }
+}
+
+/// Linear orthomorphism: L || R -> (L ⊕ R) || L, taken from https://eprint.iacr.org/2019/074.pdf Section 7.3
+///
+/// Optimized implementation using `_mm_shuffle_epi32` as described in the paper:
+/// σ(a) = mm_shuffle_epi32(a, 78) ⊕ and_si128(a, mask)
+/// where mask selects the appropriate bits for the linear orthomorphism.
+///
+/// The shuffle with 78 (0x4E) rearranges words as [2, 3, 1, 0], which swaps the halves.
+/// Combined with the mask and XOR, this implements L || R -> (L ⊕ R) || L.
+///
+/// # Safety
+/// - The caller must ensure that the CPU supports the `sse2` target feature
+/// - `x` must be a valid 128-bit value
+#[inline]
+#[target_feature(enable = "sse2")]
+pub unsafe fn sigma(x: __m128i) -> __m128i {
+    // Mask: 0xFFFFFFFFFFFFFFFF0000000000000000
+    // This mask selects the first 64 bits (the L half: words 0 and 1)
+    // Using -1i32 for 0xFFFFFFFF (all bits set in two's complement)
+    let mask = _mm_set_epi32(0x00000000i32, 0x00000000i32, -1i32, -1i32);
+    // Shuffle with 78 (0x4E): rearranges words as [x[2], x[3], x[1], x[0]]
+    // This effectively swaps the halves: [R|L] = [R0, R1, L1, L0]
+    let shuffled = _mm_shuffle_epi32(x, 78);
+    // XOR the shuffled result [R|L] with the masked L [L|0] to get [(R⊕L)|L] = [(L⊕R)|L]
+    _mm_xor_si128(shuffled, _mm_and_si128(x, mask))
+}
+/// ccrnd hash function using one AES call and one linear orthomorphism, taken from https://eprint.iacr.org/2019/074.pdf Section 5
+///
+/// # Safety
+/// - The caller must ensure that the CPU supports the `aes` and `neon` target features
+/// - `x` and `tweak` must be valid 128-bit values
+#[inline]
+#[target_feature(enable = "aes")]
+#[target_feature(enable = "sse2")]
+pub unsafe fn ccrnd(x: __m128i, tweak: __m128i) -> __m128i {
+    let input = unsafe { xor128(xor128(x, S), tweak) };
+    let lin_orth_input = unsafe { sigma(input) };
+    unsafe { xor128(aes_encrypt(lin_orth_input), lin_orth_input) }
 }
 
 #[cfg(test)]
