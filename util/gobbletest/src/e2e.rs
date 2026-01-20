@@ -17,16 +17,18 @@ pub async fn test_end_to_end(
 
     // Step 2: Garble the circuit
     println!("\n🔒 Step 2: Garbling circuit...");
-    let (delta, input_values_bits, input_labels, garbler_output_labels) =
+    let (delta, input_values_bits, input_labels, garbler_output_labels, garbling_params) =
         garble::garble(circuit_file, input_file, garbled_file, rng).await;
 
     // Step 3: Evaluate the garbled circuit
+    // The garbling_params (AES key and public S) are passed to the evaluator
     println!("\n🔓 Step 3: Evaluating garbled circuit...");
     let (eval_output_labels, eval_output_values) = eval::eval(
         circuit_file,
         garbled_file,
         &input_values_bits,
         &input_labels,
+        &garbling_params,
     )
     .await;
 

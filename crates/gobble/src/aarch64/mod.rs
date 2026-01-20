@@ -10,7 +10,7 @@ mod expand;
 use expand::expand_key;
 type Aes128RoundKeys = expand::Aes128RoundKeys;
 
-use crate::{AES128_KEY_BYTES, AES128_ROUND_KEY_BYTES, S_BYTES};
+use crate::{AES128_KEY_BYTES, AES128_ROUND_KEY_BYTES};
 
 // Re-export the unified types
 pub use crate::types::{Ciphertext, Label};
@@ -30,7 +30,6 @@ const AES128_ROUND_KEYS: Aes128RoundKeys = [
     unsafe { transmute::<[u8; 16], uint8x16_t>(AES128_ROUND_KEY_BYTES[9]) },
 ];
 
-const S: uint8x16_t = unsafe { transmute(S_BYTES) };
 
 /// AES-128 key expansion using ARM AES instructions.
 ///
@@ -183,25 +182,16 @@ pub unsafe fn sigma(x: uint8x16_t) -> uint8x16_t {
     let swapped_xor = veorq_u8(x, swapped); // (L xor R) || (L xor R)
     vextq_u8(swapped_xor, x, 8) // (L xor R)||L
 }
-/// ccrnd hash function using one AES call and one linear orthomorphism, taken from <https://eprint.iacr.org/2019/074.pdf> Section 5
+/// CCRND hash function using caller-provided round keys and public S.
 ///
-/// # Safety
-/// - The caller must ensure that the CPU supports the `aes` and `neon` target features
-/// - `x` and `tweak` must be valid 128-bit values
-#[inline]
-#[target_feature(enable = "aes")]
-#[target_feature(enable = "neon")]
-pub unsafe fn ccrnd(x: uint8x16_t, tweak: uint8x16_t) -> uint8x16_t {
-    unsafe { ccrnd_with_round_keys(x, tweak, &AES128_ROUND_KEYS) }
-}
-
-/// CCRND hash function using caller-provided round keys.
+/// This is the CCRND hash function from Section 5 of <https://eprint.iacr.org/2019/074.pdf>,
+/// using one AES call and one linear orthomorphism.
 ///
 /// # Safety
 ///
 /// The caller must ensure that:
 /// - The CPU supports the `aes` and `neon` target features.
-/// - `x` and `tweak` are valid 128-bit values.
+/// - `x`, `tweak`, and `public_s` are valid 128-bit values.
 /// - The `round_keys` are a valid AES-128 key schedule.
 #[inline]
 #[target_feature(enable = "aes")]
@@ -210,8 +200,9 @@ pub unsafe fn ccrnd_with_round_keys(
     x: uint8x16_t,
     tweak: uint8x16_t,
     round_keys: &Aes128RoundKeys,
+    public_s: uint8x16_t,
 ) -> uint8x16_t {
-    let input = unsafe { xor128(xor128(x, S), tweak) };
+    let input = unsafe { xor128(xor128(x, public_s), tweak) };
     let lin_orth_input = unsafe { sigma(input) };
     unsafe {
         xor128(
@@ -294,12 +285,17 @@ mod tests {
             ),
         ];
 
+        // Use a fixed public_s for testing
+        let public_s_bytes = [0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE, 0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE];
+        let public_s = unsafe { transmute::<[u8; 16], uint8x16_t>(public_s_bytes) };
+        let round_keys = unsafe { expand_aes128_key(&AES128_KEY_BYTES) };
+
         println!("\n=== aarch64 ccrnd test outputs (compare with x86_64) ===");
         for (i, (x_bytes, tweak_bytes)) in test_cases.iter().enumerate() {
             let x = unsafe { transmute::<[u8; 16], uint8x16_t>(*x_bytes) };
             let tweak = unsafe { transmute::<[u8; 16], uint8x16_t>(*tweak_bytes) };
 
-            let result = unsafe { ccrnd(x, tweak) };
+            let result = unsafe { ccrnd_with_round_keys(x, tweak, &round_keys, public_s) };
             let result_bytes: [u8; 16] = unsafe { transmute(result) };
 
             // Output in hex format for easy comparison

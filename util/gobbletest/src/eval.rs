@@ -7,12 +7,14 @@ use ckt_gobble::traits::EvaluationInstanceConfig;
 use ckt_runner_exec::{CircuitReader, EvalTask, ReaderV5cWrapper, process_task};
 
 use crate::common::ProgressBarTask;
+use crate::garble::GarblingParams;
 
 pub async fn eval(
     circuit_file: &str,
     ciphertext_file: &str,
     input_values_bits: &BitVec,
     input_labels: &[[u8; 16]],
+    garbling_params: &GarblingParams,
 ) -> (Vec<[u8; 16]>, Vec<bool>) {
     let mut reader = ReaderV5cWrapper::new(ReaderV5c::open(circuit_file).unwrap());
 
@@ -22,7 +24,8 @@ pub async fn eval(
         scratch_space: header.scratch_space as u32,
         selected_primary_input_labels: input_labels,
         selected_primary_input_values: input_values_bits,
-        aes128_key: None,
+        aes128_key: garbling_params.aes128_key,
+        public_s: garbling_params.public_s,
     };
 
     let task_info = EvalTask::new(config);

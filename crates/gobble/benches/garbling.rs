@@ -30,12 +30,15 @@ fn bench_garble_xor_gate(c: &mut Criterion) {
         // Setup once: create instance and working space
         let delta_bytes = [0xFFu8; 16];
         let primary_input_false_labels = vec![];
+        let aes128_key = [0x2Bu8; 16]; // Arbitrary key for benchmarking
+        let public_s = [0xDEu8; 16]; // Arbitrary S for benchmarking
 
         let config = GarblingInstanceConfig {
             scratch_space: 10,
             delta: delta_bytes,
             primary_input_false_labels: &primary_input_false_labels,
-            aes128_key: None,
+            aes128_key,
+            public_s,
         };
 
         let engine = Engine::new();
@@ -54,12 +57,15 @@ fn bench_garble_and_gate(c: &mut Criterion) {
         // Setup once: create instance and working space
         let delta_bytes = [0xFFu8; 16];
         let primary_input_false_labels = vec![];
+        let aes128_key = [0x2Bu8; 16]; // Arbitrary key for benchmarking
+        let public_s = [0xDEu8; 16]; // Arbitrary S for benchmarking
 
         let config = GarblingInstanceConfig {
             scratch_space: 10,
             delta: delta_bytes,
             primary_input_false_labels: &primary_input_false_labels,
-            aes128_key: None,
+            aes128_key,
+            public_s,
         };
 
         let engine = Engine::new();
@@ -78,12 +84,15 @@ fn bench_garble_mixed_gates(c: &mut Criterion) {
         // Setup once: create instance with enough space for 100 gates
         let delta_bytes = [0xFFu8; 16];
         let primary_input_false_labels = vec![];
+        let aes128_key = [0x2Bu8; 16]; // Arbitrary key for benchmarking
+        let public_s = [0xDEu8; 16]; // Arbitrary S for benchmarking
 
         let config = GarblingInstanceConfig {
             scratch_space: 200,
             delta: delta_bytes,
             primary_input_false_labels: &primary_input_false_labels,
-            aes128_key: None,
+            aes128_key,
+            public_s,
         };
 
         let engine = Engine::new();
@@ -116,12 +125,15 @@ fn bench_eval_xor_gate(c: &mut Criterion) {
         // Setup once: create instance with dummy labels
         let selected_primary_input_labels = vec![];
         let selected_primary_input_values = BitVec::repeat(false, 0);
+        let aes128_key = [0x2Bu8; 16]; // Arbitrary key for benchmarking
+        let public_s = [0xDEu8; 16]; // Arbitrary S for benchmarking
 
         let config = EvaluationInstanceConfig {
             scratch_space: 10,
             selected_primary_input_labels: &selected_primary_input_labels,
             selected_primary_input_values: &selected_primary_input_values,
-            aes128_key: None,
+            aes128_key,
+            public_s,
         };
 
         let engine = Engine::new();
@@ -140,12 +152,15 @@ fn bench_eval_and_gate(c: &mut Criterion) {
         // Setup once: create instance with dummy labels
         let selected_primary_input_labels = vec![];
         let selected_primary_input_values = BitVec::repeat(false, 0);
+        let aes128_key = [0x2Bu8; 16]; // Arbitrary key for benchmarking
+        let public_s = [0xDEu8; 16]; // Arbitrary S for benchmarking
 
         let config = EvaluationInstanceConfig {
             scratch_space: 10,
             selected_primary_input_labels: &selected_primary_input_labels,
             selected_primary_input_values: &selected_primary_input_values,
-            aes128_key: None,
+            aes128_key,
+            public_s,
         };
 
         let engine = Engine::new();
@@ -173,12 +188,15 @@ fn bench_eval_mixed_gates(c: &mut Criterion) {
         // Setup once: create instance with enough space for 100 gates
         let selected_primary_input_labels = vec![];
         let selected_primary_input_values = BitVec::repeat(false, 0);
+        let aes128_key = [0x2Bu8; 16]; // Arbitrary key for benchmarking
+        let public_s = [0xDEu8; 16]; // Arbitrary S for benchmarking
 
         let config = EvaluationInstanceConfig {
             scratch_space: 200,
             selected_primary_input_labels: &selected_primary_input_labels,
             selected_primary_input_values: &selected_primary_input_values,
-            aes128_key: None,
+            aes128_key,
+            public_s,
         };
 
         let engine = Engine::new();
