@@ -53,9 +53,9 @@ The library uses a `scratch_space` memory model where each circuit specifies a m
 
 The library defines three configuration structures:
 
-**`GarblingInstanceConfig`** specifies the `scratch_space` size, the global `delta` offset (which must remain secret from the evaluator), and the false labels for primary inputs. The true labels are computed by XORing the false labels with `delta`.
+**`GarblingInstanceConfig`** specifies the `scratch_space` size, the global `delta` offset (which must remain secret from the evaluator), the false labels for primary inputs, and an optional per-instance AES-128 key override. The true labels are computed by XORing the false labels with `delta`.
 
-**`EvaluationInstanceConfig`** specifies the `scratch_space` size and the selected labels for primary inputs along with their semantic boolean values for tracking purposes.
+**`EvaluationInstanceConfig`** specifies the `scratch_space` size, the selected labels for primary inputs along with their semantic boolean values for tracking purposes, and an optional AES-128 key override which must match the garbler.
 
 **`ExecutionInstanceConfig`** specifies the `scratch_space` size and the input boolean values for cleartext execution.
 

@@ -35,6 +35,7 @@ fn bench_garble_xor_gate(c: &mut Criterion) {
             scratch_space: 10,
             delta: delta_bytes,
             primary_input_false_labels: &primary_input_false_labels,
+            aes128_key: None,
         };
 
         let engine = Engine::new();
@@ -58,6 +59,7 @@ fn bench_garble_and_gate(c: &mut Criterion) {
             scratch_space: 10,
             delta: delta_bytes,
             primary_input_false_labels: &primary_input_false_labels,
+            aes128_key: None,
         };
 
         let engine = Engine::new();
@@ -81,6 +83,7 @@ fn bench_garble_mixed_gates(c: &mut Criterion) {
             scratch_space: 200,
             delta: delta_bytes,
             primary_input_false_labels: &primary_input_false_labels,
+            aes128_key: None,
         };
 
         let engine = Engine::new();
@@ -118,6 +121,7 @@ fn bench_eval_xor_gate(c: &mut Criterion) {
             scratch_space: 10,
             selected_primary_input_labels: &selected_primary_input_labels,
             selected_primary_input_values: &selected_primary_input_values,
+            aes128_key: None,
         };
 
         let engine = Engine::new();
@@ -141,6 +145,7 @@ fn bench_eval_and_gate(c: &mut Criterion) {
             scratch_space: 10,
             selected_primary_input_labels: &selected_primary_input_labels,
             selected_primary_input_values: &selected_primary_input_values,
+            aes128_key: None,
         };
 
         let engine = Engine::new();
@@ -173,6 +178,7 @@ fn bench_eval_mixed_gates(c: &mut Criterion) {
             scratch_space: 200,
             selected_primary_input_labels: &selected_primary_input_labels,
             selected_primary_input_values: &selected_primary_input_values,
+            aes128_key: None,
         };
 
         let engine = Engine::new();

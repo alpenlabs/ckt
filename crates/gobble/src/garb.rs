@@ -7,15 +7,16 @@ use std::mem::transmute;
 
 use bitvec::vec::BitVec;
 
+use crate::AES128_KEY_BYTES;
 use crate::traits::{GarblingInstance, GarblingInstanceConfig};
 use crate::types::{Ciphertext, Inner, Label};
 
 // Conditional imports for architecture-specific intrinsics
 #[cfg(target_arch = "aarch64")]
-use crate::aarch64::{hash, index_to_tweak, xor128};
+use crate::aarch64::{expand_aes128_key, hash_with_round_keys, index_to_tweak, xor128};
 
 #[cfg(target_arch = "x86_64")]
-use crate::x86_64::{hash, index_to_tweak, xor128};
+use crate::x86_64::{expand_aes128_key, hash_with_round_keys, index_to_tweak, xor128};
 
 /// Garbling instance that produces a garbled circuit.
 #[derive(Debug)]
@@ -24,6 +25,7 @@ pub struct GarblingInstanceImpl {
     and_ctr: u64,
     working_space: Vec<Label>,
     delta: Inner,
+    round_keys: [Inner; 11],
 }
 
 impl GarblingInstanceImpl {
@@ -46,11 +48,15 @@ impl GarblingInstanceImpl {
             working_space[i] = Label(unsafe { transmute::<[u8; 16], Inner>(*label) });
         }
 
+        let round_keys =
+            unsafe { expand_aes128_key(&config.aes128_key.unwrap_or(AES128_KEY_BYTES)) };
+
         GarblingInstanceImpl {
             gate_ctr: 0,
             working_space,
             delta: unsafe { transmute::<[u8; 16], Inner>(config.delta) },
             and_ctr: 0,
+            round_keys,
         }
     }
 }
@@ -81,8 +87,8 @@ impl GarblingInstance for GarblingInstanceImpl {
         let t = unsafe { index_to_tweak(self.gate_ctr) };
         let xor_in1_delta = unsafe { xor128(in1.0, self.delta) };
 
-        let h_in1_t = unsafe { hash(in1.0, t) };
-        let h_in1_delta_t = unsafe { hash(xor_in1_delta, t) };
+        let h_in1_t = unsafe { hash_with_round_keys(in1.0, t, &self.round_keys) };
+        let h_in1_delta_t = unsafe { hash_with_round_keys(xor_in1_delta, t, &self.round_keys) };
 
         let ciphertext = unsafe { xor128(xor128(h_in1_t, h_in1_delta_t), in2.0) };
 

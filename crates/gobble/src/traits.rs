@@ -79,6 +79,11 @@ pub struct GarblingInstanceConfig<'labels> {
 
     /// Input false labels for the circuit.
     pub primary_input_false_labels: &'labels [[u8; 16]],
+
+    /// Optional AES-128 key override for this instance.
+    ///
+    /// When `None`, a fixed public key is used.
+    pub aes128_key: Option<[u8; 16]>,
 }
 
 /// Configuration for executing a boolean circuit
@@ -104,6 +109,11 @@ pub struct EvaluationInstanceConfig<'labels> {
 
     /// Selected values for each wire (1 bit per wire, boolean)
     pub selected_primary_input_values: &'labels BitVec,
+
+    /// Optional AES-128 key override for this instance.
+    ///
+    /// Must match the key used during garbling.
+    pub aes128_key: Option<[u8; 16]>,
 }
 
 /// GobbleEngine is the primary interface of `gobble`. It

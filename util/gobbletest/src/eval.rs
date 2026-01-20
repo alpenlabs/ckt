@@ -22,6 +22,7 @@ pub async fn eval(
         scratch_space: header.scratch_space as u32,
         selected_primary_input_labels: input_labels,
         selected_primary_input_values: input_values_bits,
+        aes128_key: None,
     };
 
     let task_info = EvalTask::new(config);
