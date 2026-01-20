@@ -174,4 +174,45 @@ mod tests {
             assert_eq!(ciphertext, &expected_ciphertext[..], "failed at test {}", i);
         }
     }
+
+    #[test]
+    fn test_ccrnd_output_bytes() {
+        // Test vectors: fixed inputs to ensure reproducible outputs
+        // Run this test and compare outputs with aarch64 version
+        let test_cases = vec![
+            ([0u8; 16], [0u8; 16]),
+            ([0xFFu8; 16], [0u8; 16]),
+            ([0u8; 16], [0xFFu8; 16]),
+            ([0x42u8; 16], [0x99u8; 16]),
+            (
+                [
+                    0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0xFE, 0xDC, 0xBA, 0x98, 0x76,
+                    0x54, 0x32, 0x10,
+                ],
+                [
+                    0x10, 0x32, 0x54, 0x76, 0x98, 0xBA, 0xDC, 0xFE, 0xEF, 0xCD, 0xAB, 0x89, 0x67,
+                    0x45, 0x23, 0x01,
+                ],
+            ),
+        ];
+
+        println!("\n=== x86_64 ccrnd test outputs (compare with aarch64) ===");
+        for (i, (x_bytes, tweak_bytes)) in test_cases.iter().enumerate() {
+            let x = unsafe { transmute::<[u8; 16], __m128i>(*x_bytes) };
+            let tweak = unsafe { transmute::<[u8; 16], __m128i>(*tweak_bytes) };
+
+            let result = unsafe { ccrnd(x, tweak) };
+            let result_bytes: [u8; 16] = unsafe { transmute(result) };
+
+            // Output in hex format for easy comparison
+            let x_hex: String = x_bytes.iter().map(|b| format!("{:02x}", b)).collect();
+            let tweak_hex: String = tweak_bytes.iter().map(|b| format!("{:02x}", b)).collect();
+            let output_hex: String = result_bytes.iter().map(|b| format!("{:02x}", b)).collect();
+
+            println!(
+                "Test {}: x={} tweak={} -> output={}",
+                i, x_hex, tweak_hex, output_hex
+            );
+        }
+    }
 }
