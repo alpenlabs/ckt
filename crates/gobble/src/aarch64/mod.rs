@@ -277,7 +277,7 @@ mod tests {
     fn test_ccrnd_output_bytes() {
         // Test vectors: fixed inputs to ensure reproducible outputs
         // These must match the test vectors in x86_64/mod.rs
-        let test_cases = vec![
+        let test_cases = [
             ([0u8; 16], [0u8; 16]),
             ([0xFFu8; 16], [0u8; 16]),
             ([0u8; 16], [0xFFu8; 16]),

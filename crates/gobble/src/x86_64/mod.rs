@@ -283,7 +283,7 @@ mod tests {
     fn test_ccrnd_output_bytes() {
         // Test vectors: fixed inputs to ensure reproducible outputs
         // Run this test and compare outputs with aarch64 version
-        let test_cases = vec![
+        let test_cases = [
             ([0u8; 16], [0u8; 16]),
             ([0xFFu8; 16], [0u8; 16]),
             ([0u8; 16], [0xFFu8; 16]),
