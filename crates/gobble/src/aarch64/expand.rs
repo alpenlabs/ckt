@@ -1,5 +1,5 @@
 //! AES key expansion support.
-//! Taken verbatim from https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/armv8/expand.rs
+//! Taken verbatim from <https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/armv8/expand.rs>
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use core::{arch::aarch64::*, mem, slice};

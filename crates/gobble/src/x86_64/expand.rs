@@ -1,5 +1,5 @@
 //! AES key expansion support.
-//! Taken verbatim from https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/x86/ni/test_expand.rs
+//! Taken verbatim from <https://github.com/RustCrypto/block-ciphers/blob/master/aes/src/x86/ni/test_expand.rs>
 #![allow(unsafe_op_in_unsafe_fn)]
 
 use core::arch::x86_64::*;
