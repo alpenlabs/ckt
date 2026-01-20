@@ -30,7 +30,6 @@ const AES128_ROUND_KEYS: [__m128i; 11] = [
     unsafe { transmute::<[u8; 16], __m128i>(AES128_ROUND_KEY_BYTES[9]) },
 ];
 
-
 /// AES-128 key expansion using AES-NI instructions.
 ///
 /// # Safety
@@ -292,7 +291,10 @@ mod tests {
         ];
 
         // Use a fixed public_s for testing
-        let public_s_bytes = [0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE, 0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE];
+        let public_s_bytes = [
+            0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE, 0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE,
+            0xBA, 0xBE,
+        ];
         let public_s = unsafe { transmute::<[u8; 16], __m128i>(public_s_bytes) };
         let round_keys = unsafe { expand_aes128_key(&AES128_KEY_BYTES) };
 

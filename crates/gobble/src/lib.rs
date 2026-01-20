@@ -39,7 +39,6 @@ pub const AES128_ROUND_KEY_BYTES: [[u8; 16]; 10] = [
     hex!("d014f9a8c9ee2589e13f0cc8b6630ca6"),
 ];
 
-
 // Re-export types at crate root
 pub use eval::EvaluationInstanceImpl as EvaluationInstance;
 pub use exec::CleartextExecutionInstance as ExecutionInstance;
