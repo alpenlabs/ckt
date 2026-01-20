@@ -10,12 +10,27 @@ use rand_chacha::rand_core::RngCore;
 
 use crate::common::{ProgressBarTask, read_inputs};
 
+/// Garbling parameters that need to be communicated to the evaluator.
+#[derive(Debug, Clone)]
+pub struct GarblingParams {
+    /// AES-128 key used for this garbling instance.
+    pub aes128_key: [u8; 16],
+    /// Public S value used in the CCRND hash function.
+    pub public_s: [u8; 16],
+}
+
 pub async fn garble(
     circuit_file: &str,
     input_file: &str,
     output_file: &str,
     rng: &mut ChaCha20Rng,
-) -> ([u8; 16], BitVec, Vec<[u8; 16]>, Vec<[u8; 16]>) {
+) -> (
+    [u8; 16],
+    BitVec,
+    Vec<[u8; 16]>,
+    Vec<[u8; 16]>,
+    GarblingParams,
+) {
     let mut reader = ReaderV5cWrapper::new(ReaderV5c::open(circuit_file).unwrap());
 
     let header = *reader.header();
@@ -32,11 +47,24 @@ pub async fn garble(
     let mut delta = [0u8; 16];
     rng.fill_bytes(&mut delta);
 
+    // Generate random AES key and public S for this garbling instance
+    let mut aes128_key = [0u8; 16];
+    rng.fill_bytes(&mut aes128_key);
+
+    let mut public_s = [0u8; 16];
+    rng.fill_bytes(&mut public_s);
+
     let config = GarblingInstanceConfig {
         scratch_space: header.scratch_space as u32,
         delta,
         primary_input_false_labels: &labels,
-        aes128_key: None,
+        aes128_key,
+        public_s,
+    };
+
+    let garbling_params = GarblingParams {
+        aes128_key,
+        public_s,
     };
 
     let task_info = GarbleTask::new(config);
@@ -68,6 +96,7 @@ pub async fn garble(
         input_values_bits,
         input_labels,
         output.garbler_output_labels,
+        garbling_params,
     )
 }
 
@@ -87,11 +116,19 @@ pub async fn garble_discard(circuit_file: &str, rng: &mut ChaCha20Rng) -> Vec<[u
     let mut delta = [0u8; 16];
     rng.fill_bytes(&mut delta);
 
+    // Generate random AES key and public S for this garbling instance
+    let mut aes128_key = [0u8; 16];
+    rng.fill_bytes(&mut aes128_key);
+
+    let mut public_s = [0u8; 16];
+    rng.fill_bytes(&mut public_s);
+
     let config = GarblingInstanceConfig {
         scratch_space: header.scratch_space as u32,
         delta,
         primary_input_false_labels: &labels,
-        aes128_key: None,
+        aes128_key,
+        public_s,
     };
 
     let task_info = GarbleTask::new(config);

@@ -10,7 +10,7 @@ mod expand;
 use expand::aes128 as expand_aes128;
 type Aes128RoundKeys = expand::Aes128RoundKeys;
 
-use crate::{AES128_KEY_BYTES, AES128_ROUND_KEY_BYTES, S_BYTES};
+use crate::{AES128_KEY_BYTES, AES128_ROUND_KEY_BYTES};
 
 // Re-export the unified types
 pub use crate::types::{Ciphertext, Label};
@@ -30,7 +30,6 @@ const AES128_ROUND_KEYS: [__m128i; 11] = [
     unsafe { transmute::<[u8; 16], __m128i>(AES128_ROUND_KEY_BYTES[9]) },
 ];
 
-const S: __m128i = unsafe { transmute(S_BYTES) };
 
 /// AES-128 key expansion using AES-NI instructions.
 ///
@@ -189,25 +188,16 @@ pub unsafe fn sigma(x: __m128i) -> __m128i {
     // XOR the shuffled result [R|L] with the masked L [L|0] to get [(R⊕L)|L] = [(L⊕R)|L]
     _mm_xor_si128(shuffled, _mm_and_si128(x, mask))
 }
-/// ccrnd hash function using one AES call and one linear orthomorphism, taken from <https://eprint.iacr.org/2019/074.pdf> Section 5
+/// CCRND hash function using caller-provided round keys and public S.
 ///
-/// # Safety
-/// - The caller must ensure that the CPU supports the `aes` and `neon` target features
-/// - `x` and `tweak` must be valid 128-bit values
-#[inline]
-#[target_feature(enable = "aes")]
-#[target_feature(enable = "sse2")]
-pub unsafe fn ccrnd(x: __m128i, tweak: __m128i) -> __m128i {
-    unsafe { ccrnd_with_round_keys(x, tweak, &AES128_ROUND_KEYS) }
-}
-
-/// CCRND hash function using caller-provided round keys.
+/// This is the CCRND hash function from Section 5 of <https://eprint.iacr.org/2019/074.pdf>,
+/// using one AES call and one linear orthomorphism.
 ///
 /// # Safety
 ///
 /// The caller must ensure that:
 /// - The CPU supports the `aes` and `sse2` target features.
-/// - `x` and `tweak` are valid 128-bit values.
+/// - `x`, `tweak`, and `public_s` are valid 128-bit values.
 /// - The `round_keys` are a valid AES-128 key schedule.
 #[inline]
 #[target_feature(enable = "aes")]
@@ -216,8 +206,9 @@ pub unsafe fn ccrnd_with_round_keys(
     x: __m128i,
     tweak: __m128i,
     round_keys: &Aes128RoundKeys,
+    public_s: __m128i,
 ) -> __m128i {
-    let input = unsafe { xor128(xor128(x, S), tweak) };
+    let input = unsafe { xor128(xor128(x, public_s), tweak) };
     let lin_orth_input = unsafe { sigma(input) };
     unsafe {
         xor128(
@@ -300,12 +291,17 @@ mod tests {
             ),
         ];
 
+        // Use a fixed public_s for testing
+        let public_s_bytes = [0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE, 0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE];
+        let public_s = unsafe { transmute::<[u8; 16], __m128i>(public_s_bytes) };
+        let round_keys = unsafe { expand_aes128_key(&AES128_KEY_BYTES) };
+
         println!("\n=== x86_64 ccrnd test outputs (compare with aarch64) ===");
         for (i, (x_bytes, tweak_bytes)) in test_cases.iter().enumerate() {
             let x = unsafe { transmute::<[u8; 16], __m128i>(*x_bytes) };
             let tweak = unsafe { transmute::<[u8; 16], __m128i>(*tweak_bytes) };
 
-            let result = unsafe { ccrnd(x, tweak) };
+            let result = unsafe { ccrnd_with_round_keys(x, tweak, &round_keys, public_s) };
             let result_bytes: [u8; 16] = unsafe { transmute(result) };
 
             // Output in hex format for easy comparison
