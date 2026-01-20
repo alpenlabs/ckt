@@ -164,7 +164,7 @@ pub unsafe fn hash_with_round_keys(
     }
 }
 
-/// Linear orthomorphism: L || R -> (L ⊕ R) || L, taken from https://eprint.iacr.org/2019/074.pdf Section 7.3
+/// Linear orthomorphism: L || R -> (L ⊕ R) || L, taken from <https://eprint.iacr.org/2019/074.pdf> Section 7.3
 ///
 /// Optimized implementation using `_mm_shuffle_epi32` as described in the paper:
 /// σ(a) = mm_shuffle_epi32(a, 78) ⊕ and_si128(a, mask)
@@ -189,7 +189,7 @@ pub unsafe fn sigma(x: __m128i) -> __m128i {
     // XOR the shuffled result [R|L] with the masked L [L|0] to get [(R⊕L)|L] = [(L⊕R)|L]
     _mm_xor_si128(shuffled, _mm_and_si128(x, mask))
 }
-/// ccrnd hash function using one AES call and one linear orthomorphism, taken from https://eprint.iacr.org/2019/074.pdf Section 5
+/// ccrnd hash function using one AES call and one linear orthomorphism, taken from <https://eprint.iacr.org/2019/074.pdf> Section 5
 ///
 /// # Safety
 /// - The caller must ensure that the CPU supports the `aes` and `neon` target features

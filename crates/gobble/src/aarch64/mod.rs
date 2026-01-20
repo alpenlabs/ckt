@@ -171,7 +171,7 @@ pub unsafe fn hash_with_round_keys(
     }
 }
 
-/// Linear orthomorphism: L || R -> (L ⊕ R) || L, taken from https://eprint.iacr.org/2019/074.pdf Section 7.3
+/// Linear orthomorphism: L || R -> (L ⊕ R) || L, taken from <https://eprint.iacr.org/2019/074.pdf> Section 7.3
 ///
 /// # Safety
 /// - The caller must ensure that the CPU supports the `neon` target feature
@@ -183,7 +183,7 @@ pub unsafe fn sigma(x: uint8x16_t) -> uint8x16_t {
     let swapped_xor = veorq_u8(x, swapped); // (L xor R) || (L xor R)
     vextq_u8(swapped_xor, x, 8) // (L xor R)||L
 }
-/// ccrnd hash function using one AES call and one linear orthomorphism, taken from https://eprint.iacr.org/2019/074.pdf Section 5
+/// ccrnd hash function using one AES call and one linear orthomorphism, taken from <https://eprint.iacr.org/2019/074.pdf> Section 5
 ///
 /// # Safety
 /// - The caller must ensure that the CPU supports the `aes` and `neon` target features
