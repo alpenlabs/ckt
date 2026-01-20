@@ -88,8 +88,7 @@ impl GarblingInstance for GarblingInstanceImpl {
         let t = unsafe { index_to_tweak(self.gate_ctr) };
         let xor_in1_delta = unsafe { xor128(in1.0, self.delta) };
 
-        let h_in1_t =
-            unsafe { ccrnd_with_round_keys(in1.0, t, &self.round_keys, self.public_s) };
+        let h_in1_t = unsafe { ccrnd_with_round_keys(in1.0, t, &self.round_keys, self.public_s) };
         let h_in1_delta_t =
             unsafe { ccrnd_with_round_keys(xor_in1_delta, t, &self.round_keys, self.public_s) };
 
