@@ -5,6 +5,11 @@
 use std::arch::x86_64::*;
 use std::mem::transmute;
 
+mod expand;
+
+use expand::aes128 as expand_aes128;
+type Aes128RoundKeys = expand::Aes128RoundKeys;
+
 use crate::{AES128_KEY_BYTES, AES128_ROUND_KEY_BYTES, S_BYTES};
 
 // Re-export the unified types
@@ -26,6 +31,18 @@ const AES128_ROUND_KEYS: [__m128i; 11] = [
 ];
 
 const S: __m128i = unsafe { transmute(S_BYTES) };
+
+/// AES-128 key expansion using AES-NI instructions.
+///
+/// # Safety
+///
+/// The caller must ensure that:
+/// - The CPU supports the `aes` target feature.
+#[allow(dead_code)]
+#[target_feature(enable = "aes")]
+pub(crate) unsafe fn expand_aes128_key(key: &[u8; 16]) -> Aes128RoundKeys {
+    unsafe { expand_aes128::expand_key(key) }
+}
 
 /// Extract the point-and-permute bit (LSB) from a label.
 ///
@@ -79,16 +96,30 @@ pub unsafe fn index_to_tweak(index: u64) -> __m128i {
 #[target_feature(enable = "aes")]
 #[target_feature(enable = "sse2")]
 pub unsafe fn aes_encrypt(block: __m128i) -> __m128i {
+    unsafe { aes_encrypt_with_round_keys(block, &AES128_ROUND_KEYS) }
+}
+
+/// AES-128 encryption using caller-provided round keys.
+///
+/// # Safety
+///
+/// The caller must ensure that:
+/// - The CPU supports the `aes` and `sse2` target features.
+/// - The `block` parameter contains initialized data (not uninitialized memory).
+/// - The `round_keys` are a valid AES-128 key schedule.
+#[target_feature(enable = "aes")]
+#[target_feature(enable = "sse2")]
+pub unsafe fn aes_encrypt_with_round_keys(block: __m128i, round_keys: &Aes128RoundKeys) -> __m128i {
     // Initial whitening: XOR with first round key
-    let mut state = _mm_xor_si128(block, AES128_ROUND_KEYS[0]);
+    let mut state = _mm_xor_si128(block, round_keys[0]);
 
     // Rounds 1-9: Full rounds with MixColumns
-    for &key in &AES128_ROUND_KEYS[1..10] {
+    for &key in &round_keys[1..10] {
         state = _mm_aesenc_si128(state, key);
     }
 
     // Round 10: Final round without MixColumns
-    state = _mm_aesenclast_si128(state, AES128_ROUND_KEYS[10]);
+    state = _mm_aesenclast_si128(state, round_keys[10]);
 
     state
 }
@@ -106,8 +137,31 @@ pub unsafe fn aes_encrypt(block: __m128i) -> __m128i {
 #[target_feature(enable = "aes")]
 #[target_feature(enable = "sse2")]
 pub unsafe fn hash(x: __m128i, tweak: __m128i) -> __m128i {
-    let aes_x = unsafe { aes_encrypt(x) };
-    unsafe { xor128(aes_encrypt(xor128(aes_x, tweak)), aes_x) }
+    unsafe { hash_with_round_keys(x, tweak, &AES128_ROUND_KEYS) }
+}
+
+/// TCCR hash function using caller-provided round keys.
+///
+/// # Safety
+///
+/// The caller must ensure that:
+/// - The CPU supports the `aes` and `sse2` target features.
+/// - The `x` and `tweak` parameters contain initialized data (not uninitialized memory).
+/// - The `round_keys` are a valid AES-128 key schedule.
+#[target_feature(enable = "aes")]
+#[target_feature(enable = "sse2")]
+pub unsafe fn hash_with_round_keys(
+    x: __m128i,
+    tweak: __m128i,
+    round_keys: &Aes128RoundKeys,
+) -> __m128i {
+    let aes_x = unsafe { aes_encrypt_with_round_keys(x, round_keys) };
+    unsafe {
+        xor128(
+            aes_encrypt_with_round_keys(xor128(aes_x, tweak), round_keys),
+            aes_x,
+        )
+    }
 }
 
 /// Linear orthomorphism: L || R -> (L ⊕ R) || L, taken from https://eprint.iacr.org/2019/074.pdf Section 7.3
@@ -144,9 +198,33 @@ pub unsafe fn sigma(x: __m128i) -> __m128i {
 #[target_feature(enable = "aes")]
 #[target_feature(enable = "sse2")]
 pub unsafe fn ccrnd(x: __m128i, tweak: __m128i) -> __m128i {
+    unsafe { ccrnd_with_round_keys(x, tweak, &AES128_ROUND_KEYS) }
+}
+
+/// CCRND hash function using caller-provided round keys.
+///
+/// # Safety
+///
+/// The caller must ensure that:
+/// - The CPU supports the `aes` and `sse2` target features.
+/// - `x` and `tweak` are valid 128-bit values.
+/// - The `round_keys` are a valid AES-128 key schedule.
+#[inline]
+#[target_feature(enable = "aes")]
+#[target_feature(enable = "sse2")]
+pub unsafe fn ccrnd_with_round_keys(
+    x: __m128i,
+    tweak: __m128i,
+    round_keys: &Aes128RoundKeys,
+) -> __m128i {
     let input = unsafe { xor128(xor128(x, S), tweak) };
     let lin_orth_input = unsafe { sigma(input) };
-    unsafe { xor128(aes_encrypt(lin_orth_input), lin_orth_input) }
+    unsafe {
+        xor128(
+            aes_encrypt_with_round_keys(lin_orth_input, round_keys),
+            lin_orth_input,
+        )
+    }
 }
 
 #[cfg(test)]
@@ -168,6 +246,32 @@ mod tests {
                 unsafe { transmute(aes_encrypt(transmute::<[u8; 16], __m128i>(plaintext))) };
 
             let cipher = Aes128::new(&AES128_KEY_BYTES.into());
+            let mut expected_ciphertext = plaintext.into();
+            cipher.encrypt_block(&mut expected_ciphertext);
+
+            assert_eq!(ciphertext, &expected_ciphertext[..], "failed at test {}", i);
+        }
+    }
+
+    #[test]
+    fn test_aes_encrypt_with_round_keys() {
+        let num_tests = 1000;
+        for i in 0..num_tests {
+            let mut key_bytes = [0u8; 16];
+            let mut plaintext = [0u8; 16];
+            let mut rng = rand::rng();
+            rng.fill_bytes(&mut key_bytes);
+            rng.fill_bytes(&mut plaintext);
+
+            let round_keys = unsafe { expand_aes128_key(&key_bytes) };
+            let ciphertext: [u8; 16] = unsafe {
+                transmute(aes_encrypt_with_round_keys(
+                    transmute::<[u8; 16], __m128i>(plaintext),
+                    &round_keys,
+                ))
+            };
+
+            let cipher = Aes128::new(&key_bytes.into());
             let mut expected_ciphertext = plaintext.into();
             cipher.encrypt_block(&mut expected_ciphertext);
 

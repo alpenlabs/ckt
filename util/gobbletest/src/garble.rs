@@ -36,6 +36,7 @@ pub async fn garble(
         scratch_space: header.scratch_space as u32,
         delta,
         primary_input_false_labels: &labels,
+        aes128_key: None,
     };
 
     let task_info = GarbleTask::new(config);
@@ -90,6 +91,7 @@ pub async fn garble_discard(circuit_file: &str, rng: &mut ChaCha20Rng) -> Vec<[u
         scratch_space: header.scratch_space as u32,
         delta,
         primary_input_false_labels: &labels,
+        aes128_key: None,
     };
 
     let task_info = GarbleTask::new(config);

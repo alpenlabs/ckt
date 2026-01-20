@@ -7,15 +7,16 @@ use std::mem::transmute;
 
 use bitvec::vec::BitVec;
 
+use crate::AES128_KEY_BYTES;
 use crate::traits::{EvaluationInstance, EvaluationInstanceConfig};
 use crate::types::{Ciphertext, Inner, Label};
 
 // Conditional imports for architecture-specific intrinsics
 #[cfg(target_arch = "aarch64")]
-use crate::aarch64::{hash, index_to_tweak, xor128};
+use crate::aarch64::{expand_aes128_key, hash_with_round_keys, index_to_tweak, xor128};
 
 #[cfg(target_arch = "x86_64")]
-use crate::x86_64::{hash, index_to_tweak, xor128};
+use crate::x86_64::{expand_aes128_key, hash_with_round_keys, index_to_tweak, xor128};
 
 /// Evaluation instance for evaluating a garbled circuit.
 #[derive(Debug)]
@@ -28,6 +29,7 @@ pub struct EvaluationInstanceImpl {
     working_space: Vec<Label>,
     /// Working/scratch space for wire values.
     working_space_bits: BitVec,
+    round_keys: [Inner; 11],
 }
 
 impl EvaluationInstanceImpl {
@@ -57,11 +59,15 @@ impl EvaluationInstanceImpl {
             working_space_bits.set(i, *value);
         }
 
+        let round_keys =
+            unsafe { expand_aes128_key(&config.aes128_key.unwrap_or(AES128_KEY_BYTES)) };
+
         EvaluationInstanceImpl {
             gate_ctr: 0,
             and_ctr: 0,
             working_space,
             working_space_bits,
+            round_keys,
         }
     }
 }
@@ -95,7 +101,7 @@ impl EvaluationInstance for EvaluationInstanceImpl {
         let t = unsafe { index_to_tweak(self.gate_ctr) };
         let permute_bit = self.working_space_bits[in1_addr];
 
-        let mut out_label = unsafe { hash(in1.0, t) };
+        let mut out_label = unsafe { hash_with_round_keys(in1.0, t, &self.round_keys) };
         if permute_bit {
             out_label = unsafe { xor128(out_label, xor128(ciphertext.0, in2.0)) };
         }

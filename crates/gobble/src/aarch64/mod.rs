@@ -5,13 +5,18 @@
 use std::arch::aarch64::*;
 use std::mem::transmute;
 
+mod expand;
+
+use expand::expand_key;
+type Aes128RoundKeys = expand::Aes128RoundKeys;
+
 use crate::{AES128_KEY_BYTES, AES128_ROUND_KEY_BYTES, S_BYTES};
 
 // Re-export the unified types
 pub use crate::types::{Ciphertext, Label};
 
 const AES128_KEY: uint8x16_t = unsafe { transmute(AES128_KEY_BYTES) };
-const AES128_ROUND_KEYS: [uint8x16_t; 11] = [
+const AES128_ROUND_KEYS: Aes128RoundKeys = [
     AES128_KEY,
     unsafe { transmute::<[u8; 16], uint8x16_t>(AES128_ROUND_KEY_BYTES[0]) },
     unsafe { transmute::<[u8; 16], uint8x16_t>(AES128_ROUND_KEY_BYTES[1]) },
@@ -26,6 +31,17 @@ const AES128_ROUND_KEYS: [uint8x16_t; 11] = [
 ];
 
 const S: uint8x16_t = unsafe { transmute(S_BYTES) };
+
+/// AES-128 key expansion using ARM AES instructions.
+///
+/// # Safety
+///
+/// The caller must ensure that:
+/// - The CPU supports the `aes` target feature.
+#[target_feature(enable = "aes")]
+pub(crate) unsafe fn expand_aes128_key(key: &[u8; 16]) -> Aes128RoundKeys {
+    unsafe { expand_key::<16, 11>(key) }
+}
 
 /// Extract the point-and-permute bit (LSB) from a label.
 ///
@@ -79,20 +95,37 @@ pub unsafe fn index_to_tweak(index: u64) -> uint8x16_t {
 #[target_feature(enable = "aes")]
 #[target_feature(enable = "neon")]
 pub unsafe fn aes_encrypt(block: uint8x16_t) -> uint8x16_t {
+    unsafe { aes_encrypt_with_round_keys(block, &AES128_ROUND_KEYS) }
+}
+
+/// AES-128 encryption using caller-provided round keys.
+///
+/// # Safety
+///
+/// The caller must ensure that:
+/// - The CPU supports the `aes` and `neon` target features.
+/// - The `block` parameter contains initialized data (not uninitialized memory).
+/// - The `round_keys` are a valid AES-128 key schedule.
+#[target_feature(enable = "aes")]
+#[target_feature(enable = "neon")]
+pub unsafe fn aes_encrypt_with_round_keys(
+    block: uint8x16_t,
+    round_keys: &Aes128RoundKeys,
+) -> uint8x16_t {
     let mut state = block;
 
     // Rounds 0-8: AES single round encryption + Mix columns
-    for key in AES128_ROUND_KEYS.iter().take(9) {
+    for key in round_keys.iter().take(9) {
         state = vaeseq_u8(state, *key);
         state = vaesmcq_u8(state);
     }
 
     // Round 9: AES single round encryption (no MixColumns)
-    let key9: uint8x16_t = AES128_ROUND_KEYS[9];
+    let key9: uint8x16_t = round_keys[9];
     state = vaeseq_u8(state, key9);
 
     // Round 10: Final add (bitwise XOR with last round key)
-    let key10: uint8x16_t = AES128_ROUND_KEYS[10];
+    let key10: uint8x16_t = round_keys[10];
     state = veorq_u8(state, key10);
 
     state
@@ -111,8 +144,31 @@ pub unsafe fn aes_encrypt(block: uint8x16_t) -> uint8x16_t {
 #[target_feature(enable = "aes")]
 #[target_feature(enable = "neon")]
 pub unsafe fn hash(x: uint8x16_t, tweak: uint8x16_t) -> uint8x16_t {
-    let aes_x = unsafe { aes_encrypt(x) };
-    unsafe { xor128(aes_encrypt(xor128(aes_x, tweak)), aes_x) }
+    unsafe { hash_with_round_keys(x, tweak, &AES128_ROUND_KEYS) }
+}
+
+/// TCCR hash function using caller-provided round keys.
+///
+/// # Safety
+///
+/// The caller must ensure that:
+/// - The CPU supports the `aes` and `neon` target features.
+/// - The `x` and `tweak` parameters contain initialized data (not uninitialized memory).
+/// - The `round_keys` are a valid AES-128 key schedule.
+#[target_feature(enable = "aes")]
+#[target_feature(enable = "neon")]
+pub unsafe fn hash_with_round_keys(
+    x: uint8x16_t,
+    tweak: uint8x16_t,
+    round_keys: &Aes128RoundKeys,
+) -> uint8x16_t {
+    let aes_x = unsafe { aes_encrypt_with_round_keys(x, round_keys) };
+    unsafe {
+        xor128(
+            aes_encrypt_with_round_keys(xor128(aes_x, tweak), round_keys),
+            aes_x,
+        )
+    }
 }
 
 /// Linear orthomorphism: L || R -> (L ⊕ R) || L, taken from https://eprint.iacr.org/2019/074.pdf Section 7.3
@@ -136,9 +192,33 @@ pub unsafe fn sigma(x: uint8x16_t) -> uint8x16_t {
 #[target_feature(enable = "aes")]
 #[target_feature(enable = "neon")]
 pub unsafe fn ccrnd(x: uint8x16_t, tweak: uint8x16_t) -> uint8x16_t {
+    unsafe { ccrnd_with_round_keys(x, tweak, &AES128_ROUND_KEYS) }
+}
+
+/// CCRND hash function using caller-provided round keys.
+///
+/// # Safety
+///
+/// The caller must ensure that:
+/// - The CPU supports the `aes` and `neon` target features.
+/// - `x` and `tweak` are valid 128-bit values.
+/// - The `round_keys` are a valid AES-128 key schedule.
+#[inline]
+#[target_feature(enable = "aes")]
+#[target_feature(enable = "neon")]
+pub unsafe fn ccrnd_with_round_keys(
+    x: uint8x16_t,
+    tweak: uint8x16_t,
+    round_keys: &Aes128RoundKeys,
+) -> uint8x16_t {
     let input = unsafe { xor128(xor128(x, S), tweak) };
     let lin_orth_input = unsafe { sigma(input) };
-    unsafe { xor128(aes_encrypt(lin_orth_input), lin_orth_input) }
+    unsafe {
+        xor128(
+            aes_encrypt_with_round_keys(lin_orth_input, round_keys),
+            lin_orth_input,
+        )
+    }
 }
 
 #[cfg(test)]
@@ -160,6 +240,32 @@ mod tests {
                 unsafe { transmute(aes_encrypt(transmute::<[u8; 16], uint8x16_t>(plaintext))) };
 
             let cipher = Aes128::new(&AES128_KEY_BYTES.into());
+            let mut expected_ciphertext = plaintext.into();
+            cipher.encrypt_block(&mut expected_ciphertext);
+
+            assert_eq!(ciphertext, &expected_ciphertext[..], "failed at test {}", i);
+        }
+    }
+
+    #[test]
+    fn test_aes_encrypt_with_round_keys() {
+        let num_tests = 1000;
+        for i in 0..num_tests {
+            let mut key_bytes = [0u8; 16];
+            let mut plaintext = [0u8; 16];
+            let mut rng = rand::rng();
+            rng.fill_bytes(&mut key_bytes);
+            rng.fill_bytes(&mut plaintext);
+
+            let round_keys = unsafe { expand_aes128_key(&key_bytes) };
+            let ciphertext: [u8; 16] = unsafe {
+                transmute(aes_encrypt_with_round_keys(
+                    transmute::<[u8; 16], uint8x16_t>(plaintext),
+                    &round_keys,
+                ))
+            };
+
+            let cipher = Aes128::new(&key_bytes.into());
             let mut expected_ciphertext = plaintext.into();
             cipher.encrypt_block(&mut expected_ciphertext);
 
