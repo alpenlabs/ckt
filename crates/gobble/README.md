@@ -6,7 +6,7 @@ A high-performance Rust library for privacy-free garbled circuit generation, eva
 
 `gobble` implements efficient garbled circuit operations using architecture-specific SIMD instructions. It provides three fundamental operations:
 
-1. **Garbling**: Transform a boolean circuit into a garbled circuit, consisting of 1 ciphertext per AND gate in the circuit 
+1. **Garbling**: Transform a boolean circuit into a garbled circuit, consisting of 1 ciphertext per AND gate in the circuit
 2. **Evaluation**: Evaluate a garbled circuit using input labels and values to obtain output labels
 3. **Execution**: Execute a circuit in cleartext for testing and verification
 
@@ -35,7 +35,7 @@ The main entry point that creates garbling, evaluation, and execution instances.
 
 ### `GarblingInstance`
 
-Handles the generation of garbled circuits. It accepts XOR and AND gates by feeding them their input and output wire addresses. XOR gates are free (no ciphertext), while AND gates produce a single ciphertext that is transmitted to the evaluator. The instance also provides methods to extract selected labels for specific wires based on their boolean values. This is used for encoding input labels, later used for evaluation in an authenticated manner. 
+Handles the generation of garbled circuits. It accepts XOR and AND gates by feeding them their input and output wire addresses. XOR gates are free (no ciphertext), while AND gates produce a single ciphertext that is transmitted to the evaluator. The instance also provides methods to extract selected labels for specific wires based on their boolean values. This is used for encoding input labels, later used for evaluation in an authenticated manner.
 
 ### `EvaluationInstance`
 
@@ -61,7 +61,7 @@ The library defines three configuration structures:
 
 ## Benchmarking
 
-The crate includes a comprehensive benchmark suite using `criterion`. Benchmarks cover individual XOR and AND gate operations, mixed gate sequences, and low-level primitive operations. 
+The crate includes a comprehensive benchmark suite using `criterion`. Benchmarks cover individual XOR and AND gate operations, mixed gate sequences, and low-level primitive operations.
 
 ## Testing
 
