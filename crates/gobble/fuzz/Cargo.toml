@@ -11,7 +11,7 @@ cargo-fuzz = true
 aes = "0.8.4"
 libfuzzer-sys = "0.4"
 
-[dependencies.gobble]
+[dependencies.ckt-gobble]
 path = ".."
 
 [[bin]]
