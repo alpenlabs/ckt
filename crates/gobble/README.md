@@ -19,7 +19,7 @@ The library uses a trait-based architecture to support multiple CPU architecture
 ### Cryptographic Primitives
 
 - **Privacy-Free Half-Gate Garbling**: Implements the Zahur-Rosulek-Evans half-gate optimization, which reduces the size of garbled AND gates to just 1 ciphertexts in the privacy-free setting (compared to 4 in the classical Yao approach) and XOR gates are free
-- **Fixed-Key AES**: Uses 2 fixed key AES calls to implement a tweakble circular correlation robust (TCCR) hash function for performance, which is standard practice in garbled circuit implementations and is proved secure in the ideal permutation model
+- **CCRND Hash Function**: Uses the circular correlation robust with naturally derived keys (CCRND) hash function from [GKWY20](https://eprint.iacr.org/2019/074), which requires only 1 AES call per hash invocation. The AES key and public S value must be provided per-instance by the garbler and communicated to the evaluator
 
 ### Performance Optimizations
 
@@ -53,9 +53,9 @@ The library uses a `scratch_space` memory model where each circuit specifies a m
 
 The library defines three configuration structures:
 
-**`GarblingInstanceConfig`** specifies the `scratch_space` size, the global `delta` offset (which must remain secret from the evaluator), the false labels for primary inputs, and an optional per-instance AES-128 key override. The true labels are computed by XORing the false labels with `delta`.
+**`GarblingInstanceConfig`** specifies the `scratch_space` size, the global `delta` offset (which must remain secret from the evaluator), the false labels for primary inputs, a per-instance AES-128 key, and a public S value for the CCRND hash. The AES key and public S are chosen randomly by the garbler and must be communicated to the evaluator. The true labels are computed by XORing the false labels with `delta`.
 
-**`EvaluationInstanceConfig`** specifies the `scratch_space` size, the selected labels for primary inputs along with their semantic boolean values for tracking purposes, and an optional AES-128 key override which must match the garbler.
+**`EvaluationInstanceConfig`** specifies the `scratch_space` size, the selected labels for primary inputs along with their semantic boolean values for tracking purposes, plus the AES-128 key and public S value which must match those used by the garbler.
 
 **`ExecutionInstanceConfig`** specifies the `scratch_space` size and the input boolean values for cleartext execution.
 
