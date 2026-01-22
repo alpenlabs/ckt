@@ -8,27 +8,12 @@ use std::mem::transmute;
 mod expand;
 
 use expand::aes128 as expand_aes128;
-type Aes128RoundKeys = expand::Aes128RoundKeys;
 
-use crate::{AES128_KEY_BYTES, AES128_ROUND_KEY_BYTES};
+/// AES-128 round keys type.
+pub type Aes128RoundKeys = expand::Aes128RoundKeys;
 
 // Re-export the unified types
 pub use crate::types::{Ciphertext, Label};
-
-const AES128_KEY: __m128i = unsafe { transmute::<[u8; 16], __m128i>(AES128_KEY_BYTES) };
-const AES128_ROUND_KEYS: [__m128i; 11] = [
-    AES128_KEY,
-    unsafe { transmute::<[u8; 16], __m128i>(AES128_ROUND_KEY_BYTES[0]) },
-    unsafe { transmute::<[u8; 16], __m128i>(AES128_ROUND_KEY_BYTES[1]) },
-    unsafe { transmute::<[u8; 16], __m128i>(AES128_ROUND_KEY_BYTES[2]) },
-    unsafe { transmute::<[u8; 16], __m128i>(AES128_ROUND_KEY_BYTES[3]) },
-    unsafe { transmute::<[u8; 16], __m128i>(AES128_ROUND_KEY_BYTES[4]) },
-    unsafe { transmute::<[u8; 16], __m128i>(AES128_ROUND_KEY_BYTES[5]) },
-    unsafe { transmute::<[u8; 16], __m128i>(AES128_ROUND_KEY_BYTES[6]) },
-    unsafe { transmute::<[u8; 16], __m128i>(AES128_ROUND_KEY_BYTES[7]) },
-    unsafe { transmute::<[u8; 16], __m128i>(AES128_ROUND_KEY_BYTES[8]) },
-    unsafe { transmute::<[u8; 16], __m128i>(AES128_ROUND_KEY_BYTES[9]) },
-];
 
 /// AES-128 key expansion using AES-NI instructions.
 ///
@@ -36,9 +21,8 @@ const AES128_ROUND_KEYS: [__m128i; 11] = [
 ///
 /// The caller must ensure that:
 /// - The CPU supports the `aes` target feature.
-#[allow(dead_code)]
 #[target_feature(enable = "aes")]
-pub(crate) unsafe fn expand_aes128_key(key: &[u8; 16]) -> Aes128RoundKeys {
+pub unsafe fn expand_aes128_key(key: &[u8; 16]) -> Aes128RoundKeys {
     unsafe { expand_aes128::expand_key(key) }
 }
 
@@ -79,24 +63,6 @@ pub unsafe fn index_to_tweak(index: u64) -> __m128i {
     unsafe { transmute(bytes) }
 }
 
-/// AES-128 encryption using x86 AES-NI instructions.
-///
-/// This follows the x86 AES-NI instruction pattern:
-/// - Initial whitening: XOR with round key 0
-/// - Rounds 1-9: AESENC (full round with MixColumns)
-/// - Round 10: AESENCLAST (final round without MixColumns)
-///
-/// # Safety
-///
-/// The caller must ensure that:
-/// - The CPU supports the `aes` and `sse2` target features.
-/// - The `block` parameter contains initialized data (not uninitialized memory).
-#[target_feature(enable = "aes")]
-#[target_feature(enable = "sse2")]
-pub unsafe fn aes_encrypt(block: __m128i) -> __m128i {
-    unsafe { aes_encrypt_with_round_keys(block, &AES128_ROUND_KEYS) }
-}
-
 /// AES-128 encryption using caller-provided round keys.
 ///
 /// # Safety
@@ -120,46 +86,6 @@ pub unsafe fn aes_encrypt_with_round_keys(block: __m128i, round_keys: &Aes128Rou
     state = _mm_aesenclast_si128(state, round_keys[10]);
 
     state
-}
-
-/// TCCR hash function via fixed-key AES: H(x, tweak) = AES(AES(x) ⊕ tweak) ⊕ AES(x).
-///
-/// Tweakable circular correlation robust (TCCR) hash function.
-/// Referenced from Section 7.4 of GKWY20 <https://eprint.iacr.org/2019/074>.
-///
-/// # Safety
-///
-/// The caller must ensure that:
-/// - The CPU supports the `aes` and `sse2` target features.
-/// - The `x` and `tweak` parameters contain initialized data (not uninitialized memory).
-#[target_feature(enable = "aes")]
-#[target_feature(enable = "sse2")]
-pub unsafe fn hash(x: __m128i, tweak: __m128i) -> __m128i {
-    unsafe { hash_with_round_keys(x, tweak, &AES128_ROUND_KEYS) }
-}
-
-/// TCCR hash function using caller-provided round keys.
-///
-/// # Safety
-///
-/// The caller must ensure that:
-/// - The CPU supports the `aes` and `sse2` target features.
-/// - The `x` and `tweak` parameters contain initialized data (not uninitialized memory).
-/// - The `round_keys` are a valid AES-128 key schedule.
-#[target_feature(enable = "aes")]
-#[target_feature(enable = "sse2")]
-pub unsafe fn hash_with_round_keys(
-    x: __m128i,
-    tweak: __m128i,
-    round_keys: &Aes128RoundKeys,
-) -> __m128i {
-    let aes_x = unsafe { aes_encrypt_with_round_keys(x, round_keys) };
-    unsafe {
-        xor128(
-            aes_encrypt_with_round_keys(xor128(aes_x, tweak), round_keys),
-            aes_x,
-        )
-    }
 }
 
 /// Linear orthomorphism: L || R -> (L ⊕ R) || L, taken from <https://eprint.iacr.org/2019/074.pdf> Section 7.3
@@ -187,6 +113,7 @@ pub unsafe fn sigma(x: __m128i) -> __m128i {
     // XOR the shuffled result [R|L] with the masked L [L|0] to get [(R⊕L)|L] = [(L⊕R)|L]
     _mm_xor_si128(shuffled, _mm_and_si128(x, mask))
 }
+
 /// CCRND hash function using caller-provided round keys and public S.
 ///
 /// This is the CCRND hash function from Section 5 of <https://eprint.iacr.org/2019/074.pdf>,
@@ -223,25 +150,6 @@ mod tests {
     use aes::Aes128;
     use aes::cipher::{BlockEncrypt, KeyInit};
     use rand::RngCore;
-
-    #[test]
-    fn test_aes_encrypt() {
-        let num_tests = 1000;
-        for i in 0..num_tests {
-            let mut plaintext = [0u8; 16];
-            let mut rng = rand::rng();
-            rng.fill_bytes(&mut plaintext);
-
-            let ciphertext: [u8; 16] =
-                unsafe { transmute(aes_encrypt(transmute::<[u8; 16], __m128i>(plaintext))) };
-
-            let cipher = Aes128::new(&AES128_KEY_BYTES.into());
-            let mut expected_ciphertext = plaintext.into();
-            cipher.encrypt_block(&mut expected_ciphertext);
-
-            assert_eq!(ciphertext, &expected_ciphertext[..], "failed at test {}", i);
-        }
-    }
 
     #[test]
     fn test_aes_encrypt_with_round_keys() {
@@ -290,13 +198,14 @@ mod tests {
             ),
         ];
 
-        // Use a fixed public_s for testing
+        // Use fixed key and public_s for testing
+        let key_bytes = [0x2Bu8; 16];
         let public_s_bytes = [
             0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE, 0xBA, 0xBE, 0xDE, 0xAD, 0xBE, 0xEF, 0xCA, 0xFE,
             0xBA, 0xBE,
         ];
         let public_s = unsafe { transmute::<[u8; 16], __m128i>(public_s_bytes) };
-        let round_keys = unsafe { expand_aes128_key(&AES128_KEY_BYTES) };
+        let round_keys = unsafe { expand_aes128_key(&key_bytes) };
 
         println!("\n=== x86_64 ccrnd test outputs (compare with aarch64) ===");
         for (i, (x_bytes, tweak_bytes)) in test_cases.iter().enumerate() {
