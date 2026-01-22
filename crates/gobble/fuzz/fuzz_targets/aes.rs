@@ -3,9 +3,9 @@
 use libfuzzer_sys::fuzz_target;
 
 #[cfg(target_arch = "aarch64")]
-use gobble::aarch64::{aes_encrypt_with_round_keys, expand_aes128_key};
+use ckt_gobble::aarch64::{aes_encrypt_with_round_keys, expand_aes128_key};
 #[cfg(target_arch = "x86_64")]
-use gobble::x86_64::{aes_encrypt_with_round_keys, expand_aes128_key};
+use ckt_gobble::x86_64::{aes_encrypt_with_round_keys, expand_aes128_key};
 
 use aes::Aes128;
 use aes::cipher::{BlockEncrypt, KeyInit};
