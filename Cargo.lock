@@ -283,8 +283,10 @@ version = "0.1.0"
 dependencies = [
  "aes",
  "bitvec",
+ "blake3",
  "criterion",
  "rand",
+ "rand_chacha",
 ]
 
 [[package]]

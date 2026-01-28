@@ -1,6 +1,7 @@
 //! Core crate for garbling, executing and evaluating garbled/boolean circuits.
 
 pub mod traits;
+pub mod translate;
 pub mod types;
 
 // Architecture-specific intrinsics
@@ -19,6 +20,9 @@ pub mod garb;
 pub use eval::EvaluationInstanceImpl as EvaluationInstance;
 pub use exec::CleartextExecutionInstance as ExecutionInstance;
 pub use garb::GarblingInstanceImpl as GarblingInstance;
+pub use translate::{
+    BitLabel, ByteLabel, TranslationMaterial, generate_translation_material, translate, wide_hash,
+};
 pub use types::{Ciphertext, Label};
 
 use traits::{
