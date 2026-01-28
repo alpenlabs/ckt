@@ -3,14 +3,16 @@ use std::io::BufWriter;
 
 use ckt_fmtv5_types::v5::c::*;
 use ckt_gobble::{
-    BitLabel, ByteLabel, Label, generate_translation_material, traits::GarblingInstanceConfig,
+    BitLabel, ByteLabel, Label, generate_output_translation_material,
+    generate_translation_material, traits::GarblingInstanceConfig,
 };
 use ckt_runner_exec::{CircuitReader, GarbleTask, ReaderV5cWrapper, process_task};
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::RngCore;
 
 use crate::common::{
-    ProgressBarTask, bits_to_bytes, generate_byte_labels, read_inputs, write_translation_material,
+    ProgressBarTask, bits_to_bytes, generate_byte_labels, read_inputs,
+    write_output_translation_material, write_translation_material,
 };
 
 /// Output from garbling with translation support.
@@ -20,10 +22,14 @@ pub struct GarbleTranslationOutput {
     pub delta: [u8; 16],
     /// Selected byte labels corresponding to the input byte values.
     pub selected_byte_labels: Vec<[u8; 16]>,
-    /// Path to the translation material file.
+    /// Path to the input translation material file.
     pub translation_file: String,
-    /// Output labels from the garbler.
+    /// Path to the output translation material file.
+    pub output_translation_file: String,
+    /// Output labels from the garbler (BitLabel: both false and true labels).
     pub garbler_output_labels: Vec<[u8; 16]>,
+    /// Secrets embedded in output translation (256-bit per output).
+    pub secrets: Vec<[u8; 32]>,
     /// AES-128 key used for garbling.
     pub aes128_key: [u8; 16],
     /// Public S value used in CCRND hash.
@@ -168,6 +174,42 @@ pub async fn garble_with_translation(
 
     println!("\n✓ Garbled circuit written to {}", output_file);
 
+    // Generate output translation material
+    // The garbler_output_labels are the FALSE labels for each output
+    let num_outputs = output.garbler_output_labels.len();
+
+    // Generate random 256-bit secrets for each output
+    let mut secrets = Vec::with_capacity(num_outputs);
+    for _ in 0..num_outputs {
+        let mut secret = [0u8; 32];
+        rng.fill_bytes(&mut secret);
+        secrets.push(secret);
+    }
+
+    // Create BitLabel array from output labels
+    // garbler_output_labels contains false labels, true labels = false XOR delta
+    let output_bit_labels: Vec<BitLabel> = output
+        .garbler_output_labels
+        .iter()
+        .map(|false_label_bytes| {
+            let false_label = Label::from(*false_label_bytes);
+            let true_label = Label(unsafe { xor128(false_label.0, delta.0) });
+            BitLabel::new([false_label, true_label])
+        })
+        .collect();
+
+    // Generate output translation material
+    let output_translation_material =
+        generate_output_translation_material(&output_bit_labels, &secrets);
+
+    // Write output translation material to file
+    let output_translation_file = format!("{}.output_translation", output_file);
+    write_output_translation_material(&output_translation_file, &output_translation_material);
+    println!(
+        "✓ Output translation material written to {}",
+        output_translation_file
+    );
+
     // Select byte labels based on input bytes
     let mut selected_byte_labels = Vec::new();
     for byte_position in 0..num_bytes {
@@ -180,7 +222,9 @@ pub async fn garble_with_translation(
         delta: delta_bytes,
         selected_byte_labels,
         translation_file,
+        output_translation_file,
         garbler_output_labels: output.garbler_output_labels,
+        secrets,
         aes128_key,
         public_s,
     }

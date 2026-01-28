@@ -3,10 +3,13 @@ use std::io::BufReader;
 
 use bitvec::vec::BitVec;
 use ckt_fmtv5_types::v5::c::ReaderV5c;
-use ckt_gobble::{Label, traits::EvaluationInstanceConfig, translate};
+use ckt_gobble::{Label, traits::EvaluationInstanceConfig, translate, translate_outputs};
 use ckt_runner_exec::{CircuitReader, EvalTask, ReaderV5cWrapper, process_task};
 
-use crate::common::{ProgressBarTask, bits_to_bytes, read_inputs, read_translation_material};
+use crate::common::{
+    ProgressBarTask, bits_to_bytes, read_inputs, read_output_translation_material,
+    read_translation_material,
+};
 
 /// Output from evaluation with translation support.
 #[derive(Debug)]
@@ -15,15 +18,19 @@ pub struct EvalTranslationOutput {
     pub output_labels: Vec<[u8; 16]>,
     /// Output boolean values corresponding to the labels.
     pub output_values: Vec<bool>,
+    /// Recovered secrets for false outputs (None for true outputs).
+    pub recovered_secrets: Vec<Option<[u8; 32]>>,
 }
 
 /// Evaluation with translation support.
 ///
 /// Translates byte labels to bit labels using translation material, then runs standard evaluation.
+/// Also translates output labels to recover secrets for false outputs.
 pub async fn eval_with_translation(
     circuit_file: &str,
     ciphertext_file: &str,
     translation_file: &str,
+    output_translation_file: &str,
     input_file: &str,
     byte_labels: &[[u8; 16]],
     aes128_key: [u8; 16],
@@ -116,8 +123,26 @@ pub async fn eval_with_translation(
     println!("Output labels: {:?}", output.output_labels);
     println!("Output values: {:?}", output.output_values);
 
+    // Read output translation material and translate outputs
+    let output_translation_material = read_output_translation_material(output_translation_file);
+
+    // Convert output labels to Label type
+    let output_labels_typed: Vec<Label> = output
+        .output_labels
+        .iter()
+        .map(|bytes| Label::from(*bytes))
+        .collect();
+
+    // Translate outputs to recover secrets for false outputs
+    let recovered_secrets = translate_outputs(
+        &output_labels_typed,
+        &output.output_values,
+        &output_translation_material,
+    );
+
     EvalTranslationOutput {
         output_labels: output.output_labels,
         output_values: output.output_values,
+        recovered_secrets,
     }
 }

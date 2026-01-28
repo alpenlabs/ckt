@@ -21,7 +21,9 @@ pub use eval::EvaluationInstanceImpl as EvaluationInstance;
 pub use exec::CleartextExecutionInstance as ExecutionInstance;
 pub use garb::GarblingInstanceImpl as GarblingInstance;
 pub use translate::{
-    BitLabel, ByteLabel, TranslationMaterial, generate_translation_material, translate, wide_hash,
+    BitLabel, ByteLabel, OutputTranslationCiphertext, OutputTranslationMaterial,
+    TranslationMaterial, generate_output_translation_material, generate_translation_material,
+    translate, translate_outputs, wide_hash, wide_hash_256,
 };
 pub use types::{Ciphertext, Label};
 

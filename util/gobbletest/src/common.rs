@@ -1,6 +1,6 @@
 use bitvec::vec::BitVec;
 use ckt_fmtv5_types::v5::c::HeaderV5c;
-use ckt_gobble::{ByteLabel, Label, TranslationMaterial};
+use ckt_gobble::{ByteLabel, Label, OutputTranslationMaterial, TranslationMaterial};
 use ckt_runner_types::{CircuitTask, GateBlock};
 use indicatif::{ProgressBar, ProgressStyle};
 use rand_chacha::ChaCha20Rng;
@@ -105,6 +105,54 @@ pub fn read_translation_material(path: &str, num_bytes: usize) -> Vec<Translatio
     }
 
     materials
+}
+
+/// Write output translation material to a file
+pub fn write_output_translation_material(path: &str, material: &OutputTranslationMaterial) {
+    let file = File::create(path).expect("Failed to create output translation file");
+    let mut writer = BufWriter::new(file);
+
+    // Write number of outputs first (for reading back)
+    let num_outputs = material.len() as u64;
+    writer
+        .write_all(&num_outputs.to_le_bytes())
+        .expect("Failed to write num outputs");
+
+    // Write each 32-byte ciphertext
+    for ciphertext in material {
+        writer
+            .write_all(ciphertext)
+            .expect("Failed to write output ciphertext");
+    }
+
+    writer
+        .flush()
+        .expect("Failed to flush output translation file");
+}
+
+/// Read output translation material from a file
+pub fn read_output_translation_material(path: &str) -> OutputTranslationMaterial {
+    let file = File::open(path).expect("Failed to open output translation file");
+    let mut reader = BufReader::new(file);
+
+    // Read number of outputs
+    let mut num_bytes = [0u8; 8];
+    reader
+        .read_exact(&mut num_bytes)
+        .expect("Failed to read num outputs");
+    let num_outputs = u64::from_le_bytes(num_bytes) as usize;
+
+    // Read each 32-byte ciphertext
+    let mut material = Vec::with_capacity(num_outputs);
+    for _ in 0..num_outputs {
+        let mut ciphertext = [0u8; 32];
+        reader
+            .read_exact(&mut ciphertext)
+            .expect("Failed to read output ciphertext");
+        material.push(ciphertext);
+    }
+
+    material
 }
 
 /// Wrapper that adds progress bar reporting to a CircuitTask implementation.

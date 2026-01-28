@@ -121,6 +121,7 @@ pub async fn test_end_to_end_translate(
         circuit_file,
         garbled_file,
         &garble_output.translation_file,
+        &garble_output.output_translation_file,
         input_file,
         &garble_output.selected_byte_labels,
         garble_output.aes128_key,
@@ -172,6 +173,44 @@ pub async fn test_end_to_end_translate(
 
     if all_passed {
         println!("✓ All output labels are consistent");
+    }
+
+    // Check output translation: secrets should be recovered for false outputs
+    for (i, (recovered, expected_secret)) in eval_output
+        .recovered_secrets
+        .iter()
+        .zip(garble_output.secrets.iter())
+        .enumerate()
+    {
+        let value = eval_output.output_values[i];
+
+        if value {
+            // True output: should NOT be able to decrypt
+            if recovered.is_some() {
+                println!("❌ FAILED: Output {} is true but secret was recovered!", i);
+                all_passed = false;
+            }
+        } else {
+            // False output: should be able to decrypt and recover correct secret
+            match recovered {
+                Some(secret) => {
+                    if secret != expected_secret {
+                        println!("❌ FAILED: Output {} secret mismatch!", i);
+                        println!("   Expected: {:?}", expected_secret);
+                        println!("   Got:      {:?}", secret);
+                        all_passed = false;
+                    }
+                }
+                None => {
+                    println!("❌ FAILED: Output {} is false but no secret recovered!", i);
+                    all_passed = false;
+                }
+            }
+        }
+    }
+
+    if all_passed {
+        println!("✓ Output translation secrets verified");
         println!("\n🎉 All tests passed!");
     } else {
         println!("\n❌ Some tests failed!");

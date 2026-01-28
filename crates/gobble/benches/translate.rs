@@ -2,7 +2,10 @@
 #![expect(missing_docs)]
 #![allow(unused_crate_dependencies)]
 
-use ckt_gobble::{BitLabel, ByteLabel, Label, generate_translation_material, translate, wide_hash};
+use ckt_gobble::{
+    BitLabel, ByteLabel, Label, generate_output_translation_material,
+    generate_translation_material, translate, translate_outputs, wide_hash, wide_hash_256,
+};
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
 
 #[cfg(target_arch = "aarch64")]
@@ -80,11 +83,95 @@ fn bench_translate(c: &mut Criterion) {
     });
 }
 
+fn bench_wide_hash_256(c: &mut Criterion) {
+    c.bench_function("wide_hash_256", |b| {
+        let label = Label::from([0x42u8; 16]);
+        let index = 12345u64;
+
+        b.iter(|| {
+            let result = wide_hash_256(black_box(label), black_box(index));
+            black_box(result)
+        });
+    });
+}
+
+fn bench_generate_output_translation_material(c: &mut Criterion) {
+    c.bench_function("generate_output_translation_material", |b| {
+        // Setup: generate output labels for 10 outputs
+        let seed = [55u8; 32];
+        let (labels, _) = expand_seed(seed, 20); // 10 outputs * 2 labels each
+
+        let output_labels: Vec<BitLabel> = (0..10)
+            .map(|i| BitLabel::new([labels[i * 2], labels[i * 2 + 1]]))
+            .collect();
+
+        let secrets: Vec<[u8; 32]> = (0..10)
+            .map(|i| {
+                let mut s = [0u8; 32];
+                s.fill(i as u8);
+                s
+            })
+            .collect();
+
+        b.iter(|| {
+            let result = generate_output_translation_material(
+                black_box(&output_labels),
+                black_box(&secrets),
+            );
+            black_box(result)
+        });
+    });
+}
+
+fn bench_translate_outputs(c: &mut Criterion) {
+    c.bench_function("translate_outputs", |b| {
+        // Setup: generate output translation material for 10 outputs
+        let seed = [55u8; 32];
+        let (labels, _) = expand_seed(seed, 20);
+
+        let output_labels: Vec<BitLabel> = (0..10)
+            .map(|i| BitLabel::new([labels[i * 2], labels[i * 2 + 1]]))
+            .collect();
+
+        let secrets: Vec<[u8; 32]> = (0..10)
+            .map(|i| {
+                let mut s = [0u8; 32];
+                s.fill(i as u8);
+                s
+            })
+            .collect();
+
+        let material = generate_output_translation_material(&output_labels, &secrets);
+
+        // Simulate evaluator having labels (mix of true/false)
+        let output_values = vec![
+            false, true, false, true, false, true, false, true, false, true,
+        ];
+        let eval_labels: Vec<Label> = output_labels
+            .iter()
+            .zip(output_values.iter())
+            .map(|(bl, &val)| bl.get_label(val))
+            .collect();
+
+        b.iter(|| {
+            let result = translate_outputs(
+                black_box(&eval_labels),
+                black_box(&output_values),
+                black_box(&material),
+            );
+            black_box(result)
+        });
+    });
+}
+
 criterion_group!(
     benches,
     bench_wide_hash,
     bench_generate_translation_material,
-    bench_translate
+    bench_translate,
+    bench_wide_hash_256,
+    bench_generate_output_translation_material,
+    bench_translate_outputs
 );
 
 criterion_main!(benches);
