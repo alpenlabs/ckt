@@ -1,9 +1,12 @@
 use bitvec::vec::BitVec;
 use ckt_fmtv5_types::v5::c::HeaderV5c;
+use ckt_gobble::{ByteLabel, Label, TranslationMaterial};
 use ckt_runner_types::{CircuitTask, GateBlock};
 use indicatif::{ProgressBar, ProgressStyle};
+use rand_chacha::ChaCha20Rng;
+use rand_chacha::rand_core::RngCore;
 use std::fs::File;
-use std::io::{BufReader, Read};
+use std::io::{BufReader, BufWriter, Read, Write};
 use std::time::Instant;
 
 /// Read input bits from a text file containing 0s and 1s
@@ -34,6 +37,74 @@ pub fn read_inputs(input_file: &str, expected_num_inputs: usize) -> BitVec {
     }
 
     input_values_bits
+}
+
+/// Convert bits to bytes (LSB first within each byte)
+pub fn bits_to_bytes(bits: &BitVec, num_bytes: usize) -> Vec<u8> {
+    let mut bytes = vec![0u8; num_bytes];
+    for (i, bit) in bits.iter().enumerate() {
+        if *bit {
+            bytes[i / 8] |= 1 << (i % 8);
+        }
+    }
+    bytes
+}
+
+/// Generate random byte labels (256 labels per byte position)
+pub fn generate_byte_labels(num_bytes: usize, rng: &mut ChaCha20Rng) -> Vec<ByteLabel> {
+    let mut byte_labels = Vec::with_capacity(num_bytes);
+    for _ in 0..num_bytes {
+        let mut labels = [Label::default(); 256];
+        for label in &mut labels {
+            let mut bytes = [0u8; 16];
+            rng.fill_bytes(&mut bytes);
+            *label = Label::from(bytes);
+        }
+        byte_labels.push(ByteLabel::new(labels));
+    }
+    byte_labels
+}
+
+/// Write translation material to a file
+pub fn write_translation_material(path: &str, materials: &[TranslationMaterial]) {
+    let file = File::create(path).expect("Failed to create translation file");
+    let mut writer = BufWriter::new(file);
+
+    for material in materials {
+        for row in material {
+            for ct in row {
+                let bytes: [u8; 16] = (*ct).into();
+                writer
+                    .write_all(&bytes)
+                    .expect("Failed to write ciphertext");
+            }
+        }
+    }
+
+    writer.flush().expect("Failed to flush translation file");
+}
+
+/// Read translation material from a file
+pub fn read_translation_material(path: &str, num_bytes: usize) -> Vec<TranslationMaterial> {
+    let file = File::open(path).expect("Failed to open translation file");
+    let mut reader = BufReader::new(file);
+
+    let mut materials = Vec::with_capacity(num_bytes);
+    for _ in 0..num_bytes {
+        let mut material = [[ckt_gobble::Ciphertext::default(); 8]; 256];
+        for row in &mut material {
+            for ct in row {
+                let mut bytes = [0u8; 16];
+                reader
+                    .read_exact(&mut bytes)
+                    .expect("Failed to read ciphertext");
+                *ct = ckt_gobble::Ciphertext::from(bytes);
+            }
+        }
+        materials.push(material);
+    }
+
+    materials
 }
 
 /// Wrapper that adds progress bar reporting to a CircuitTask implementation.
