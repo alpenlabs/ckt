@@ -23,7 +23,7 @@ pub mod garb;
 pub use eval::EvaluationInstanceImpl as EvaluationInstance;
 pub use exec::CleartextExecutionInstance as ExecutionInstance;
 pub use garb::GarblingInstanceImpl as GarblingInstance;
-pub use types::{Ciphertext, Label};
+pub use types::{Ciphertext, Label, expand_seed};
 
 // Re-export input translation types and functions
 pub use input_translate::{

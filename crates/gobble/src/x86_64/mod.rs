@@ -5,9 +5,6 @@
 use std::arch::x86_64::*;
 use std::mem::transmute;
 
-use rand_chacha::ChaCha20Rng;
-use rand_chacha::rand_core::{RngCore, SeedableRng};
-
 mod expand;
 
 use expand::aes128 as expand_aes128;
@@ -17,23 +14,6 @@ pub type Aes128RoundKeys = expand::Aes128RoundKeys;
 
 // Re-export the unified types
 pub use crate::types::{Ciphertext, Label};
-
-/// Expand a seed into a vector of labels and a delta value.
-///
-/// This is useful for deterministic label generation in tests.
-pub fn expand_seed(seed: [u8; 32], num_inputs: u32) -> (Vec<Label>, Label) {
-    let mut rng = ChaCha20Rng::from_seed(seed);
-    let mut delta = [0u8; 16];
-    rng.fill_bytes(&mut delta);
-    let delta = Label(unsafe { transmute::<[u8; 16], __m128i>(delta) });
-    let mut labels = Vec::with_capacity(num_inputs as usize);
-    for _ in 0..num_inputs {
-        let mut input = [0u8; 16];
-        rng.fill_bytes(&mut input);
-        labels.push(Label(unsafe { transmute::<[u8; 16], __m128i>(input) }));
-    }
-    (labels, delta)
-}
 
 /// AES-128 key expansion using AES-NI instructions.
 ///

@@ -6,6 +6,7 @@ use ckt_gobble::{
     BitLabel,
     ByteLabel,
     Label,
+    expand_seed,
     // Input translation
     generate_input_translation_material,
     // Output translation
@@ -16,12 +17,6 @@ use ckt_gobble::{
     wide_hash_8x,
 };
 use criterion::{Criterion, black_box, criterion_group, criterion_main};
-
-#[cfg(target_arch = "aarch64")]
-use ckt_gobble::aarch64::expand_seed;
-
-#[cfg(target_arch = "x86_64")]
-use ckt_gobble::x86_64::expand_seed;
 
 fn bench_wide_hash_8x(c: &mut Criterion) {
     c.bench_function("wide_hash_8x", |b| {

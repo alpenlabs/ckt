@@ -145,12 +145,7 @@ pub fn translate_output(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[cfg(target_arch = "aarch64")]
-    use crate::aarch64::expand_seed;
-
-    #[cfg(target_arch = "x86_64")]
-    use crate::x86_64::expand_seed;
+    use crate::types::expand_seed;
 
     #[test]
     fn test_output_translation_roundtrip() {
