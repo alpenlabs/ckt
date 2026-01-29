@@ -1,6 +1,6 @@
 use bitvec::vec::BitVec;
 use ckt_fmtv5_types::v5::c::HeaderV5c;
-use ckt_gobble::{ByteLabel, Label, OutputTranslationMaterial, TranslationMaterial};
+use ckt_gobble::{ByteLabel, InputTranslationMaterial, Label, OutputTranslationMaterial};
 use ckt_runner_types::{CircuitTask, GateBlock};
 use indicatif::{ProgressBar, ProgressStyle};
 use rand_chacha::ChaCha20Rng;
@@ -66,7 +66,7 @@ pub fn generate_byte_labels(num_bytes: usize, rng: &mut ChaCha20Rng) -> Vec<Byte
 }
 
 /// Write translation material to a file
-pub fn write_translation_material(path: &str, materials: &[TranslationMaterial]) {
+pub fn write_input_translation_material(path: &str, materials: &[InputTranslationMaterial]) {
     let file = File::create(path).expect("Failed to create translation file");
     let mut writer = BufWriter::new(file);
 
@@ -85,7 +85,10 @@ pub fn write_translation_material(path: &str, materials: &[TranslationMaterial])
 }
 
 /// Read translation material from a file
-pub fn read_translation_material(path: &str, num_bytes: usize) -> Vec<TranslationMaterial> {
+pub fn read_input_translation_material(
+    path: &str,
+    num_bytes: usize,
+) -> Vec<InputTranslationMaterial> {
     let file = File::open(path).expect("Failed to open translation file");
     let mut reader = BufReader::new(file);
 

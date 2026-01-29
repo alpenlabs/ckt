@@ -3,12 +3,12 @@ use std::io::BufReader;
 
 use bitvec::vec::BitVec;
 use ckt_fmtv5_types::v5::c::ReaderV5c;
-use ckt_gobble::{Label, traits::EvaluationInstanceConfig, translate, translate_outputs};
+use ckt_gobble::{Label, traits::EvaluationInstanceConfig, translate_input, translate_output};
 use ckt_runner_exec::{CircuitReader, EvalTask, ReaderV5cWrapper, process_task};
 
 use crate::common::{
-    ProgressBarTask, bits_to_bytes, read_inputs, read_output_translation_material,
-    read_translation_material,
+    ProgressBarTask, bits_to_bytes, read_input_translation_material, read_inputs,
+    read_output_translation_material,
 };
 
 /// Output from evaluation with translation support.
@@ -54,7 +54,7 @@ pub async fn eval_with_translation(
     );
 
     // Read translation material from file
-    let translation_material = read_translation_material(translation_file, num_bytes);
+    let translation_material = read_input_translation_material(translation_file, num_bytes);
 
     // Translate byte labels to bit labels
     // Only translate exactly primary_inputs bits (may be less than num_bytes * 8)
@@ -67,7 +67,7 @@ pub async fn eval_with_translation(
         let byte_value = input_bytes[byte_position];
 
         // Translate: byte_label to 8 bit labels
-        let translated_bit_labels = translate(
+        let translated_bit_labels = translate_input(
             byte_position as u64,
             byte_label,
             byte_value,
@@ -134,7 +134,7 @@ pub async fn eval_with_translation(
         .collect();
 
     // Translate outputs to recover secrets for false outputs
-    let recovered_secrets = translate_outputs(
+    let recovered_secrets = translate_output(
         &output_labels_typed,
         &output.output_values,
         &output_translation_material,

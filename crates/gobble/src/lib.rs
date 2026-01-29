@@ -1,8 +1,11 @@
 //! Core crate for garbling, executing and evaluating garbled/boolean circuits.
 
 pub mod traits;
-pub mod translate;
 pub mod types;
+
+// Translation layers
+pub mod input_translate;
+pub mod output_translate;
 
 // Architecture-specific intrinsics
 #[cfg(target_arch = "aarch64")]
@@ -20,12 +23,19 @@ pub mod garb;
 pub use eval::EvaluationInstanceImpl as EvaluationInstance;
 pub use exec::CleartextExecutionInstance as ExecutionInstance;
 pub use garb::GarblingInstanceImpl as GarblingInstance;
-pub use translate::{
-    BitLabel, ByteLabel, OutputTranslationCiphertext, OutputTranslationMaterial,
-    TranslationMaterial, generate_output_translation_material, generate_translation_material,
-    translate, translate_outputs, wide_hash, wide_hash_256,
-};
 pub use types::{Ciphertext, Label};
+
+// Re-export input translation types and functions
+pub use input_translate::{
+    BitLabel, ByteLabel, InputTranslationMaterial, generate_input_translation_material,
+    translate_input, wide_hash_8x,
+};
+
+// Re-export output translation types and functions
+pub use output_translate::{
+    OutputTranslationCiphertext, OutputTranslationMaterial, generate_output_translation_material,
+    translate_output, wide_hash_2x,
+};
 
 use traits::{
     EvaluationInstanceConfig, ExecutionInstanceConfig, GarblingInstanceConfig, GobbleEngine,
