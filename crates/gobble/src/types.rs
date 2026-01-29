@@ -77,3 +77,25 @@ impl From<Ciphertext> for [u8; 16] {
         unsafe { transmute::<Inner, [u8; 16]>(ciphertext.0) }
     }
 }
+
+/// Expand a seed into a vector of labels and a delta value.
+///
+/// This is useful for deterministic label generation in tests.
+pub fn expand_seed(seed: [u8; 32], num_inputs: u32) -> (Vec<Label>, Label) {
+    use rand_chacha::ChaCha20Rng;
+    use rand_chacha::rand_core::{RngCore, SeedableRng};
+
+    let mut rng = ChaCha20Rng::from_seed(seed);
+    let mut delta_bytes = [0u8; 16];
+    rng.fill_bytes(&mut delta_bytes);
+    let delta = Label::from(delta_bytes);
+
+    let mut labels = Vec::with_capacity(num_inputs as usize);
+    for _ in 0..num_inputs {
+        let mut label_bytes = [0u8; 16];
+        rng.fill_bytes(&mut label_bytes);
+        labels.push(Label::from(label_bytes));
+    }
+
+    (labels, delta)
+}
