@@ -78,6 +78,16 @@ impl From<Ciphertext> for [u8; 16] {
     }
 }
 
+/// XOR two byte arrays of the same length.
+#[inline]
+pub fn xor_bytes<const N: usize>(a: [u8; N], b: [u8; N]) -> [u8; N] {
+    let mut result = [0u8; N];
+    for i in 0..N {
+        result[i] = a[i] ^ b[i];
+    }
+    result
+}
+
 /// Expand a seed into a vector of labels and a delta value.
 ///
 /// This is useful for deterministic label generation in tests.

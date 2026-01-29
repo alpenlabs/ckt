@@ -3,17 +3,7 @@
 //! This module provides translation from ByteLabel (256 possible values) to
 //! BitLabel components (8 bits), using Blake3 XOF for hash expansion.
 
-use crate::types::{Ciphertext, Label};
-
-/// XOR two 16-byte arrays.
-#[inline]
-fn xor_bytes(a: [u8; 16], b: [u8; 16]) -> [u8; 16] {
-    let mut result = [0u8; 16];
-    for i in 0..16 {
-        result[i] = a[i] ^ b[i];
-    }
-    result
-}
+use crate::types::{Ciphertext, Label, xor_bytes};
 
 /// Bit label type, representing value 0 or 1
 #[derive(Debug, Clone, Copy)]
