@@ -10,6 +10,7 @@ use crate::common::{
     ProgressBarTask, bits_to_bytes, read_input_translation_material, read_inputs,
     read_output_translation_material,
 };
+use crate::garble::GarblingParams;
 
 /// Output from evaluation with translation support.
 #[derive(Debug)]
@@ -22,39 +23,41 @@ pub struct EvalTranslationOutput {
     pub recovered_secrets: Vec<Option<[u8; 32]>>,
 }
 
+/// Input configuration for evaluation with translation.
+pub struct EvalTranslationConfig<'a> {
+    pub circuit_file: &'a str,
+    pub ciphertext_file: &'a str,
+    pub translation_file: &'a str,
+    pub output_translation_file: &'a str,
+    pub input_file: &'a str,
+    pub byte_labels: &'a [[u8; 16]],
+    pub garbling_params: &'a GarblingParams,
+}
+
 /// Evaluation with translation support.
 ///
 /// Translates byte labels to bit labels using translation material, then runs standard evaluation.
 /// Also translates output labels to recover secrets for false outputs.
-pub async fn eval_with_translation(
-    circuit_file: &str,
-    ciphertext_file: &str,
-    translation_file: &str,
-    output_translation_file: &str,
-    input_file: &str,
-    byte_labels: &[[u8; 16]],
-    aes128_key: [u8; 16],
-    public_s: [u8; 16],
-) -> EvalTranslationOutput {
-    let mut reader = ReaderV5cWrapper::new(ReaderV5c::open(circuit_file).unwrap());
+pub async fn eval_with_translation(config: EvalTranslationConfig<'_>) -> EvalTranslationOutput {
+    let mut reader = ReaderV5cWrapper::new(ReaderV5c::open(config.circuit_file).unwrap());
     let header = *reader.header();
 
     // Read inputs as bits and convert to bytes (need to know byte values for translation)
     let num_bits = header.primary_inputs as usize;
     let num_bytes = num_bits.div_ceil(8);
-    let input_bits = read_inputs(input_file, num_bits);
+    let input_bits = read_inputs(config.input_file, num_bits);
     let input_bytes = bits_to_bytes(&input_bits, num_bytes);
 
     assert_eq!(
-        byte_labels.len(),
+        config.byte_labels.len(),
         num_bytes,
         "Expected {} byte labels, got {}",
         num_bytes,
-        byte_labels.len()
+        config.byte_labels.len()
     );
 
     // Read translation material from file
-    let translation_material = read_input_translation_material(translation_file, num_bytes);
+    let translation_material = read_input_translation_material(config.translation_file, num_bytes);
 
     // Translate byte labels to bit labels
     // Only translate exactly primary_inputs bits (may be less than num_bytes * 8)
@@ -63,7 +66,7 @@ pub async fn eval_with_translation(
     let mut bit_count = 0;
 
     for byte_position in 0..num_bytes {
-        let byte_label = Label::from(byte_labels[byte_position]);
+        let byte_label = Label::from(config.byte_labels[byte_position]);
         let byte_value = input_bytes[byte_position];
 
         // Translate: byte_label to 8 bit labels
@@ -100,19 +103,19 @@ pub async fn eval_with_translation(
     );
 
     // Run standard evaluation
-    let config = EvaluationInstanceConfig {
+    let eval_config = EvaluationInstanceConfig {
         scratch_space: header.scratch_space as u32,
         selected_primary_input_labels: &bit_labels,
         selected_primary_input_values: &input_values_bits,
-        aes128_key,
-        public_s,
+        aes128_key: config.garbling_params.aes128_key,
+        public_s: config.garbling_params.public_s,
     };
 
-    let task_info = EvalTask::new(config);
+    let task_info = EvalTask::new(eval_config);
     let task_with_progress = ProgressBarTask::new(task_info);
 
     // Open the ciphertext reader.
-    let garbled_file = File::open(ciphertext_file).unwrap();
+    let garbled_file = File::open(config.ciphertext_file).unwrap();
     let ct_reader = BufReader::new(garbled_file);
 
     // Execute the evaluation loop.
@@ -124,7 +127,8 @@ pub async fn eval_with_translation(
     println!("Output values: {:?}", output.output_values);
 
     // Read output translation material and translate outputs
-    let output_translation_material = read_output_translation_material(output_translation_file);
+    let output_translation_material =
+        read_output_translation_material(config.output_translation_file);
 
     // Convert output labels to Label type
     let output_labels_typed: Vec<Label> = output
