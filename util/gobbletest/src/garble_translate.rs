@@ -3,8 +3,8 @@ use std::io::BufWriter;
 
 use ckt_fmtv5_types::v5::c::*;
 use ckt_gobble::{
-    BitLabel, ByteLabel, Label, generate_output_translation_material,
-    generate_translation_material, traits::GarblingInstanceConfig,
+    BitLabel, ByteLabel, Label, generate_input_translation_material,
+    generate_output_translation_material, traits::GarblingInstanceConfig,
 };
 use ckt_runner_exec::{CircuitReader, GarbleTask, ReaderV5cWrapper, process_task};
 use rand_chacha::ChaCha20Rng;
@@ -12,7 +12,7 @@ use rand_chacha::rand_core::RngCore;
 
 use crate::common::{
     ProgressBarTask, bits_to_bytes, generate_byte_labels, read_inputs,
-    write_output_translation_material, write_translation_material,
+    write_input_translation_material, write_output_translation_material,
 };
 
 /// Output from garbling with translation support.
@@ -103,7 +103,7 @@ pub async fn garble_with_translation(
     // Generate translation material
     let mut translation_material = Vec::new();
     for byte_position in 0..num_bytes {
-        let material = generate_translation_material(
+        let material = generate_input_translation_material(
             byte_position as u64,
             byte_labels_vec[byte_position],
             bit_labels_vec[byte_position],
@@ -113,7 +113,7 @@ pub async fn garble_with_translation(
 
     // Write translation material to file
     let translation_file = format!("{}.translation", output_file);
-    write_translation_material(&translation_file, &translation_material);
+    write_input_translation_material(&translation_file, &translation_material);
     println!("✓ Translation material written to {}", translation_file);
 
     // Flatten bit labels for garbling
