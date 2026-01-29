@@ -1,3 +1,5 @@
+use crate::eval_translate::EvalTranslationConfig;
+use crate::garble::GarblingParams;
 use crate::{eval, eval_translate, exec, garble, garble_translate};
 use rand_chacha::ChaCha20Rng;
 
@@ -117,16 +119,19 @@ pub async fn test_end_to_end_translate(
 
     // Step 3: Evaluate the garbled circuit with translation
     println!("\n🔓 Step 3: Evaluating garbled circuit with translation...");
-    let eval_output = eval_translate::eval_with_translation(
+    let garbling_params = GarblingParams {
+        aes128_key: garble_output.aes128_key,
+        public_s: garble_output.public_s,
+    };
+    let eval_output = eval_translate::eval_with_translation(EvalTranslationConfig {
         circuit_file,
-        garbled_file,
-        &garble_output.translation_file,
-        &garble_output.output_translation_file,
+        ciphertext_file: garbled_file,
+        translation_file: &garble_output.translation_file,
+        output_translation_file: &garble_output.output_translation_file,
         input_file,
-        &garble_output.selected_byte_labels,
-        garble_output.aes128_key,
-        garble_output.public_s,
-    )
+        byte_labels: &garble_output.selected_byte_labels,
+        garbling_params: &garbling_params,
+    })
     .await;
 
     // Step 4: Verify correctness

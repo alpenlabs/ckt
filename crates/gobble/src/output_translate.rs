@@ -148,12 +148,12 @@ mod tests {
             output_labels.push(BitLabel::new([labels[i * 2], labels[i * 2 + 1]]));
         }
 
-        // Generate random 256-bit secrets
+        // Generate arbitrary 256-bit secrets
         let mut secrets = Vec::new();
         for i in 0..5 {
             let mut secret = [0u8; 32];
-            for j in 0..32 {
-                secret[j] = ((i * 32 + j) as u8).wrapping_mul(17);
+            for (j, byte) in secret.iter_mut().enumerate() {
+                *byte = ((i * 32 + j) as u8).wrapping_mul(17);
             }
             secrets.push(secret);
         }
