@@ -5,7 +5,7 @@
 //! circuit output evaluates to false.
 
 use crate::input_translate::BitLabel;
-use crate::types::Label;
+use crate::types::{Label, xor_bytes};
 
 /// 256-bit ciphertext for output translation (one per output bit).
 /// Contains: H(L_out,0) ⊕ secret
@@ -13,16 +13,6 @@ pub type OutputTranslationCiphertext = [u8; 32];
 
 /// Translation material for all circuit outputs.
 pub type OutputTranslationMaterial = Vec<OutputTranslationCiphertext>;
-
-/// XOR two 32-byte arrays.
-#[inline]
-fn xor_bytes_32(a: [u8; 32], b: [u8; 32]) -> [u8; 32] {
-    let mut result = [0u8; 32];
-    for i in 0..32 {
-        result[i] = a[i] ^ b[i];
-    }
-    result
-}
 
 /// Expands a 128-bit label to 256 bits (2× expansion) using Blake3 XOF.
 ///
@@ -88,7 +78,7 @@ pub fn generate_output_translation_material(
             // Hash the false label to 256 bits
             let hash = wide_hash_2x(false_label, i as u64);
             // XOR with secret to create ciphertext
-            xor_bytes_32(hash, *secret)
+            xor_bytes(hash, *secret)
         })
         .collect()
 }
@@ -136,7 +126,7 @@ pub fn translate_output(
             } else {
                 // Output is false, evaluator has L_out,0, can decrypt
                 let hash = wide_hash_2x(*label, i as u64);
-                Some(xor_bytes_32(hash, *ciphertext))
+                Some(xor_bytes(hash, *ciphertext))
             }
         })
         .collect()
