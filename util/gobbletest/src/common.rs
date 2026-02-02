@@ -10,7 +10,7 @@ use std::io::{BufReader, BufWriter, Read, Write};
 use std::time::Instant;
 
 /// Read input bits from a text file containing 0s and 1s
-pub fn read_inputs(input_file: &str, expected_num_inputs: usize) -> BitVec {
+pub(crate) fn read_inputs(input_file: &str, expected_num_inputs: usize) -> BitVec {
     let mut input_string = String::new();
     let file = File::open(input_file)
         .unwrap_or_else(|_| panic!("Failed to open input file: {}", input_file));
@@ -40,7 +40,7 @@ pub fn read_inputs(input_file: &str, expected_num_inputs: usize) -> BitVec {
 }
 
 /// Convert bits to bytes (LSB first within each byte)
-pub fn bits_to_bytes(bits: &BitVec, num_bytes: usize) -> Vec<u8> {
+pub(crate) fn bits_to_bytes(bits: &BitVec, num_bytes: usize) -> Vec<u8> {
     let mut bytes = vec![0u8; num_bytes];
     for (i, bit) in bits.iter().enumerate() {
         if *bit {
@@ -51,7 +51,7 @@ pub fn bits_to_bytes(bits: &BitVec, num_bytes: usize) -> Vec<u8> {
 }
 
 /// Generate random byte labels (256 labels per byte position)
-pub fn generate_byte_labels(num_bytes: usize, rng: &mut ChaCha20Rng) -> Vec<ByteLabel> {
+pub(crate) fn generate_byte_labels(num_bytes: usize, rng: &mut ChaCha20Rng) -> Vec<ByteLabel> {
     let mut byte_labels = Vec::with_capacity(num_bytes);
     for _ in 0..num_bytes {
         let mut labels = [Label::default(); 256];
@@ -66,7 +66,10 @@ pub fn generate_byte_labels(num_bytes: usize, rng: &mut ChaCha20Rng) -> Vec<Byte
 }
 
 /// Write translation material to a file
-pub fn write_input_translation_material(path: &str, materials: &[InputTranslationMaterial]) {
+pub(crate) fn write_input_translation_material(
+    path: &str,
+    materials: &[InputTranslationMaterial],
+) {
     let file = File::create(path).expect("Failed to create translation file");
     let mut writer = BufWriter::new(file);
 
@@ -85,7 +88,7 @@ pub fn write_input_translation_material(path: &str, materials: &[InputTranslatio
 }
 
 /// Read translation material from a file
-pub fn read_input_translation_material(
+pub(crate) fn read_input_translation_material(
     path: &str,
     num_bytes: usize,
 ) -> Vec<InputTranslationMaterial> {
@@ -111,7 +114,10 @@ pub fn read_input_translation_material(
 }
 
 /// Write output translation material to a file
-pub fn write_output_translation_material(path: &str, material: &OutputTranslationMaterial) {
+pub(crate) fn write_output_translation_material(
+    path: &str,
+    material: &OutputTranslationMaterial,
+) {
     let file = File::create(path).expect("Failed to create output translation file");
     let mut writer = BufWriter::new(file);
 
@@ -134,7 +140,7 @@ pub fn write_output_translation_material(path: &str, material: &OutputTranslatio
 }
 
 /// Read output translation material from a file
-pub fn read_output_translation_material(path: &str) -> OutputTranslationMaterial {
+pub(crate) fn read_output_translation_material(path: &str) -> OutputTranslationMaterial {
     let file = File::open(path).expect("Failed to open output translation file");
     let mut reader = BufReader::new(file);
 
@@ -159,18 +165,18 @@ pub fn read_output_translation_material(path: &str) -> OutputTranslationMaterial
 }
 
 /// Wrapper that adds progress bar reporting to a CircuitTask implementation.
-pub struct ProgressBarTask<T> {
+pub(crate) struct ProgressBarTask<T> {
     inner: T,
 }
 
 impl<T> ProgressBarTask<T> {
-    pub fn new(inner: T) -> Self {
+    pub(crate) fn new(inner: T) -> Self {
         Self { inner }
     }
 }
 
 /// State wrapper that tracks progress bar state alongside the inner task state.
-pub struct ProgressBarState<S> {
+pub(crate) struct ProgressBarState<S> {
     inner_state: S,
     progress_bar: ProgressBar,
     start: Instant,
