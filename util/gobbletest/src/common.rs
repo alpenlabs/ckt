@@ -66,10 +66,7 @@ pub(crate) fn generate_byte_labels(num_bytes: usize, rng: &mut ChaCha20Rng) -> V
 }
 
 /// Write translation material to a file
-pub(crate) fn write_input_translation_material(
-    path: &str,
-    materials: &[InputTranslationMaterial],
-) {
+pub(crate) fn write_input_translation_material(path: &str, materials: &[InputTranslationMaterial]) {
     let file = File::create(path).expect("Failed to create translation file");
     let mut writer = BufWriter::new(file);
 
@@ -114,10 +111,7 @@ pub(crate) fn read_input_translation_material(
 }
 
 /// Write output translation material to a file
-pub(crate) fn write_output_translation_material(
-    path: &str,
-    material: &OutputTranslationMaterial,
-) {
+pub(crate) fn write_output_translation_material(path: &str, material: &OutputTranslationMaterial) {
     let file = File::create(path).expect("Failed to create output translation file");
     let mut writer = BufWriter::new(file);
 
