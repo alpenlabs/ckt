@@ -1,4 +1,6 @@
 //! Benchmarks for gobble garbling and evaluation operations
+// This benchmark uses fixed, rather than variable inputs.
+//For some reason, the numbers obtain this way are more representative of the e2e timings.
 #![expect(missing_docs)]
 #![allow(unused_crate_dependencies)]
 
