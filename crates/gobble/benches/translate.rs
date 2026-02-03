@@ -1,4 +1,6 @@
 //! Benchmarks for translation operations
+// This benchmark uses fixed, rather than variable inputs.
+// For some reason, the numbers obtain this way are, on extrapolating, more representative of the e2e timings.
 #![expect(missing_docs)]
 #![allow(unused_crate_dependencies)]
 
