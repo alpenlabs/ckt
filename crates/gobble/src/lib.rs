@@ -33,8 +33,8 @@ pub use input_translate::{
 
 // Re-export output translation types and functions
 pub use output_translate::{
-    OutputTranslationCiphertext, OutputTranslationMaterial, generate_output_translation_material,
-    translate_output, wide_hash_2x,
+    OutputTranslationCiphertext, OutputTranslationError, OutputTranslationMaterial,
+    generate_output_translation_material, translate_output, wide_hash_2x,
 };
 
 use traits::{

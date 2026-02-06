@@ -6,6 +6,38 @@
 
 use crate::input_translate::BitLabel;
 use crate::types::{Label, xor_bytes};
+use thiserror::Error;
+
+/// Errors that can occur during output translation.
+#[derive(Debug, Error, PartialEq, Eq)]
+pub enum OutputTranslationError {
+    /// The number of output labels does not match the number of secrets.
+    #[error("output label count ({labels}) does not match secret count ({secrets})")]
+    LabelSecretMismatch {
+        /// Number of output labels provided.
+        labels: usize,
+        /// Number of secrets provided.
+        secrets: usize,
+    },
+
+    /// The number of output labels does not match the number of output values.
+    #[error("output label count ({labels}) does not match output value count ({values})")]
+    LabelValueMismatch {
+        /// Number of output labels provided.
+        labels: usize,
+        /// Number of output values provided.
+        values: usize,
+    },
+
+    /// The number of output labels does not match the number of ciphertexts.
+    #[error("output label count ({labels}) does not match ciphertext count ({ciphertexts})")]
+    LabelCiphertextMismatch {
+        /// Number of output labels provided.
+        labels: usize,
+        /// Number of ciphertexts provided.
+        ciphertexts: usize,
+    },
+}
 
 /// 256-bit ciphertext for output translation (one per output bit).
 /// Contains: H(L_out,0) ⊕ secret
@@ -57,18 +89,24 @@ pub fn wide_hash_2x(label: Label, index: u64) -> [u8; 32] {
 ///
 /// # Returns
 ///
-/// Vector of ciphertexts, one per output
+/// Vector of ciphertexts, one per output.
+///
+/// # Errors
+///
+/// Returns [`OutputTranslationError::LabelSecretMismatch`] if the number of output labels
+/// does not match the number of secrets.
 pub fn generate_output_translation_material(
     output_labels: &[BitLabel],
     secrets: &[[u8; 32]],
-) -> OutputTranslationMaterial {
-    assert_eq!(
-        output_labels.len(),
-        secrets.len(),
-        "Number of output labels must match number of secrets"
-    );
+) -> Result<OutputTranslationMaterial, OutputTranslationError> {
+    if output_labels.len() != secrets.len() {
+        return Err(OutputTranslationError::LabelSecretMismatch {
+            labels: output_labels.len(),
+            secrets: secrets.len(),
+        });
+    }
 
-    output_labels
+    Ok(output_labels
         .iter()
         .zip(secrets.iter())
         .enumerate()
@@ -80,7 +118,7 @@ pub fn generate_output_translation_material(
             // XOR with secret to create ciphertext
             xor_bytes(hash, *secret)
         })
-        .collect()
+        .collect())
 }
 
 /// Translates output labels to recover secrets for outputs that evaluated to false.
@@ -97,24 +135,32 @@ pub fn generate_output_translation_material(
 ///
 /// # Returns
 ///
-/// Vector of Option<[u8; 32]>: Some(secret) for false outputs, None for true outputs
+/// Vector of Option<[u8; 32]>: Some(secret) for false outputs, None for true outputs.
+///
+/// # Errors
+///
+/// Returns an error if the input slice lengths do not match:
+/// - [`OutputTranslationError::LabelValueMismatch`] if output labels and values have different lengths
+/// - [`OutputTranslationError::LabelCiphertextMismatch`] if output labels and ciphertexts have different lengths
 pub fn translate_output(
     output_labels: &[Label],
     output_values: &[bool],
     output_translation_material: &OutputTranslationMaterial,
-) -> Vec<Option<[u8; 32]>> {
-    assert_eq!(
-        output_labels.len(),
-        output_values.len(),
-        "Number of output labels must match number of output values"
-    );
-    assert_eq!(
-        output_labels.len(),
-        output_translation_material.len(),
-        "Number of output labels must match number of ciphertexts"
-    );
+) -> Result<Vec<Option<[u8; 32]>>, OutputTranslationError> {
+    if output_labels.len() != output_values.len() {
+        return Err(OutputTranslationError::LabelValueMismatch {
+            labels: output_labels.len(),
+            values: output_values.len(),
+        });
+    }
+    if output_labels.len() != output_translation_material.len() {
+        return Err(OutputTranslationError::LabelCiphertextMismatch {
+            labels: output_labels.len(),
+            ciphertexts: output_translation_material.len(),
+        });
+    }
 
-    output_labels
+    Ok(output_labels
         .iter()
         .zip(output_values.iter())
         .zip(output_translation_material.iter())
@@ -129,7 +175,7 @@ pub fn translate_output(
                 Some(xor_bytes(hash, *ciphertext))
             }
         })
-        .collect()
+        .collect())
 }
 
 #[cfg(test)]
@@ -159,7 +205,7 @@ mod tests {
         }
 
         // Generate output translation material
-        let material = generate_output_translation_material(&output_labels, &secrets);
+        let material = generate_output_translation_material(&output_labels, &secrets).unwrap();
         assert_eq!(material.len(), 5);
 
         // Test: for false outputs, we should recover the secret
@@ -167,7 +213,7 @@ mod tests {
         let eval_labels: Vec<Label> = output_labels.iter().map(|bl| bl.get_label(false)).collect();
         let output_values = vec![false, false, false, false, false];
 
-        let recovered = translate_output(&eval_labels, &output_values, &material);
+        let recovered = translate_output(&eval_labels, &output_values, &material).unwrap();
 
         for i in 0..5 {
             assert!(recovered[i].is_some(), "Output {} should decrypt", i);
@@ -184,13 +230,13 @@ mod tests {
 
         let secret = [0xABu8; 32]; // Known secret
 
-        let material = generate_output_translation_material(&[output_label], &[secret]);
+        let material = generate_output_translation_material(&[output_label], &[secret]).unwrap();
 
         // Evaluator has false label
         let eval_labels = vec![output_label.get_label(false)];
         let output_values = vec![false];
 
-        let recovered = translate_output(&eval_labels, &output_values, &material);
+        let recovered = translate_output(&eval_labels, &output_values, &material).unwrap();
 
         assert!(recovered[0].is_some());
         assert_eq!(recovered[0].unwrap(), secret);
@@ -205,13 +251,13 @@ mod tests {
 
         let secret = [0xCDu8; 32];
 
-        let material = generate_output_translation_material(&[output_label], &[secret]);
+        let material = generate_output_translation_material(&[output_label], &[secret]).unwrap();
 
         // Evaluator has TRUE label (cannot decrypt)
         let eval_labels = vec![output_label.get_label(true)];
         let output_values = vec![true];
 
-        let recovered = translate_output(&eval_labels, &output_values, &material);
+        let recovered = translate_output(&eval_labels, &output_values, &material).unwrap();
 
         assert!(recovered[0].is_none(), "True output should return None");
     }
@@ -235,7 +281,7 @@ mod tests {
             })
             .collect();
 
-        let material = generate_output_translation_material(&output_labels, &secrets);
+        let material = generate_output_translation_material(&output_labels, &secrets).unwrap();
 
         // Outputs: false, true, false, true
         let output_values = vec![false, true, false, true];
@@ -245,7 +291,7 @@ mod tests {
             .map(|(bl, &val)| bl.get_label(val))
             .collect();
 
-        let recovered = translate_output(&eval_labels, &output_values, &material);
+        let recovered = translate_output(&eval_labels, &output_values, &material).unwrap();
 
         // Output 0: false -> should decrypt
         assert!(recovered[0].is_some());

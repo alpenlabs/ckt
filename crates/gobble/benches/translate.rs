@@ -123,7 +123,8 @@ fn bench_generate_output_translation_material(c: &mut Criterion) {
             let result = generate_output_translation_material(
                 black_box(&output_labels),
                 black_box(&secrets),
-            );
+            )
+            .unwrap();
             black_box(result)
         });
     });
@@ -147,7 +148,7 @@ fn bench_translate_output(c: &mut Criterion) {
             })
             .collect();
 
-        let material = generate_output_translation_material(&output_labels, &secrets);
+        let material = generate_output_translation_material(&output_labels, &secrets).unwrap();
 
         // Simulate evaluator having labels (mix of true/false)
         let output_values = vec![
@@ -164,7 +165,8 @@ fn bench_translate_output(c: &mut Criterion) {
                 black_box(&eval_labels),
                 black_box(&output_values),
                 black_box(&material),
-            );
+            )
+            .unwrap();
             black_box(result)
         });
     });

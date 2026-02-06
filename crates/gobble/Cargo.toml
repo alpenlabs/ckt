@@ -10,6 +10,7 @@ repository.workspace = true
 bitvec.workspace = true
 blake3.workspace = true
 rand_chacha.workspace = true
+thiserror.workspace = true
 
 [dev-dependencies]
 aes.workspace = true
