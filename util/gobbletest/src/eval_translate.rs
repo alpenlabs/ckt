@@ -142,7 +142,8 @@ pub async fn eval_with_translation(config: EvalTranslationConfig<'_>) -> EvalTra
         &output_labels_typed,
         &output.output_values,
         &output_translation_material,
-    );
+    )
+    .expect("output translation inputs must have matching lengths");
 
     EvalTranslationOutput {
         output_labels: output.output_labels,

@@ -200,7 +200,8 @@ pub async fn garble_with_translation(
 
     // Generate output translation material
     let output_translation_material =
-        generate_output_translation_material(&output_bit_labels, &secrets);
+        generate_output_translation_material(&output_bit_labels, &secrets)
+            .expect("output label count must match secret count");
 
     // Write output translation material to file
     let output_translation_file = format!("{}.output_translation", output_file);
