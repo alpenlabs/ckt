@@ -34,6 +34,8 @@ fn bench_garble_xor_gate(c: &mut Criterion) {
         let primary_input_false_labels = vec![];
         let aes128_key = [0x2Bu8; 16]; // Arbitrary key for benchmarking
         let public_s = [0xDEu8; 16]; // Arbitrary S for benchmarking
+        let constant_zero_label = [0x09u8; 16];
+        let constant_one_label = [0x08u8; 16];
 
         let config = GarblingInstanceConfig {
             scratch_space: 10,
@@ -41,6 +43,8 @@ fn bench_garble_xor_gate(c: &mut Criterion) {
             primary_input_false_labels: &primary_input_false_labels,
             aes128_key,
             public_s,
+            constant_zero_label,
+            constant_one_label,
         };
 
         let engine = Engine::new();
@@ -61,6 +65,8 @@ fn bench_garble_and_gate(c: &mut Criterion) {
         let primary_input_false_labels = vec![];
         let aes128_key = [0x2Bu8; 16]; // Arbitrary key for benchmarking
         let public_s = [0xDEu8; 16]; // Arbitrary S for benchmarking
+        let constant_zero_label = [0x09u8; 16];
+        let constant_one_label = [0x08u8; 16];
 
         let config = GarblingInstanceConfig {
             scratch_space: 10,
@@ -68,6 +74,8 @@ fn bench_garble_and_gate(c: &mut Criterion) {
             primary_input_false_labels: &primary_input_false_labels,
             aes128_key,
             public_s,
+            constant_zero_label,
+            constant_one_label,
         };
 
         let engine = Engine::new();
@@ -88,6 +96,8 @@ fn bench_garble_mixed_gates(c: &mut Criterion) {
         let primary_input_false_labels = vec![];
         let aes128_key = [0x2Bu8; 16]; // Arbitrary key for benchmarking
         let public_s = [0xDEu8; 16]; // Arbitrary S for benchmarking
+        let constant_zero_label = [0x09u8; 16];
+        let constant_one_label = [0x08u8; 16];
 
         let config = GarblingInstanceConfig {
             scratch_space: 200,
@@ -95,6 +105,8 @@ fn bench_garble_mixed_gates(c: &mut Criterion) {
             primary_input_false_labels: &primary_input_false_labels,
             aes128_key,
             public_s,
+            constant_zero_label,
+            constant_one_label,
         };
 
         let engine = Engine::new();
@@ -129,6 +141,8 @@ fn bench_eval_xor_gate(c: &mut Criterion) {
         let selected_primary_input_values = BitVec::repeat(false, 0);
         let aes128_key = [0x2Bu8; 16]; // Arbitrary key for benchmarking
         let public_s = [0xDEu8; 16]; // Arbitrary S for benchmarking
+        let constant_zero_label = [0x09u8; 16];
+        let constant_one_label = [0x08u8; 16];
 
         let config = EvaluationInstanceConfig {
             scratch_space: 10,
@@ -136,6 +150,8 @@ fn bench_eval_xor_gate(c: &mut Criterion) {
             selected_primary_input_values: &selected_primary_input_values,
             aes128_key,
             public_s,
+            constant_zero_label,
+            constant_one_label,
         };
 
         let engine = Engine::new();
@@ -156,6 +172,8 @@ fn bench_eval_and_gate(c: &mut Criterion) {
         let selected_primary_input_values = BitVec::repeat(false, 0);
         let aes128_key = [0x2Bu8; 16]; // Arbitrary key for benchmarking
         let public_s = [0xDEu8; 16]; // Arbitrary S for benchmarking
+        let constant_zero_label = [0x09u8; 16];
+        let constant_one_label = [0x08u8; 16];
 
         let config = EvaluationInstanceConfig {
             scratch_space: 10,
@@ -163,6 +181,8 @@ fn bench_eval_and_gate(c: &mut Criterion) {
             selected_primary_input_values: &selected_primary_input_values,
             aes128_key,
             public_s,
+            constant_zero_label,
+            constant_one_label,
         };
 
         let engine = Engine::new();
@@ -192,6 +212,8 @@ fn bench_eval_mixed_gates(c: &mut Criterion) {
         let selected_primary_input_values = BitVec::repeat(false, 0);
         let aes128_key = [0x2Bu8; 16]; // Arbitrary key for benchmarking
         let public_s = [0xDEu8; 16]; // Arbitrary S for benchmarking
+        let constant_zero_label = [0x09u8; 16];
+        let constant_one_label = [0x08u8; 16];
 
         let config = EvaluationInstanceConfig {
             scratch_space: 200,
@@ -199,6 +221,8 @@ fn bench_eval_mixed_gates(c: &mut Criterion) {
             selected_primary_input_values: &selected_primary_input_values,
             aes128_key,
             public_s,
+            constant_zero_label,
+            constant_one_label,
         };
 
         let engine = Engine::new();

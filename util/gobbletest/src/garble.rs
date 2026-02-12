@@ -17,6 +17,10 @@ pub struct GarblingParams {
     pub aes128_key: [u8; 16],
     /// Public S value used in the CCRND hash function.
     pub public_s: [u8; 16],
+    /// Label for constant wire 0 (always false).
+    pub constant_zero_label: [u8; 16],
+    /// Label for constant wire 1 (always true).
+    pub constant_one_label: [u8; 16],
 }
 
 pub async fn garble(
@@ -54,17 +58,28 @@ pub async fn garble(
     let mut public_s = [0u8; 16];
     rng.fill_bytes(&mut public_s);
 
+    // Generate random constant wire labels
+    let mut constant_zero_label = [0u8; 16];
+    rng.fill_bytes(&mut constant_zero_label);
+
+    let mut constant_one_label = [0u8; 16];
+    rng.fill_bytes(&mut constant_one_label);
+
     let config = GarblingInstanceConfig {
         scratch_space: header.scratch_space as u32,
         delta,
         primary_input_false_labels: &labels,
         aes128_key,
         public_s,
+        constant_zero_label,
+        constant_one_label,
     };
 
     let garbling_params = GarblingParams {
         aes128_key,
         public_s,
+        constant_zero_label,
+        constant_one_label,
     };
 
     let task_info = GarbleTask::new(config);
@@ -123,12 +138,21 @@ pub async fn garble_discard(circuit_file: &str, rng: &mut ChaCha20Rng) -> Vec<[u
     let mut public_s = [0u8; 16];
     rng.fill_bytes(&mut public_s);
 
+    // Generate random constant wire labels
+    let mut constant_zero_label = [0u8; 16];
+    rng.fill_bytes(&mut constant_zero_label);
+
+    let mut constant_one_label = [0u8; 16];
+    rng.fill_bytes(&mut constant_one_label);
+
     let config = GarblingInstanceConfig {
         scratch_space: header.scratch_space as u32,
         delta,
         primary_input_false_labels: &labels,
         aes128_key,
         public_s,
+        constant_zero_label,
+        constant_one_label,
     };
 
     let task_info = GarbleTask::new(config);

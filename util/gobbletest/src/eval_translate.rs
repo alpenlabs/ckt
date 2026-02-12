@@ -109,6 +109,8 @@ pub async fn eval_with_translation(config: EvalTranslationConfig<'_>) -> EvalTra
         selected_primary_input_values: &input_values_bits,
         aes128_key: config.garbling_params.aes128_key,
         public_s: config.garbling_params.public_s,
+        constant_zero_label: config.garbling_params.constant_zero_label,
+        constant_one_label: config.garbling_params.constant_one_label,
     };
 
     let task_info = EvalTask::new(eval_config);

@@ -91,6 +91,21 @@ pub struct GarblingInstanceConfig<'labels> {
     /// This value is chosen randomly by the garbler for each instance and must be
     /// communicated to the evaluator along with the garbled circuit.
     pub public_s: [u8; 16],
+
+    /// Label for constant wire 0 (always false).
+    ///
+    /// This is chosen randomly by the garbler for each instance and must be
+    /// communicated to the evaluator along with the garbled circuit.
+    pub constant_zero_label: [u8; 16],
+
+    /// Label for constant wire 1 (always true).
+    ///
+    /// This is the true label for wire 1. The garbler internally stores
+    /// `constant_one_label XOR delta` to maintain FreeXOR invariants.
+    ///
+    /// This is chosen randomly by the garbler for each instance and must be
+    /// communicated to the evaluator along with the garbled circuit.
+    pub constant_one_label: [u8; 16],
 }
 
 /// Configuration for executing a boolean circuit
@@ -126,6 +141,16 @@ pub struct EvaluationInstanceConfig<'labels> {
     ///
     /// This must match the value used during garbling.
     pub public_s: [u8; 16],
+
+    /// Label for constant wire 0 (always false).
+    ///
+    /// This must match the value used during garbling.
+    pub constant_zero_label: [u8; 16],
+
+    /// Label for constant wire 1 (always true).
+    ///
+    /// This must match the value used during garbling.
+    pub constant_one_label: [u8; 16],
 }
 
 /// GobbleEngine is the primary interface of `gobble`. It
