@@ -122,6 +122,8 @@ pub async fn test_end_to_end_translate(
     let garbling_params = GarblingParams {
         aes128_key: garble_output.aes128_key,
         public_s: garble_output.public_s,
+        constant_zero_label: garble_output.constant_zero_label,
+        constant_one_label: garble_output.constant_one_label,
     };
     let eval_output = eval_translate::eval_with_translation(EvalTranslationConfig {
         circuit_file,

@@ -12,29 +12,12 @@ pub(crate) type Inner = std::arch::aarch64::uint8x16_t;
 #[cfg(target_arch = "x86_64")]
 pub(crate) type Inner = std::arch::x86_64::__m128i;
 
-// Constants for Label::zero() and Label::one()
-// These are currently picked arbitrarily.
-const LABEL_ZERO_BYTES: [u8; 16] = [98u8; 16];
-const LABEL_ONE_BYTES: [u8; 16] = [25u8; 16];
-
 /// A 128-bit label used in garbled circuits.
 ///
 /// Labels are the fundamental unit of garbled circuit computation.
 /// Each wire has two labels: one for the value 0 and one for the value 1.
 #[derive(Debug, Clone, Copy)]
 pub struct Label(pub Inner);
-
-impl Label {
-    /// Returns the public constant label for zero.
-    pub fn zero() -> Self {
-        Label::from(LABEL_ZERO_BYTES)
-    }
-
-    /// Returns the public constant label for one.
-    pub fn one() -> Self {
-        Label::from(LABEL_ONE_BYTES)
-    }
-}
 
 impl Default for Label {
     fn default() -> Self {

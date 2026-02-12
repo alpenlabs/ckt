@@ -26,6 +26,8 @@ pub async fn eval(
         selected_primary_input_values: input_values_bits,
         aes128_key: garbling_params.aes128_key,
         public_s: garbling_params.public_s,
+        constant_zero_label: garbling_params.constant_zero_label,
+        constant_one_label: garbling_params.constant_one_label,
     };
 
     let task_info = EvalTask::new(config);

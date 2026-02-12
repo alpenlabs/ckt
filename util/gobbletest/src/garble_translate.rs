@@ -34,6 +34,10 @@ pub struct GarbleTranslationOutput {
     pub aes128_key: [u8; 16],
     /// Public S value used in CCRND hash.
     pub public_s: [u8; 16],
+    /// Label for constant wire 0 (always false).
+    pub constant_zero_label: [u8; 16],
+    /// Label for constant wire 1 (always true).
+    pub constant_one_label: [u8; 16],
 }
 
 /// Garbling with translation support.
@@ -151,6 +155,12 @@ pub async fn garble_with_translation(
     let mut public_s = [0u8; 16];
     rng.fill_bytes(&mut public_s);
 
+    // Generate random constant wire labels
+    let mut constant_zero_label = [0u8; 16];
+    rng.fill_bytes(&mut constant_zero_label);
+    let mut constant_one_label = [0u8; 16];
+    rng.fill_bytes(&mut constant_one_label);
+
     // Run standard garbling
     let config = GarblingInstanceConfig {
         scratch_space: header.scratch_space as u32,
@@ -158,6 +168,8 @@ pub async fn garble_with_translation(
         primary_input_false_labels: &primary_input_false_labels,
         aes128_key,
         public_s,
+        constant_zero_label,
+        constant_one_label,
     };
 
     let task_info = GarbleTask::new(config);
@@ -228,5 +240,7 @@ pub async fn garble_with_translation(
         secrets,
         aes128_key,
         public_s,
+        constant_zero_label,
+        constant_one_label,
     }
 }

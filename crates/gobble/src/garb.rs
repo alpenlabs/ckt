@@ -39,9 +39,15 @@ impl GarblingInstanceImpl {
         let mut working_space = vec![empty_label; config.scratch_space as usize];
 
         // Wire 0 is constant false label, wire 1 is constant true label
-        working_space[0] = Label::zero();
-        working_space[1] =
-            Label(unsafe { xor128(Label::one().0, transmute::<[u8; 16], Inner>(config.delta)) });
+        // The garbler stores the false label for each wire internally (FreeXOR invariant)
+        // For wire 1, false_label = constant_one_label XOR delta (so true_label = constant_one_label)
+        working_space[0] = Label::from(config.constant_zero_label);
+        working_space[1] = Label(unsafe {
+            xor128(
+                transmute::<[u8; 16], Inner>(config.constant_one_label),
+                transmute::<[u8; 16], Inner>(config.delta),
+            )
+        });
 
         // Set primary input labels starting at position 2
         for (label, i) in config.primary_input_false_labels.iter().zip(2..) {
