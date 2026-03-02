@@ -50,7 +50,7 @@ async fn round_trip_small() {
     // Accumulate all gates back
     let mut acc: Vec<GateV5a> = Vec::new();
     while let Some(v) = r.next_block().await.unwrap() {
-        acc.extend(v.into_iter());
+        acc.extend(v);
     }
 
     assert_eq!(acc.len(), gates.len());
