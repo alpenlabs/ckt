@@ -48,8 +48,7 @@ pub async fn prealloc(input: &str, output: &str) {
                 block.out[i],
                 WireEntry {
                     slab_idx: out_wire_id,
-                    // safe because max creds is like 45k
-                    credits_remaining: block.credits[i] as u16,
+                    credits_remaining: block.credits[i],
                 },
             );
             writer
@@ -93,7 +92,7 @@ type AbsoluteWireId = u64;
 #[derive(Debug)]
 struct WireEntry {
     slab_idx: usize,
-    credits_remaining: u16,
+    credits_remaining: u32,
 }
 
 type WireMap = HashMap<AbsoluteWireId, WireEntry>;
