@@ -76,7 +76,7 @@ pub fn xor_bytes<const N: usize>(a: [u8; N], b: [u8; N]) -> [u8; N] {
 /// This is useful for deterministic label generation in tests.
 pub fn expand_seed(seed: [u8; 32], num_inputs: u32) -> (Vec<Label>, Label) {
     use rand_chacha::ChaCha20Rng;
-    use rand_chacha::rand_core::{RngCore, SeedableRng};
+    use rand_chacha::rand_core::{Rng, SeedableRng};
 
     let mut rng = ChaCha20Rng::from_seed(seed);
     let mut delta_bytes = [0u8; 16];
