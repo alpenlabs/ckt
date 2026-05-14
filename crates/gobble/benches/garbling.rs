@@ -1,9 +1,9 @@
 //! Benchmarks for gobble garbling and evaluation operations
 // This benchmark uses fixed, rather than variable inputs.
 // For some reason, the numbers obtain this way are more representative of the e2e timings.
-#![expect(missing_docs)]
 #![allow(unused_crate_dependencies)]
 
+use std::hint::black_box;
 use std::mem::transmute;
 
 #[cfg(target_arch = "x86_64")]
@@ -19,7 +19,7 @@ use ckt_gobble::{
         GobbleEngine,
     },
 };
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 
 #[cfg(target_arch = "aarch64")]
 use ckt_gobble::aarch64::{Ciphertext, get_permute_bit, index_to_tweak, xor128};
