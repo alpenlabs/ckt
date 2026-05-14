@@ -143,7 +143,7 @@ pub unsafe fn ccrnd_with_round_keys(
 mod tests {
     use super::*;
     use aes::Aes128;
-    use aes::cipher::{BlockEncrypt, KeyInit};
+    use aes::cipher::{BlockCipherEncrypt, KeyInit};
     use rand::RngCore;
 
     #[test]
