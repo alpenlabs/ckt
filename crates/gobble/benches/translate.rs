@@ -1,8 +1,9 @@
 //! Benchmarks for translation operations
 // This benchmark uses fixed, rather than variable inputs.
 // For some reason, the numbers obtain this way are, on extrapolating, more representative of the e2e timings.
-#![expect(missing_docs)]
 #![allow(unused_crate_dependencies)]
+
+use std::hint::black_box;
 
 use ckt_gobble::{
     BitLabel,
@@ -18,7 +19,7 @@ use ckt_gobble::{
     wide_hash_2x,
     wide_hash_8x,
 };
-use criterion::{Criterion, black_box, criterion_group, criterion_main};
+use criterion::{Criterion, criterion_group, criterion_main};
 
 fn bench_wide_hash_8x(c: &mut Criterion) {
     c.bench_function("wide_hash_8x", |b| {
