@@ -8,7 +8,7 @@ use ckt_gobble::{
 };
 use ckt_runner_exec::{CircuitReader, GarbleTask, ReaderV5cWrapper, process_task};
 use rand_chacha::ChaCha20Rng;
-use rand_chacha::rand_core::RngCore;
+use rand_chacha::rand_core::Rng;
 
 use crate::common::{
     ProgressBarTask, bits_to_bytes, generate_byte_labels, read_inputs,

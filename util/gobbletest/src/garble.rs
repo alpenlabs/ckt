@@ -6,7 +6,7 @@ use ckt_fmtv5_types::v5::c::*;
 use ckt_gobble::traits::{GarblingInstance, GarblingInstanceConfig};
 use ckt_runner_exec::{CircuitReader, GarbleTask, HashWriter, ReaderV5cWrapper, process_task};
 use rand_chacha::ChaCha20Rng;
-use rand_chacha::rand_core::RngCore;
+use rand_chacha::rand_core::Rng;
 
 use crate::common::{ProgressBarTask, read_inputs};
 

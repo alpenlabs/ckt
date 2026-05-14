@@ -4,7 +4,7 @@ use ckt_gobble::{ByteLabel, InputTranslationMaterial, Label, OutputTranslationMa
 use ckt_runner_types::{CircuitTask, GateBlock};
 use indicatif::{ProgressBar, ProgressStyle};
 use rand_chacha::ChaCha20Rng;
-use rand_chacha::rand_core::RngCore;
+use rand_chacha::rand_core::Rng;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Read, Write};
 use std::time::Instant;
