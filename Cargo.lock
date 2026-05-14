@@ -489,9 +489,9 @@ dependencies = [
 
 [[package]]
 name = "cynosure"
-version = "0.3.0"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e288cc1b43de778225a146644ec52af11aafc1a0490dbe4b4108ef9a46002416"
+checksum = "4b87575c1637454fd3c7de54730c5780c9605c87c30f174e03ec3d94e634a36b"
 dependencies = [
  "futures",
  "monoio",
