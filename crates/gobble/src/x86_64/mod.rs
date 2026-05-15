@@ -149,7 +149,7 @@ mod tests {
     use super::*;
     use aes::Aes128;
     use aes::cipher::{BlockCipherEncrypt, KeyInit};
-    use rand::RngCore;
+    use rand::Rng;
 
     #[test]
     fn test_aes_encrypt_with_round_keys() {
