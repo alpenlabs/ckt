@@ -48,7 +48,7 @@ ckt-lvl = { path = "crates/lvl" }
 ckt-runner-exec = { path = "crates/runner-exec" }
 ckt-runner-types = { path = "crates/runner-types" }
 
-aes = "0.9.0"
+aes = "0.9.1"
 ahash = "0.8.12"
 anyhow = "1.0"
 assert_cmd = "2.0"
