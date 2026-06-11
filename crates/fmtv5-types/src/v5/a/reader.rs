@@ -483,7 +483,9 @@ pub async fn verify_v5a_checksum(path: impl AsRef<Path>) -> Result<bool> {
         .map_err(|_| Error::new(ErrorKind::InvalidData, "header size mismatch"))?;
     let hdr = parse_header(&header)?;
     let file_checksum = &header[40..72];
-    let outputs_len = (hdr.num_outputs as usize) * 5;
+    let outputs_len = (hdr.num_outputs as usize)
+        .checked_mul(5)
+        .ok_or_else(|| Error::new(ErrorKind::InvalidData, "outputs length overflow"))?;
 
     let mut hasher = Hasher::new();
 
