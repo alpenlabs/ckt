@@ -82,7 +82,15 @@ impl ReaderV5c {
         let outputs_padded_size = padded_size(outputs_bytes_len);
         let gate_region_start = ALIGNMENT as u64 + outputs_padded_size as u64;
         let gate_region_end = file_size;
-        let gate_region_bytes = gate_region_end - gate_region_start;
+        let gate_region_bytes =
+            gate_region_end
+                .checked_sub(gate_region_start)
+                .ok_or_else(|| {
+                    Error::new(
+                        ErrorKind::InvalidData,
+                        "file truncated before outputs boundary",
+                    )
+                })?;
 
         // Validate that gate region is multiple of BLOCK_SIZE
         if !gate_region_bytes.is_multiple_of(BLOCK_SIZE as u64) {
