@@ -1,6 +1,9 @@
 //! Garbling task implementation.
 
-use std::io::{Error, ErrorKind, Write};
+use std::{
+    fmt,
+    io::{Error, ErrorKind, Write},
+};
 
 use bitvec::vec::BitVec;
 use ckt_fmtv5_types::GateType;
@@ -19,7 +22,6 @@ pub struct GarbleState<W> {
 }
 
 /// Output from the garbling task.
-#[derive(Debug)]
 pub struct GarbleTaskOutput {
     /// The garbling instance, for extracting labels after garbling.
     pub instance: PlatformGarblingInstance,
@@ -27,6 +29,12 @@ pub struct GarbleTaskOutput {
     pub garbler_output_labels: Vec<[u8; 16]>,
     /// The output values (all false, used for label selection).
     pub output_values: BitVec,
+}
+
+impl fmt::Debug for GarbleTaskOutput {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("GarbleTaskOutput(<redacted>)")
+    }
 }
 
 /// Task for garbling a circuit.

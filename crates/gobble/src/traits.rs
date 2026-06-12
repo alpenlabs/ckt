@@ -1,5 +1,7 @@
 //! Traits for genericising architecture specific [`GobbleEngine`]s
 
+use std::fmt;
+
 use bitvec::vec::BitVec;
 
 /// A generic trait for describing an instance used for garbling a boolean circuit. The garbling instance stores labels of active wires during garbling.
@@ -68,7 +70,7 @@ pub trait ExecutionInstance {
 }
 
 /// Configuration for garbling a boolean circuit
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone)]
 pub struct GarblingInstanceConfig<'labels> {
     /// Max live wires used at any point in the circuit. See ckt v5 architecture
     /// for additional details.
@@ -106,6 +108,12 @@ pub struct GarblingInstanceConfig<'labels> {
     /// This is chosen randomly by the garbler for each instance and must be
     /// communicated to the evaluator along with the garbled circuit.
     pub constant_one_label: [u8; 16],
+}
+
+impl<'labels> fmt::Debug for GarblingInstanceConfig<'labels> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("GarblingInstanceConfig(<redacted>)")
+    }
 }
 
 /// Configuration for executing a boolean circuit

@@ -3,7 +3,7 @@
 //! Uses conditional compilation to select the appropriate intrinsics
 //! while sharing all the garbling logic.
 
-use std::mem::transmute;
+use std::{fmt, mem::transmute};
 
 use bitvec::vec::BitVec;
 
@@ -18,7 +18,6 @@ use crate::aarch64::{ccrnd_with_round_keys, expand_aes128_key, index_to_tweak, x
 use crate::x86_64::{ccrnd_with_round_keys, expand_aes128_key, index_to_tweak, xor128};
 
 /// Garbling instance that produces a garbled circuit.
-#[derive(Debug)]
 pub struct GarblingInstanceImpl {
     gate_ctr: u64,
     and_ctr: u64,
@@ -26,6 +25,12 @@ pub struct GarblingInstanceImpl {
     delta: Inner,
     round_keys: [Inner; 11],
     public_s: Inner,
+}
+
+impl fmt::Debug for GarblingInstanceImpl {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("GarblingInstanceImpl(<redacted>)")
+    }
 }
 
 impl GarblingInstanceImpl {
