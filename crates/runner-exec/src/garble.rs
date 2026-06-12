@@ -1,6 +1,6 @@
 //! Garbling task implementation.
 
-use std::io::Write;
+use std::io::{Error, ErrorKind, Write};
 
 use bitvec::vec::BitVec;
 use ckt_fmtv5_types::GateType;
@@ -53,9 +53,27 @@ impl<'c, W: Write> CircuitTask for GarbleTask<'c, W> {
 
     fn initialize(
         &self,
-        _header: &HeaderV5c,
+        header: &HeaderV5c,
         writer: Self::InitInput,
     ) -> Result<Self::State, Self::Error> {
+        // Check input count consistency
+        let expected_primary_inputs = usize::try_from(header.primary_inputs).map_err(|_| {
+            Error::new(
+                ErrorKind::InvalidInput,
+                "circuit primary input count exceeds supported size",
+            )
+        })?;
+        if self.garb_config.primary_input_false_labels.len() != expected_primary_inputs {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!(
+                    "expected {} primary input false labels, got {}",
+                    header.primary_inputs,
+                    self.garb_config.primary_input_false_labels.len()
+                ),
+            ));
+        }
+
         // Create the engine.
         let engine = Engine::new();
         let instance = engine.new_garbling_instance(self.garb_config);
