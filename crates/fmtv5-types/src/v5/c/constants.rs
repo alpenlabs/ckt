@@ -15,7 +15,7 @@ pub const BLOCK_PADDING: usize = BLOCK_SIZE - GATES_SIZE - TYPES_SIZE; // 1 byte
 pub const GATE_SIZE: usize = 12;
 
 /// Header size
-pub const HEADER_SIZE: usize = 88;
+pub const HEADER_SIZE: usize = 120;
 
 /// Output entry size (u32 LE)
 pub const OUTPUT_ENTRY_SIZE: usize = 4;

@@ -10,9 +10,10 @@ use crate::v5::c::*;
 #[monoio::test]
 async fn test_round_trip_small_circuit() {
     let path = "/tmp/test_v5c_round_trip_small.ckt";
+    let memo = [1u8; 32];
 
     // Write a small circuit (4 gates)
-    let mut writer = WriterV5c::new(path, 2, 1).await.unwrap();
+    let mut writer = WriterV5c::new(path, 2, 1, memo).await.unwrap();
     writer
         .write_gate(GateV5c::new(2, 3, 4), GateType::XOR)
         .await
@@ -38,6 +39,7 @@ async fn test_round_trip_small_circuit() {
     // Read back
     let mut reader = ReaderV5c::open(path).unwrap();
     assert_eq!(reader.header().total_gates(), 4);
+    assert_eq!(reader.header().memo, memo);
     assert_eq!(reader.outputs(), &[7]);
 
     // Get blocks (should be first buffer with 1 partial block)
@@ -78,10 +80,11 @@ async fn test_round_trip_small_circuit() {
 #[monoio::test]
 async fn test_round_trip_multiple_blocks() {
     let path = "/tmp/test_v5c_round_trip_multi.ckt";
+    let memo = [1u8; 32];
 
     // Write enough gates for 2 full blocks + partial
     let total_gates = GATES_PER_BLOCK * 2 + 1000;
-    let mut writer = WriterV5c::new(path, 100, 10).await.unwrap();
+    let mut writer = WriterV5c::new(path, 100, 10, memo).await.unwrap();
 
     for i in 0..total_gates {
         let gate = GateV5c::new(100, 101, 102 + i as u32);
@@ -105,6 +108,7 @@ async fn test_round_trip_multiple_blocks() {
     // Read back
     let mut reader = ReaderV5c::open(path).unwrap();
     assert_eq!(reader.header().total_gates(), total_gates as u64);
+    assert_eq!(reader.header().memo, memo);
     assert_eq!(reader.outputs(), &outputs[..]);
 
     // 2 full blocks + 1 partial = 3 blocks
@@ -130,7 +134,7 @@ async fn test_arc_sharing_pattern() {
     let path = "/tmp/test_v5c_arc_sharing.ckt";
 
     // Write a circuit with exactly GATES_PER_BLOCK gates (1 full block)
-    let mut writer = WriterV5c::new(path, 10, 1).await.unwrap();
+    let mut writer = WriterV5c::new(path, 10, 1, [0u8; 32]).await.unwrap();
 
     for i in 0..GATES_PER_BLOCK {
         let gate = GateV5c::new(10, 11, 100 + i as u32);
@@ -164,12 +168,15 @@ async fn test_arc_sharing_pattern() {
 #[monoio::test]
 async fn test_large_outputs() {
     let path = "/tmp/test_v5c_large_outputs.ckt";
+    let memo = [1u8; 32];
 
     // Create circuit with >256 KiB of outputs (requires multiple 256 KiB sections)
     let num_outputs = 100_000; // 400 KB of outputs
     let outputs: Vec<u32> = (1000..1000 + num_outputs).collect();
 
-    let mut writer = WriterV5c::new(path, 10, num_outputs as u64).await.unwrap();
+    let mut writer = WriterV5c::new(path, 10, num_outputs as u64, memo)
+        .await
+        .unwrap();
 
     // Write some gates (just enough to be valid for the output count)
     for i in 0..99_990 {
@@ -183,6 +190,7 @@ async fn test_large_outputs() {
 
     // Read back and verify outputs
     let reader = ReaderV5c::open(path).unwrap();
+    assert_eq!(reader.header().memo, memo);
     assert_eq!(reader.outputs().len(), num_outputs as usize);
     assert_eq!(reader.outputs(), &outputs[..]);
 
@@ -194,7 +202,7 @@ async fn test_checksum_verification() {
     let path = "/tmp/test_v5c_checksum.ckt";
 
     // Write a circuit
-    let mut writer = WriterV5c::new(path, 5, 2).await.unwrap();
+    let mut writer = WriterV5c::new(path, 5, 2, [0u8; 32]).await.unwrap();
 
     for i in 0..100 {
         writer
@@ -230,7 +238,7 @@ async fn test_partial_last_block() {
 
     // Write exactly 1.5 blocks worth of gates
     let total_gates = GATES_PER_BLOCK + (GATES_PER_BLOCK / 2);
-    let mut writer = WriterV5c::new(path, 10, 1).await.unwrap();
+    let mut writer = WriterV5c::new(path, 10, 1, [0u8; 32]).await.unwrap();
 
     for i in 0..total_gates {
         writer
@@ -267,7 +275,7 @@ async fn test_partial_last_block() {
 async fn test_empty_circuit_rejected() {
     let path = "/tmp/test_v5c_empty.ckt";
 
-    let writer = WriterV5c::new(path, 0, 0).await.unwrap();
+    let writer = WriterV5c::new(path, 0, 0, [0u8; 32]).await.unwrap();
 
     // Try to finalize without writing any gates
     let result = writer.finalize(100, vec![]).await;
@@ -284,7 +292,7 @@ async fn test_empty_circuit_rejected() {
 async fn test_writer_validates_addresses() {
     let path = "/tmp/test_v5c_validate_addr.ckt";
 
-    let mut writer = WriterV5c::new(path, 10, 1).await.unwrap();
+    let mut writer = WriterV5c::new(path, 10, 1, [0u8; 32]).await.unwrap();
 
     // Write valid gate
     writer

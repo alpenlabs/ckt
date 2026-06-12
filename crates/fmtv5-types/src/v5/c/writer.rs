@@ -33,6 +33,7 @@ pub struct WriterV5c {
     // Metadata
     primary_inputs: u64,
     num_outputs: u64,
+    memo: [u8; 32],
 
     // File offsets
     outputs_offset: u64, // Start of outputs section
@@ -61,13 +62,14 @@ impl WriterV5c {
         path: impl AsRef<Path>,
         primary_inputs: u64,
         num_outputs: u64,
+        memo: [u8; 32],
     ) -> Result<Self> {
         // Open/truncate file
         let mut opts = OpenOptions::new();
         opts.create(true).write(true).truncate(true);
         let file = opts.open(path.as_ref()).await?;
 
-        // Write header placeholder (88 bytes) padded to 256 KiB
+        // Write header placeholder (120 bytes) padded to 256 KiB
         let header_padded_size = ALIGNMENT;
         let header_placeholder = vec![0u8; header_padded_size];
         {
@@ -95,6 +97,7 @@ impl WriterV5c {
             file,
             primary_inputs,
             num_outputs,
+            memo,
             outputs_offset,
             next_offset: blocks_start_offset,
             block_buffer: Box::new([0u8; BLOCK_SIZE]),
@@ -246,6 +249,7 @@ impl WriterV5c {
         // Hash header: before checksum + after checksum + all padding to 256 KiB
         // Build complete header first
         let mut temp_header = HeaderV5c::new();
+        temp_header.memo = self.memo;
         temp_header.xor_gates = self.xor_gates_written;
         temp_header.and_gates = self.and_gates_written;
         temp_header.primary_inputs = self.primary_inputs;
@@ -255,12 +259,12 @@ impl WriterV5c {
 
         let temp_header_bytes = temp_header.to_bytes();
 
-        // Hash header before checksum field (bytes 0-10: magic, version, format_type, nkas)
-        self.hasher.update(&temp_header_bytes[0..10]);
-        // Skip checksum field (bytes 10-42)
-        // Hash header after checksum field (bytes 42-88: all metadata)
-        self.hasher.update(&temp_header_bytes[42..88]);
-        // Hash header padding (88 bytes to 256 KiB)
+        // Hash header before checksum field (bytes 0-42: magic, version, format_type, nkas, memo)
+        self.hasher.update(&temp_header_bytes[0..42]);
+        // Skip checksum field (bytes 42-74)
+        // Hash header after checksum field (bytes 74-10: all metadata)
+        self.hasher.update(&temp_header_bytes[74..120]);
+        // Hash header padding (120 bytes to 256 KiB)
         let header_padding = vec![0u8; ALIGNMENT - HEADER_SIZE];
         self.hasher.update(&header_padding);
 
@@ -269,6 +273,7 @@ impl WriterV5c {
 
         // Build complete header
         let mut header = HeaderV5c::new();
+        header.memo = self.memo;
         header.xor_gates = self.xor_gates_written;
         header.and_gates = self.and_gates_written;
         header.primary_inputs = self.primary_inputs;
@@ -276,7 +281,7 @@ impl WriterV5c {
         header.num_outputs = self.num_outputs;
         header.checksum = checksum;
 
-        // Write header at offset 0 (only 88 bytes, not padding)
+        // Write header at offset 0 (only 120 bytes, not padding)
         let header_bytes = header.to_bytes();
         {
             let (res, _) = self.file.write_all_at(header_bytes.to_vec(), 0).await;
@@ -356,7 +361,7 @@ mod tests {
         let path = "/tmp/test_v5c_write_simple.ckt";
 
         // Create writer
-        let mut writer = WriterV5c::new(path, 2, 1).await?;
+        let mut writer = WriterV5c::new(path, 2, 1, [0u8; 32]).await?;
 
         // Write 4 gates in execution order
         writer
@@ -404,7 +409,7 @@ mod tests {
     async fn test_writer_validates_scratch_space() {
         let path = "/tmp/test_v5c_scratch_space.ckt";
 
-        let mut writer = WriterV5c::new(path, 2, 1).await.unwrap();
+        let mut writer = WriterV5c::new(path, 2, 1, [0u8; 32]).await.unwrap();
         writer
             .write_gate(GateV5c::new(2, 3, 100), GateType::XOR)
             .await

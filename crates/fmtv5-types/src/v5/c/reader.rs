@@ -38,7 +38,7 @@ impl ReaderV5c {
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let mut f = std::fs::OpenOptions::new().read(true).open(path.as_ref())?;
 
-        // Read and parse header (88 bytes)
+        // Read and parse header (120 bytes)
         let mut hdr_bytes = [0u8; HEADER_SIZE];
         f.read_exact(&mut hdr_bytes)?;
         let header = HeaderV5c::from_bytes(&hdr_bytes)?;
@@ -320,7 +320,7 @@ pub async fn verify_v5c_checksum(path: impl AsRef<Path>) -> Result<bool> {
     hdr.validate()
         .map_err(|e| Error::new(ErrorKind::InvalidData, e))?;
 
-    let file_checksum = &header_arr[10..42];
+    let file_checksum = &header_arr[42..74];
 
     let outputs_len = (hdr.num_outputs as usize)
         .checked_mul(4)
@@ -370,11 +370,11 @@ pub async fn verify_v5c_checksum(path: impl AsRef<Path>) -> Result<bool> {
         hasher.update(&outputs_padded);
     }
 
-    // 3. Hash header: before checksum (0-10) + after checksum (42-88) + padding to 256 KiB
-    hasher.update(&header_arr[0..10]); // magic, version, format_type, nkas
-    // Skip checksum field (bytes 10-42)
-    hasher.update(&header_arr[42..HEADER_SIZE]); // all metadata fields
-    // Hash header padding (88 bytes to 256 KiB)
+    // 3. Hash header: before checksum (0-42) + after checksum (74-120) + padding to 256 KiB
+    hasher.update(&header_arr[0..42]); // magic, version, format_type, nkas, memo
+    // Skip checksum field (bytes 42-74)
+    hasher.update(&header_arr[74..HEADER_SIZE]); // all metadata fields
+    // Hash header padding (120 bytes to 256 KiB)
     let header_padding = vec![0u8; ALIGNMENT - HEADER_SIZE];
     hasher.update(&header_padding);
 

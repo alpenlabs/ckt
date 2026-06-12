@@ -35,7 +35,7 @@ Block working set:
 ## File Structure
 
 ```
-[HEADER]          88 bytes → padded to next 256 KiB boundary
+[HEADER]          120 bytes → padded to next 256 KiB boundary
 [OUTPUTS]         num_outputs × 4 bytes → padded to next 256 KiB boundary
 [GATE BLOCKS]     Sequence of 256 KiB blocks:
   Block 0:        256 KiB
@@ -64,11 +64,11 @@ All major sections are aligned to 256 KiB boundaries for optimal mmap and io_uri
 #define BLOCK_PADDING        1         // To reach 262,144 bytes
 
 // Header/output sizes
-#define HEADER_SIZE          88
+#define HEADER_SIZE          120
 #define OUTPUT_ENTRY_SIZE    4
 ```
 
-## Header Structure (88 bytes)
+## Header Structure (120 bytes)
 
 ```c
 struct HeaderV5c {
@@ -77,6 +77,7 @@ struct HeaderV5c {
     version: u8,             // 1 byte: Always 0x05
     format_type: u8,         // 1 byte: Always 0x02 for v5c
     nkas: [u8; 4],           // 4 bytes: "nkas" (0x6E6B6173)
+    memo: [u8; 32],          // 32 bytes: arbitrary memo data
 
     // Checksum (32 bytes)
     checksum: [u8; 32],      // 32 bytes: BLAKE3 hash
@@ -89,7 +90,7 @@ struct HeaderV5c {
     num_outputs: u64,        // 8 bytes: Number of outputs
     reserved2: [u8; 6],      // 6 bytes: Reserved for future use
 }
-// Total: 88 bytes
+// Total: 120 bytes
 // Padded to: 262,144 bytes (256 KiB)
 ```
 
@@ -99,6 +100,7 @@ struct HeaderV5c {
 - **version**: Must be `0x05`
 - **format_type**: Must be `0x02` (identifies v5c variant)
 - **nkas**: Must be `[0x6E, 0x6B, 0x61, 0x73]` ("nkas")
+- **memo**: Arbitrary
 - **checksum**: BLAKE3 hash (see Checksum Calculation)
 - **xor_gates**: Total count of XOR gates in circuit
 - **and_gates**: Total count of AND gates in circuit
@@ -233,7 +235,7 @@ The BLAKE3 checksum is computed over **the entire file** except the checksum fie
 **Hash order** (to enable streaming during writes):
 1. **GATE BLOCKS** section - all full 256 KiB blocks including 1-byte padding within each
 2. **OUTPUTS** section - with padding to 256 KiB boundary
-3. **HEADER** section - bytes 0-8, skip bytes 8-40 (checksum field), bytes 40-88, then padding to 256 KiB
+3. **HEADER** section - all bytes except checksum, then padding to 256 KiB
 
 This differs from the physical file layout (Header → Outputs → Gate Blocks) to enable streaming hash computation during writes.
 
@@ -252,10 +254,10 @@ let outputs_padded_size = padded_size(num_outputs * 4);
 hasher.update(&outputs_padded_data);  // Includes padding to 256 KiB boundary
 
 // 3. Hash header (skip only the checksum field itself)
-hasher.update(&header_bytes[0..10]);     // magic, version, format_type, nkas
-// Skip bytes 10-42: checksum field
-hasher.update(&header_bytes[42..88]);    // all circuit metadata
-let header_padding = vec![0u8; 256*1024 - 88];
+hasher.update(&header_bytes[0..42]);     // magic, version, format_type, nkas, memo
+// Skip 32-byte checksum
+hasher.update(&header_bytes[42..74]);    // all circuit metadata
+let header_padding = vec![0u8; 256*1024 - 74];
 hasher.update(&header_padding);          // padding to 256 KiB
 
 let computed = hasher.finalize();
@@ -265,7 +267,7 @@ assert_eq!(computed.as_bytes(), &header.checksum);
 **What is included in checksum:**
 - All gate blocks: full 256 KiB each (gates + types + 1-byte padding)
 - Outputs section: data + padding to 256 KiB boundary
-- Header section: all bytes except checksum field (10-42) + padding to 256 KiB
+- Header section: all bytes except checksum + padding to 256 KiB
 - **Summary: Everything in the file except the checksum field itself**
 
 ## File Layout Example
@@ -275,7 +277,7 @@ assert_eq!(computed.as_bytes(), &header.checksum);
 ```
 Section         Unpadded Size   Padded Size     Content
 ────────────────────────────────────────────────────────────────
-Header          88 bytes        256 KiB         HeaderV5c + padding
+Header          120 bytes       256 KiB         HeaderV5c + padding
 Outputs         4,000 bytes     256 KiB         [u32; 1000] + padding
 Block 0         262,144 bytes   256 KiB         21,620 gates (full)
 Block 1         262,144 bytes   256 KiB         21,620 gates (full)
@@ -289,14 +291,14 @@ Total           ~786 KB         1.25 MB
 ```
 Section         Unpadded Size   Padded Size     Overhead
 ────────────────────────────────────────────────────────────────
-Header          88 bytes        256 KiB         ~256 KiB
+Header          120 bytes       256 KiB         ~256 KiB
 Outputs         4,000 bytes     256 KiB         ~256 KiB
 Blocks          ~145.5 GB       ~145.5 GB       < 256 KiB
 ────────────────────────────────────────────────────────────────
 Total           ~145.5 GB       ~145.5 GB       ~512 KiB
 
 Number of blocks: ⌈12,000,000,000 / 21,620⌉ = 555,041 blocks
-File size: 88 bytes + 256 KiB + 4,000 bytes + 256 KiB + (555,041 × 256 KiB)
+File size: 256 KiB + 4,000 bytes + 256 KiB + (555,041 × 256 KiB)
          ≈ 145.5 GB
 
 Overhead: 0.00034% (negligible for large circuits)
@@ -407,7 +409,7 @@ total_size = header_padded + outputs_padded + blocks_size
 
 1. Read all gate blocks (including padding)
 2. Read outputs (including padding)
-3. Read header tail (bytes 40..88)
+3. Read header tail
 4. Compute BLAKE3 hash in the specified order
 5. Compare with header checksum field
 
@@ -429,7 +431,7 @@ impl ReaderV5c {
         let mmap = unsafe { MmapOptions::new().map(&file)? };
         
         // Parse header
-        let header = HeaderV5c::from_bytes(&mmap[0..88])?;
+        let header = HeaderV5c::from_bytes(&mmap[0..120])?;
         header.validate()?;
         
         Ok(ReaderV5c { header, mmap })
@@ -586,7 +588,7 @@ impl WriterV5c {
         
         // Write header (padded to 256 KiB)
         let mut header_padded = vec![0u8; 262144];
-        header_padded[..88].copy_from_slice(&self.header.to_bytes());
+        header_padded[..120].copy_from_slice(&self.header.to_bytes());
         self.file.write_all(&header_padded)?;
         
         // Write outputs (padded to 256 KiB)
@@ -600,7 +602,7 @@ impl WriterV5c {
         
         // Complete checksum: hash outputs then header tail
         self.hasher.update(&outputs_padded[..outputs_size]); // No padding
-        self.hasher.update(&self.header.to_bytes()[40..88]);
+        self.hasher.update(&self.header.to_bytes()[74..120]);
         
         let checksum = self.hasher.finalize();
         self.header.checksum.copy_from_slice(checksum.as_bytes());

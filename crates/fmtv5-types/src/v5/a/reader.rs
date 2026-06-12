@@ -482,7 +482,7 @@ pub async fn verify_v5a_checksum(path: impl AsRef<Path>) -> Result<bool> {
         .try_into()
         .map_err(|_| Error::new(ErrorKind::InvalidData, "header size mismatch"))?;
     let hdr = parse_header(&header)?;
-    let file_checksum = &header[8..40];
+    let file_checksum = &header[40..72];
     let outputs_len = (hdr.num_outputs as usize) * 5;
 
     let mut hasher = Hasher::new();
@@ -521,7 +521,7 @@ pub async fn verify_v5a_checksum(path: impl AsRef<Path>) -> Result<bool> {
     }
 
     // 3. Header tail
-    hasher.update(&header[40..72]);
+    hasher.update(&header[72..104]);
 
     Ok(hasher.finalize().as_bytes() == file_checksum)
 }
@@ -549,8 +549,14 @@ mod tests {
         }
     }
 
-    async fn write_file(path: &Path, primary_inputs: u64, outputs: Vec<u64>, gates: &[GateV5a]) {
-        let mut w = CircuitWriterV5a::new(path, primary_inputs, outputs)
+    async fn write_file(
+        path: &Path,
+        primary_inputs: u64,
+        outputs: Vec<u64>,
+        memo: [u8; 32],
+        gates: &[GateV5a],
+    ) {
+        let mut w = CircuitWriterV5a::new(path, primary_inputs, outputs, memo)
             .await
             .unwrap();
         w.write_gates(gates).await.unwrap();
@@ -561,10 +567,11 @@ mod tests {
     async fn reader_open_header_outputs_and_no_blocks() {
         let dir = tempdir().unwrap();
         let path = dir.path().join("empty.v5a");
+        let memo = [1u8; 32];
 
         let primary_inputs = 12;
         let outputs = vec![2, 3, 4, 5];
-        write_file(&path, primary_inputs, outputs.clone(), &[]).await;
+        write_file(&path, primary_inputs, outputs.clone(), memo, &[]).await;
 
         let mut r = CircuitReaderV5a::open(&path).unwrap();
         let h = r.header();
@@ -573,6 +580,7 @@ mod tests {
         assert_eq!(h.format_type, 0x00);
         assert_eq!(h.primary_inputs, primary_inputs);
         assert_eq!(h.num_outputs, outputs.len() as u64);
+        assert_eq!(h.memo, memo);
         assert_eq!(r.outputs(), &outputs[..]);
 
         // No blocks
@@ -587,7 +595,7 @@ mod tests {
         let path = dir.path().join("partial.v5a");
 
         let gates: Vec<_> = (0..3u64).map(mk_gate).collect();
-        write_file(&path, 7, vec![6, 7], &gates).await;
+        write_file(&path, 7, vec![6, 7], [0u8; 32], &gates).await;
 
         let mut r = CircuitReaderV5a::open(&path).unwrap();
 
@@ -619,7 +627,7 @@ mod tests {
 
         // 256 + 10 = 266 gates
         let gates: Vec<_> = (0..(GATES_PER_BLOCK as u64 + 10)).map(mk_gate).collect();
-        write_file(&path, 0, vec![1], &gates).await;
+        write_file(&path, 0, vec![1], [0u8; 32], &gates).await;
 
         let mut r = CircuitReaderV5a::open(&path).unwrap();
 
@@ -663,7 +671,7 @@ mod tests {
         let path = dir.path().join("aos_soa.v5a");
 
         let gates: Vec<_> = (0..20u64).map(mk_gate).collect();
-        write_file(&path, 1, vec![3, 9], &gates).await;
+        write_file(&path, 1, vec![3, 9], [0u8; 32], &gates).await;
 
         // Use two independent readers so we compare the SAME block without borrow conflicts.
         let mut r_soa = CircuitReaderV5a::open(&path).unwrap();
@@ -707,7 +715,7 @@ mod tests {
 
         // Use 1 output (5 bytes) -> HEADER 72 + outputs 5 => start_off=77, misaligned.
         let gates: Vec<_> = (0..17u64).map(mk_gate).collect();
-        write_file(&path, 0, vec![42], &gates).await;
+        write_file(&path, 0, vec![42], [0u8; 32], &gates).await;
 
         let mut r = CircuitReaderV5a::open(&path).unwrap();
 
@@ -739,7 +747,7 @@ mod tests {
         let path = dir.path().join("verify.v5a");
 
         let gates: Vec<_> = (0..5u64).map(mk_gate).collect();
-        write_file(&path, 9, vec![7, 8], &gates).await;
+        write_file(&path, 9, vec![7, 8], [0u8; 32], &gates).await;
 
         // Verify via standalone async function (no streaming reader needed).
         assert!(verify_v5a_checksum(&path).await.unwrap());

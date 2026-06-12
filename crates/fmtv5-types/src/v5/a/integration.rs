@@ -25,9 +25,10 @@ async fn write_file(
     path: &std::path::Path,
     primary_inputs: u64,
     outputs: Vec<u64>,
+    memo: [u8; 32],
     gates: &[GateV5a],
 ) {
-    let mut w = CircuitWriterV5a::new(path, primary_inputs, outputs)
+    let mut w = CircuitWriterV5a::new(path, primary_inputs, outputs, memo)
         .await
         .unwrap();
     w.write_gates(gates).await.unwrap();
@@ -38,13 +39,15 @@ async fn write_file(
 async fn round_trip_small() {
     let dir = tempdir().unwrap();
     let path = dir.path().join("rt_small.v5a");
+    let memo = [1u8; 32];
 
     let outputs = vec![2, 3, 4, 5, 6];
     let gates: Vec<_> = (0..123u64).map(mk_gate).collect();
-    write_file(&path, 42, outputs.clone(), &gates).await;
+    write_file(&path, 42, outputs.clone(), memo, &gates).await;
 
     let mut r = CircuitReaderV5a::open(&path).unwrap();
     assert_eq!(r.header().primary_inputs, 42);
+    assert_eq!(r.header().memo, memo);
     assert_eq!(r.outputs(), &outputs[..]);
 
     // Accumulate all gates back
@@ -79,7 +82,7 @@ async fn round_trip_cross_triplebuffer_chunk_boundary() {
     let outputs = vec![9, 10, 11];
     let gates: Vec<_> = (0..total_gates).map(mk_gate).collect();
 
-    write_file(&path, 7, outputs.clone(), &gates).await;
+    write_file(&path, 7, outputs.clone(), [0u8; 32], &gates).await;
 
     let mut r = CircuitReaderV5a::open(&path).unwrap();
     assert_eq!(r.outputs(), &outputs[..]);
