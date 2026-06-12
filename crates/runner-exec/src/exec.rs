@@ -1,5 +1,7 @@
 //! Execution task implementation.
 
+use std::io::{Error, ErrorKind};
+
 use ckt_fmtv5_types::GateType;
 use ckt_fmtv5_types::v5::c::HeaderV5c;
 use ckt_gobble::{
@@ -40,9 +42,27 @@ impl<'c> CircuitTask for ExecTask<'c> {
 
     fn initialize(
         &self,
-        _header: &HeaderV5c,
+        header: &HeaderV5c,
         _init_input: Self::InitInput,
     ) -> Result<Self::State, Self::Error> {
+        // Check input count consistency
+        let expected_primary_inputs = usize::try_from(header.primary_inputs).map_err(|_| {
+            Error::new(
+                ErrorKind::InvalidInput,
+                "circuit primary input count exceeds supported size",
+            )
+        })?;
+        if self.exec_config.input_values.len() != expected_primary_inputs {
+            return Err(Error::new(
+                ErrorKind::InvalidInput,
+                format!(
+                    "expected {} primary input bits, got {}",
+                    header.primary_inputs,
+                    self.exec_config.input_values.len()
+                ),
+            ));
+        }
+
         // Create the engine and execution instance.
         let engine = Engine::new();
         let instance = engine.new_execution_instance(self.exec_config);
