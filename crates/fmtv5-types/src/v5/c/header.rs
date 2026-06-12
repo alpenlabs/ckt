@@ -2,16 +2,17 @@ use std::io::{self, Error, ErrorKind};
 
 use super::constants::*;
 
-/// Header structure for v5c format (88 bytes)
+/// Header structure for v5c format (120 bytes)
 ///
 /// The header is padded to 256 KiB in the file for alignment.
 #[derive(Debug, Clone, Copy)]
 pub struct HeaderV5c {
-    // Identification (10 bytes)
+    // Identification (42 bytes)
     pub magic: [u8; 4],  // "Zk2u" (0x5A6B3275)
     pub version: u8,     // Always 0x05
     pub format_type: u8, // Always 0x02 for v5c
     pub nkas: [u8; 4],   // "nkas" (0x6E6B6173)
+    pub memo: [u8; 32],  // Arbitrary memo data
 
     // Checksum (32 bytes)
     pub checksum: [u8; 32], // BLAKE3 hash
@@ -33,6 +34,7 @@ impl HeaderV5c {
             version: VERSION,
             format_type: FORMAT_TYPE,
             nkas: NKAS,
+            memo: [0; 32],
             checksum: [0; 32],
             xor_gates: 0,
             and_gates: 0,
@@ -149,6 +151,10 @@ impl HeaderV5c {
         bytes[offset..offset + 4].copy_from_slice(&self.nkas);
         offset += 4;
 
+        // memo (32 bytes)
+        bytes[offset..offset + 32].copy_from_slice(&self.memo);
+        offset += 32;
+
         // checksum (32 bytes)
         bytes[offset..offset + 32].copy_from_slice(&self.checksum);
         offset += 32;
@@ -207,6 +213,11 @@ impl HeaderV5c {
         let mut nkas = [0u8; 4];
         nkas.copy_from_slice(&bytes[offset..offset + 4]);
         offset += 4;
+
+        // memo (32 bytes)
+        let mut memo = [0u8; 32];
+        memo.copy_from_slice(&bytes[offset..offset + 32]);
+        offset += 32;
 
         // checksum (32 bytes)
         let mut checksum = [0u8; 32];
@@ -287,6 +298,7 @@ impl HeaderV5c {
             version,
             format_type,
             nkas,
+            memo,
             checksum,
             xor_gates,
             and_gates,

@@ -31,7 +31,7 @@ pub const CREDITS_OUTPUT: u32 = 0; // Wire is a circuit output
 pub const CREDITS_CONSTANT: u32 = MAX_CREDITS; // Wire is constant/primary input
 
 // v5a header constants (fixed by spec)
-pub const HEADER_SIZE_V5A: usize = 72;
+pub const HEADER_SIZE_V5A: usize = 104;
 pub const MAGIC: [u8; 4] = *b"Zk2u";
 pub const VERSION: u8 = 0x05;
 pub const FORMAT_TYPE_A: u8 = 0x00;
@@ -61,6 +61,7 @@ pub struct HeaderV5a {
     pub version: u8,         // 0x05
     pub format_type: u8,     // 0x00 for v5a
     pub reserved: [u8; 2],   // 0x0000
+    pub memo: [u8; 32],      // arbitrary memo data
     pub checksum: [u8; 32],  // blake3
     pub xor_gates: u64,      // LE
     pub and_gates: u64,      // LE
@@ -96,19 +97,23 @@ fn parse_header(bytes: &[u8; HEADER_SIZE_V5A]) -> io::Result<HeaderV5a> {
         ));
     }
 
-    let mut checksum = [0u8; 32];
-    checksum.copy_from_slice(&bytes[8..40]);
+    let mut memo = [0u8; 32];
+    memo.copy_from_slice(&bytes[8..40]);
 
-    let xor_gates = u64::from_le_bytes(bytes[40..48].try_into().unwrap());
-    let and_gates = u64::from_le_bytes(bytes[48..56].try_into().unwrap());
-    let primary_inputs = u64::from_le_bytes(bytes[56..64].try_into().unwrap());
-    let num_outputs = u64::from_le_bytes(bytes[64..72].try_into().unwrap());
+    let mut checksum = [0u8; 32];
+    checksum.copy_from_slice(&bytes[40..72]);
+
+    let xor_gates = u64::from_le_bytes(bytes[72..80].try_into().unwrap());
+    let and_gates = u64::from_le_bytes(bytes[80..88].try_into().unwrap());
+    let primary_inputs = u64::from_le_bytes(bytes[88..96].try_into().unwrap());
+    let num_outputs = u64::from_le_bytes(bytes[96..104].try_into().unwrap());
 
     Ok(HeaderV5a {
         magic: MAGIC,
         version: bytes[4],
         format_type: bytes[5],
         reserved: [0, 0],
+        memo,
         checksum,
         xor_gates,
         and_gates,

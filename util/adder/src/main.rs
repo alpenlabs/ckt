@@ -79,6 +79,7 @@ fn main() {
             &output_file,
             circuit.primary_inputs,
             circuit.outputs.clone(),
+            [0u8; 32],
         )
         .await
         .unwrap_or_else(|e| {

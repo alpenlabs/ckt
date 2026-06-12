@@ -152,6 +152,7 @@ pub struct CircuitWriterV5a {
     // Metadata
     primary_inputs: u64,
     outputs: Vec<u64>, // original outputs (for validation), we also store serialized bytes
+    memo: [u8; 32],
 
     // Offsets and aggregation
     next_offset: u64, // where the next write after outputs will go
@@ -175,6 +176,7 @@ impl CircuitWriterV5a {
         path: impl AsRef<Path>,
         primary_inputs: u64,
         outputs: Vec<u64>,
+        memo: [u8; 32],
     ) -> Result<Self> {
         // Validate outputs and encode to bytes (5 bytes per output, lower 34 bits)
         let outputs_bytes = encode_outputs_le34(&outputs)?;
@@ -184,7 +186,7 @@ impl CircuitWriterV5a {
         opts.create(true).write(true).truncate(true);
         let file = opts.open(path.as_ref()).await?;
 
-        // Write header placeholder (72 bytes of zero) and outputs
+        // Write header placeholder (104 bytes of zero) and outputs
         let header_placeholder = vec![0u8; HEADER_SIZE_V5A];
         let outputs_offset = HEADER_SIZE_V5A as u64;
         {
@@ -208,6 +210,7 @@ impl CircuitWriterV5a {
             file,
             primary_inputs,
             outputs,
+            memo,
             next_offset,
             io_buf: Vec::with_capacity(DEFAULT_IO_BUFFER_CAP),
             io_buf_cap: DEFAULT_IO_BUFFER_CAP,
@@ -292,6 +295,7 @@ impl CircuitWriterV5a {
             self.and_gates_written,
             self.primary_inputs,
             self.outputs.len() as u64,
+            self.memo,
         );
 
         // Write header back at offset 0
@@ -352,13 +356,14 @@ impl CircuitWriterV5a {
     }
 }
 
-/// Encode v5a header to bytes (72 bytes total, LE).
+/// Encode v5a header to bytes (104 bytes total, LE).
 fn encode_header_v5a_le(
     checksum: &[u8; 32],
     xor_gates: u64,
     and_gates: u64,
     primary_inputs: u64,
     num_outputs: u64,
+    memo: [u8; 32],
 ) -> [u8; HEADER_SIZE_V5A] {
     let mut h = [0u8; HEADER_SIZE_V5A];
     // Identification
@@ -366,13 +371,14 @@ fn encode_header_v5a_le(
     h[4] = VERSION;
     h[5] = FORMAT_TYPE_A;
     // h[6..8] reserved zeros
+    h[8..40].copy_from_slice(&memo);
     // Checksum
-    h[8..40].copy_from_slice(checksum);
+    h[40..72].copy_from_slice(checksum);
     // Metadata (LE)
-    h[40..48].copy_from_slice(&xor_gates.to_le_bytes());
-    h[48..56].copy_from_slice(&and_gates.to_le_bytes());
-    h[56..64].copy_from_slice(&primary_inputs.to_le_bytes());
-    h[64..72].copy_from_slice(&num_outputs.to_le_bytes());
+    h[72..80].copy_from_slice(&xor_gates.to_le_bytes());
+    h[80..88].copy_from_slice(&and_gates.to_le_bytes());
+    h[88..96].copy_from_slice(&primary_inputs.to_le_bytes());
+    h[96..104].copy_from_slice(&num_outputs.to_le_bytes());
     h
 }
 
@@ -564,7 +570,7 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("empty.v5a");
 
-        let writer = CircuitWriterV5a::new(&path, 10, vec![2, 3, 4])
+        let writer = CircuitWriterV5a::new(&path, 10, vec![2, 3, 4], [0u8; 32])
             .await
             .unwrap();
         let stats = writer.finalize().await.unwrap();
@@ -582,7 +588,9 @@ mod tests {
         let dir = tempdir().unwrap();
         let path = dir.path().join("gates.v5a");
 
-        let mut writer = CircuitWriterV5a::new(&path, 2, vec![6]).await.unwrap();
+        let mut writer = CircuitWriterV5a::new(&path, 2, vec![6], [0u8; 32])
+            .await
+            .unwrap();
 
         let gates = vec![
             GateV5a {
@@ -621,7 +629,7 @@ mod tests {
         let mut f = StdOpen::new().read(true).open(&path).unwrap();
         let mut header = [0u8; HEADER_SIZE_V5A];
         f.read_exact(&mut header).unwrap();
-        let num_outputs = u64::from_le_bytes(header[64..72].try_into().unwrap()) as usize;
+        let num_outputs = u64::from_le_bytes(header[96..104].try_into().unwrap()) as usize;
         let outputs_size = num_outputs * 5;
         f.seek(SeekFrom::Start((HEADER_SIZE_V5A + outputs_size) as u64))
             .unwrap();
@@ -643,7 +651,7 @@ mod tests {
         let path = dir.path().join("bad_out.v5a");
         let too_big = MAX_WIRE_ID + 1;
 
-        let res = CircuitWriterV5a::new(&path, 2, vec![too_big]).await;
+        let res = CircuitWriterV5a::new(&path, 2, vec![too_big], [0u8; 32]).await;
         assert!(res.is_err());
     }
 
@@ -653,7 +661,7 @@ mod tests {
         let path = dir.path().join("corrupt.v5a");
 
         {
-            let mut writer = CircuitWriterV5a::new(&path, 3, vec![100, 101])
+            let mut writer = CircuitWriterV5a::new(&path, 3, vec![100, 101], [0u8; 32])
                 .await
                 .unwrap();
             let gates = vec![
@@ -680,7 +688,7 @@ mod tests {
 
         // Corrupt a byte in the blocks area
         let mut f = StdOpen::new().read(true).write(true).open(&path).unwrap();
-        f.seek(SeekFrom::Start(100)).unwrap();
+        f.seek(SeekFrom::Start(132)).unwrap();
         f.write_all(&[0xFF]).unwrap();
 
         assert!(!verify_file_checksum(&path).unwrap());
@@ -696,8 +704,8 @@ mod tests {
         if &header[0..4] != b"Zk2u" || header[4] != 0x05 || header[5] != 0x00 {
             return Err(Error::new(ErrorKind::InvalidData, "invalid header"));
         }
-        let file_checksum = &header[8..40];
-        let num_outputs = u64::from_le_bytes(header[64..72].try_into().unwrap()) as usize;
+        let file_checksum = &header[40..72];
+        let num_outputs = u64::from_le_bytes(header[96..104].try_into().unwrap()) as usize;
         let outputs_size = num_outputs * 5;
 
         let mut hasher = Hasher::new();
@@ -719,7 +727,7 @@ mod tests {
         }
 
         // 3. Hash header tail
-        hasher.update(&header[40..72]);
+        hasher.update(&header[72..104]);
 
         Ok(hasher.finalize().as_bytes() == file_checksum)
     }

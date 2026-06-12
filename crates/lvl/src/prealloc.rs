@@ -11,9 +11,14 @@ pub async fn prealloc(input: &str, output: &str) {
 
     let mut reader = CircuitReaderV5a::open(input).unwrap();
     let header = reader.header();
-    let mut writer = WriterV5c::new(output, header.primary_inputs, header.num_outputs)
-        .await
-        .unwrap();
+    let mut writer = WriterV5c::new(
+        output,
+        header.primary_inputs,
+        header.num_outputs,
+        header.memo,
+    )
+    .await
+    .unwrap();
     let mut wire_map = WireMap::new();
 
     for _ in 0..header.primary_inputs + 2 {

@@ -54,15 +54,16 @@ This design allows writers to compute checksums in a single streaming pass witho
 ### Purpose
 v5a is an intermediate format that preserves wire IDs and credits for memory management. It bridges source formats and the production v5c format, maintaining the credits system for compile-time garbage collection.
 
-### Header Structure (72 bytes)
+### Header Structure (104 bytes)
 
 ```c
 struct HeaderV5a {
-    // Identification (8 bytes)
+    // Identification (40 bytes)
     magic: [u8; 4],          // 4 bytes: "Zk2u" (0x5A6B3275)
     version: u8,             // 1 byte: Always 0x05
     format_type: u8,         // 1 byte: Always 0x00 for v5a
     reserved: [u8; 2],       // 2 bytes: Reserved, must be 0x0000
+    memo: [u8; 32],          // 32 bytes: Arbitrary memo data
 
     // Checksum (32 bytes)
     checksum: [u8; 32],      // 32 bytes: BLAKE3 hash
@@ -233,8 +234,8 @@ for block in blocks {
 // 2. Hash outputs section
 hasher.update(&outputs_data);
 
-// 3. Hash header fields after checksum (bytes 40..72 for v5a)
-hasher.update(&header_bytes[40..]);  // Skip magic, version, type, reserved, checksum
+// 3. Hash header fields after checksum (bytes 72..104 for v5a)
+hasher.update(&header_bytes[72..]);  // Skip magic, version, type, reserved, checksum
 
 let computed = hasher.finalize();
 assert_eq!(computed.as_bytes(), &header.checksum);

@@ -40,10 +40,16 @@ fn main() {
         // ===== WRITE PHASE =====
         println!("Writing circuit to {}...", temp_file.display());
 
-        let mut writer =
-            CircuitWriterV5a::new(&temp_file, circuit.primary_inputs, circuit.outputs.clone())
-                .await
-                .expect("Failed to create writer");
+        let memo = [1u8; 32];
+
+        let mut writer = CircuitWriterV5a::new(
+            &temp_file,
+            circuit.primary_inputs,
+            circuit.outputs.clone(),
+            memo,
+        )
+        .await
+        .expect("Failed to create writer");
 
         writer
             .write_gates(&circuit.gates)
@@ -94,6 +100,7 @@ fn main() {
             circuit.outputs.len() as u64,
             "Output count mismatch"
         );
+        assert_eq!(header.memo, memo);
         assert_eq!(
             header.xor_gates,
             circuit.num_xor_gates() as u64,
@@ -140,7 +147,7 @@ fn main() {
         println!("=== Roundtrip Test PASSED ===");
         println!();
         println!("The v5a format correctly preserves:");
-        println!("  • Circuit metadata (inputs, outputs, gate counts)");
+        println!("  • Circuit metadata (inputs, outputs, gate counts, memo)");
         println!("  • All output wire IDs");
         println!("  • All gate data (in1, in2, out, credits, type)");
         println!("  • Data integrity via BLAKE3 checksum");
