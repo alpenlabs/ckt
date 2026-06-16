@@ -286,7 +286,8 @@ impl CircuitWriterV5a {
         self.hasher.update(&self.xor_gates_written.to_le_bytes());
         self.hasher.update(&self.and_gates_written.to_le_bytes());
         self.hasher.update(&self.primary_inputs.to_le_bytes());
-        self.hasher.update(&(self.outputs.len() as u64).to_le_bytes());
+        self.hasher
+            .update(&(self.outputs.len() as u64).to_le_bytes());
 
         let checksum = *self.hasher.finalize().as_bytes();
 
