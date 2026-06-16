@@ -256,8 +256,8 @@ hasher.update(&outputs_padded_data);  // Includes padding to 256 KiB boundary
 // 3. Hash header (skip only the checksum field itself)
 hasher.update(&header_bytes[0..42]);     // magic, version, format_type, nkas, memo
 // Skip 32-byte checksum
-hasher.update(&header_bytes[42..74]);    // all circuit metadata
-let header_padding = vec![0u8; 256*1024 - 74];
+hasher.update(&header_bytes[74..120]);    // all circuit metadata
+let header_padding = vec![0u8; 256*1024 - 120];
 hasher.update(&header_padding);          // padding to 256 KiB
 
 let computed = hasher.finalize();
