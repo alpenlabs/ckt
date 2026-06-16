@@ -262,7 +262,7 @@ impl WriterV5c {
         // Hash header before checksum field (bytes 0-42: magic, version, format_type, nkas, memo)
         self.hasher.update(&temp_header_bytes[0..42]);
         // Skip checksum field (bytes 42-74)
-        // Hash header after checksum field (bytes 74-10: all metadata)
+        // Hash header after checksum field (bytes 74-104: all metadata)
         self.hasher.update(&temp_header_bytes[74..120]);
         // Hash header padding (120 bytes to 256 KiB)
         let header_padding = vec![0u8; ALIGNMENT - HEADER_SIZE];
