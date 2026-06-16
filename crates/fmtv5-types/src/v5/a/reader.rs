@@ -520,7 +520,6 @@ pub async fn verify_v5a_checksum(path: impl AsRef<Path>) -> Result<bool> {
         hasher.update(&outs);
     }
 
-
     // 3. Header (without checksum)
     hasher.update(&header[0..40]);
     hasher.update(&header[72..104]);
