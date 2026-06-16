@@ -277,14 +277,16 @@ impl CircuitWriterV5a {
         let outputs_bytes = encode_outputs_le34(&self.outputs)?;
         self.hasher.update(&outputs_bytes);
 
-        // Hash header fields after checksum
-        // Order: xor_gates, and_gates, primary_inputs, num_outputs (all LE)
-        let mut header_tail = [0u8; 32];
-        header_tail[0..8].copy_from_slice(&self.xor_gates_written.to_le_bytes());
-        header_tail[8..16].copy_from_slice(&self.and_gates_written.to_le_bytes());
-        header_tail[16..24].copy_from_slice(&self.primary_inputs.to_le_bytes());
-        header_tail[24..32].copy_from_slice(&(self.outputs.len() as u64).to_le_bytes());
-        self.hasher.update(&header_tail);
+        // Hash header fields other than checksum in order
+        self.hasher.update(&MAGIC);
+        self.hasher.update(&[VERSION]);
+        self.hasher.update(&[FORMAT_TYPE_A]);
+        self.hasher.update(&[0, 0]);
+        self.hasher.update(&self.memo);
+        self.hasher.update(&self.xor_gates_written.to_le_bytes());
+        self.hasher.update(&self.and_gates_written.to_le_bytes());
+        self.hasher.update(&self.primary_inputs.to_le_bytes());
+        self.hasher.update(&(self.outputs.len() as u64).to_le_bytes());
 
         let checksum = *self.hasher.finalize().as_bytes();
 
@@ -710,7 +712,7 @@ mod tests {
 
         let mut hasher = Hasher::new();
 
-        // Checksum order: blocks || outputs || header tail
+        // Checksum order: blocks || outputs || header
 
         // 1. Hash blocks (seek past outputs to blocks region)
         f.seek(SeekFrom::Start((HEADER_SIZE_V5A + outputs_size) as u64))?;
@@ -726,7 +728,8 @@ mod tests {
             hasher.update(&outputs);
         }
 
-        // 3. Hash header tail
+        // 3. Hash header without checksum
+        hasher.update(&header[0..40]);
         hasher.update(&header[72..104]);
 
         Ok(hasher.finalize().as_bytes() == file_checksum)

@@ -487,7 +487,7 @@ pub async fn verify_v5a_checksum(path: impl AsRef<Path>) -> Result<bool> {
 
     let mut hasher = Hasher::new();
 
-    // Checksum order: blocks || outputs || header tail
+    // Checksum order: blocks || outputs || header
 
     // 1. Blocks region
     let total_gates = hdr.total_gates();
@@ -520,7 +520,9 @@ pub async fn verify_v5a_checksum(path: impl AsRef<Path>) -> Result<bool> {
         hasher.update(&outs);
     }
 
-    // 3. Header tail
+
+    // 3. Header (without checksum)
+    hasher.update(&header[0..40]);
     hasher.update(&header[72..104]);
 
     Ok(hasher.finalize().as_bytes() == file_checksum)

@@ -40,12 +40,12 @@ The format offers two variants optimized for different stages of the circuit pip
 The BLAKE3 checksum is computed over the concatenation of:
 1. **GATE BLOCKS** section (all blocks for v5a)
 2. **OUTPUTS** section (entire section as written)
-3. **HEADER** fields after the checksum field (bytes 40 onward: metadata fields)
+3. **HEADER** fields other than the checksum
 
 **Note**: This order differs from the physical file layout (Header → Outputs → Gate Blocks). The modified order enables streaming hash computation during write operations: blocks can be hashed as they're written to disk, then outputs and header metadata are hashed at finalization. This eliminates the need for a second pass over potentially billions of gates.
 
 **Physical file order**: Header → Outputs → Gate Blocks
-**Checksum order**: Gate Blocks → Outputs → Header tail
+**Checksum order**: Gate Blocks → Outputs → Header
 
 This design allows writers to compute checksums in a single streaming pass without seeking.
 
@@ -234,8 +234,9 @@ for block in blocks {
 // 2. Hash outputs section
 hasher.update(&outputs_data);
 
-// 3. Hash header fields after checksum (bytes 72..104 for v5a)
-hasher.update(&header_bytes[72..]);  // Skip magic, version, type, reserved, checksum
+// 3. Hash header fields other than checksum
+hasher.update(&header_bytes[0..40]);
+hasher.update(&header_bytes[72..104]);
 
 let computed = hasher.finalize();
 assert_eq!(computed.as_bytes(), &header.checksum);
