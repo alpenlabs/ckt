@@ -699,12 +699,14 @@ mod tests {
 
     // Reference checksum verifier for tests (pure std I/O).
     fn verify_file_checksum(path: &Path) -> Result<bool> {
+        use crate::v5::a::{FORMAT_TYPE_A, MAGIC, VERSION};
+
         let mut f = StdOpen::new().read(true).open(path)?;
 
         // Read header
         let mut header = [0u8; HEADER_SIZE_V5A];
         f.read_exact(&mut header)?;
-        if &header[0..4] != b"Zk2u" || header[4] != 0x05 || header[5] != 0x00 {
+        if header[0..4] != MAGIC || header[4] != VERSION || header[5] != FORMAT_TYPE_A {
             return Err(Error::new(ErrorKind::InvalidData, "invalid header"));
         }
         let file_checksum = &header[40..72];
