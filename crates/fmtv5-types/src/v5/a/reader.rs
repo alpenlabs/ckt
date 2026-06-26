@@ -579,8 +579,8 @@ mod tests {
         let mut r = CircuitReaderV5a::open(&path).unwrap();
         let h = r.header();
 
-        assert_eq!(h.version, 0x05);
-        assert_eq!(h.format_type, 0x00);
+        assert_eq!(h.version, crate::v5::a::VERSION);
+        assert_eq!(h.format_type, crate::v5::a::FORMAT_TYPE_A);
         assert_eq!(h.primary_inputs, primary_inputs);
         assert_eq!(h.num_outputs, outputs.len() as u64);
         assert_eq!(h.memo, memo);
