@@ -74,7 +74,7 @@ All major sections are aligned to 256 KiB boundaries for optimal mmap and io_uri
 struct HeaderV5c {
     // Identification (10 bytes)
     magic: [u8; 4],          // 4 bytes: "Zk2u" (0x5A6B3275)
-    version: u8,             // 1 byte: Always 0x05
+    version: u8,             // 1 byte: Always 0x06
     format_type: u8,         // 1 byte: Always 0x02 for v5c
     nkas: [u8; 4],           // 4 bytes: "nkas" (0x6E6B6173)
     memo: [u8; 32],          // 32 bytes: arbitrary memo data
@@ -97,7 +97,7 @@ struct HeaderV5c {
 ### Header Fields
 
 - **magic**: Must be `[0x5A, 0x6B, 0x32, 0x75]` ("Zk2u")
-- **version**: Must be `0x05`
+- **version**: Must be `0x06`
 - **format_type**: Must be `0x02` (identifies v5c variant)
 - **nkas**: Must be `[0x6E, 0x6B, 0x61, 0x73]` ("nkas")
 - **memo**: Arbitrary
@@ -389,7 +389,7 @@ total_size = header_padded + outputs_padded + blocks_size
 ### Header Validation
 
 1. **Magic bytes**: Must equal `[0x5A, 0x6B, 0x32, 0x75]`
-2. **Version**: Must equal `0x05`
+2. **Version**: Must equal `0x06`
 3. **Format type**: Must equal `0x02`
 4. **nkas field**: Must equal `[0x6E, 0x6B, 0x61, 0x73]`
 5. **Reserved fields**: Must be zero
