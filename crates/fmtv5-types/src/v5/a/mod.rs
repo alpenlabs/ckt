@@ -58,7 +58,7 @@ pub struct GateV5a {
 #[derive(Debug, Clone, Copy)]
 pub struct HeaderV5a {
     pub magic: [u8; 4],      // "Zk2u"
-    pub version: u8,         // 0x05
+    pub version: u8,         // 0x06
     pub format_type: u8,     // 0x00 for v5a
     pub reserved: [u8; 2],   // 0x0000
     pub memo: [u8; 32],      // arbitrary memo data

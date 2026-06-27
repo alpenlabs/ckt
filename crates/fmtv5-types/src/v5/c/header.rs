@@ -9,7 +9,7 @@ use super::constants::*;
 pub struct HeaderV5c {
     // Identification (42 bytes)
     pub magic: [u8; 4],  // "Zk2u" (0x5A6B3275)
-    pub version: u8,     // Always 0x05
+    pub version: u8,     // Always 0x06
     pub format_type: u8, // Always 0x02 for v5c
     pub nkas: [u8; 4],   // "nkas" (0x6E6B6173)
     pub memo: [u8; 32],  // Arbitrary memo data
