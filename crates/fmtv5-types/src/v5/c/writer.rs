@@ -400,9 +400,9 @@ mod tests {
         assert_eq!(bytes.len(), expected_size);
 
         // Verify header magic
-        assert_eq!(&bytes[0..4], b"Zk2u");
-        assert_eq!(bytes[4], 0x05); // version
-        assert_eq!(bytes[5], 0x02); // format_type v5c
+        assert_eq!(&bytes[0..4], crate::v5::c::MAGIC);
+        assert_eq!(bytes[4], crate::v5::c::VERSION); // version
+        assert_eq!(bytes[5], crate::v5::c::FORMAT_TYPE); // format_type v5c
     }
 
     #[monoio::test]

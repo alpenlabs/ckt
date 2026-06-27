@@ -60,7 +60,7 @@ v5a is an intermediate format that preserves wire IDs and credits for memory man
 struct HeaderV5a {
     // Identification (40 bytes)
     magic: [u8; 4],          // 4 bytes: "Zk2u" (0x5A6B3275)
-    version: u8,             // 1 byte: Always 0x05
+    version: u8,             // 1 byte: Always 0x06
     format_type: u8,         // 1 byte: Always 0x00 for v5a
     reserved: [u8; 2],       // 2 bytes: Reserved, must be 0x0000
     memo: [u8; 32],          // 32 bytes: Arbitrary memo data
@@ -213,7 +213,7 @@ let file = OpenOptions::new()
 
 ### Header Validation
 1. Magic bytes must equal "Zk2u" (0x5A6B3275)
-2. Version must equal 0x05
+2. Version must equal 0x06
 3. Format type must be 0x00 (v5a) or 0x02 (v5c)
 4. Reserved fields must be zero
 5. Gate counts must sum to valid total

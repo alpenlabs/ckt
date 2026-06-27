@@ -33,7 +33,7 @@ pub const CREDITS_CONSTANT: u32 = MAX_CREDITS; // Wire is constant/primary input
 // v5a header constants (fixed by spec)
 pub const HEADER_SIZE_V5A: usize = 104;
 pub const MAGIC: [u8; 4] = *b"Zk2u";
-pub const VERSION: u8 = 0x05;
+pub const VERSION: u8 = 0x06;
 pub const FORMAT_TYPE_A: u8 = 0x00;
 
 // SoA block segment sizes (fixed by spec)
@@ -58,7 +58,7 @@ pub struct GateV5a {
 #[derive(Debug, Clone, Copy)]
 pub struct HeaderV5a {
     pub magic: [u8; 4],      // "Zk2u"
-    pub version: u8,         // 0x05
+    pub version: u8,         // 0x06
     pub format_type: u8,     // 0x00 for v5a
     pub reserved: [u8; 2],   // 0x0000
     pub memo: [u8; 32],      // arbitrary memo data

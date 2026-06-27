@@ -18,8 +18,8 @@ mod avx512;
 /// Magic bytes for v5 format: "Zk2u" in ASCII
 pub const MAGIC: [u8; 4] = [0x5A, 0x6B, 0x32, 0x75];
 
-/// Version number for v5 format
-pub const VERSION: u8 = 0x05;
+/// Version number for v5c format
+pub const VERSION: u8 = 0x06;
 
 /// Format type identifiers
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
