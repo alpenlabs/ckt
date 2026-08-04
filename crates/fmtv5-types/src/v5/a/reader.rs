@@ -13,8 +13,23 @@ use crate::v5::a::{
 };
 use crate::v5::decode_block_v5a;
 use cynosure::site_d::triplebuffer::{
-    AlignedBuffer, BUFFER_ALIGN, BufferStats, TripleBufReader, TripleBufWriter, triple_buffer,
+    AlignedBuffer, BufferStats, TripleBufReader, TripleBufWriter, triple_buffer_aligned,
 };
+
+// Triple-buffer geometry.
+//
+// cynosure 0.4/0.5 hardcoded these as `BUFFER_SIZE` / `BUFFER_ALIGN` in
+// `site_d::triplebuffer`. In 0.6 the triple buffer became generic over its
+// element type and the geometry is supplied by the caller, so we keep the same
+// values here.
+
+/// Capacity of each triple-buffer IO buffer, in bytes.
+const BUFFER_SIZE: usize = 4 * 1024 * 1024;
+
+/// Alignment of each triple-buffer IO buffer, in bytes. Reads in the aligned
+/// region go through `O_DIRECT`, which requires the buffer address, the file
+/// offset, and the length to all be multiples of this.
+const BUFFER_ALIGN: usize = 4096;
 
 // Outputs are 5-byte little-endian entries that must fit in 34 bits.
 // We store them as u64 for convenience.
@@ -65,12 +80,12 @@ pub struct CircuitReaderV5a {
     gates_remaining: u64,
 
     // Triple buffer + IO thread
-    reader: TripleBufReader,
+    reader: TripleBufReader<u8>,
     stop_tx: Option<AsyncSender<()>>,
     io_jh: Option<thread::JoinHandle<()>>,
 
     // Current buffer window
-    cur_buf: Option<AlignedBuffer>,
+    cur_buf: Option<AlignedBuffer<u8>>,
     cur_pos: usize,       // current cursor within buffer
     bytes_remaining: u64, // remaining bytes from the gate region to consume
 
@@ -120,7 +135,8 @@ impl CircuitReaderV5a {
             as u64;
 
         // Triple buffer and IO thread
-        let (mut writer, reader, writer_buf) = triple_buffer();
+        let (mut writer, reader, writer_buf) =
+            triple_buffer_aligned::<u8>(BUFFER_SIZE, BUFFER_ALIGN);
 
         // Gate region file offsets
         let start_off = HEADER_SIZE_V5A as u64 + outputs_bytes_len as u64;
@@ -339,9 +355,9 @@ fn io_thread_run(
     aligned_start: u64,
     aligned_end: u64,
     tail_len: usize, // < 4096 or 0
-    writer: &mut TripleBufWriter,
+    writer: &mut TripleBufWriter<u8>,
     stop_rx: AsyncReceiver<()>,
-    write_buf: AlignedBuffer,
+    write_buf: AlignedBuffer<u8>,
 ) -> Result<()> {
     monoio::RuntimeBuilder::<FusionDriver>::new()
         .enable_timer()
@@ -352,10 +368,10 @@ fn io_thread_run(
 
             // helper: await a publish but abort if stop fires
             async fn publish_until_stop(
-                writer: &mut TripleBufWriter,
-                buf: AlignedBuffer,
+                writer: &mut TripleBufWriter<u8>,
+                buf: AlignedBuffer<u8>,
                 stop: &mut AsyncReceiver<()>,
-            ) -> Option<AlignedBuffer> {
+            ) -> Option<AlignedBuffer<u8>> {
                 select! {
                     _ = stop.recv() => None,
                     next = writer.publish(buf) => Some(next),
