@@ -10,7 +10,7 @@ use std::thread;
 
 use blake3::Hasher;
 use cynosure::site_d::triplebuffer::{
-    AlignedBuffer, BUFFER_ALIGN, TripleBufReader, TripleBufWriter, triple_buffer,
+    AlignedBuffer, TripleBufReader, TripleBufWriter, triple_buffer_aligned,
 };
 use kanal::{AsyncReceiver, AsyncSender, bounded_async};
 use monoio::{FusionDriver, select};
@@ -18,18 +18,33 @@ use monoio::{FusionDriver, select};
 use super::chunk::Chunk;
 use crate::v5::c::{ALIGNMENT, BLOCK_SIZE, GATES_PER_BLOCK, HEADER_SIZE, HeaderV5c, padded_size};
 
+// Triple-buffer geometry.
+//
+// cynosure 0.4/0.5 hardcoded these as `BUFFER_SIZE` / `BUFFER_ALIGN` in
+// `site_d::triplebuffer`. In 0.6 the triple buffer became generic over its
+// element type and the geometry is supplied by the caller, so we keep the same
+// values here.
+
+/// Capacity of each triple-buffer IO buffer, in bytes.
+const BUFFER_SIZE: usize = 4 * 1024 * 1024;
+
+/// Alignment of each triple-buffer IO buffer, in bytes. Reads in the aligned
+/// region go through `O_DIRECT`, which requires the buffer address, the file
+/// offset, and the length to all be multiples of this.
+const BUFFER_ALIGN: usize = 4096;
+
 /// Reader for v5c format files with triple-buffered io_uring
 pub struct ReaderV5c {
     header: HeaderV5c,
     outputs: Vec<u32>,
 
     // Triple-buffered io_uring reader
-    reader: TripleBufReader,
+    reader: TripleBufReader<u8>,
     stop_tx: Option<AsyncSender<()>>,
     io_jh: Option<thread::JoinHandle<()>>,
 
     // Current state
-    cur_buf: Option<AlignedBuffer>,
+    cur_buf: Option<AlignedBuffer<u8>>,
     bytes_remaining: u64, // Always multiple of BLOCK_SIZE
 }
 
@@ -107,7 +122,8 @@ impl ReaderV5c {
         let tail_len = (gate_region_end - aligned_end) as usize;
 
         // Spawn I/O thread with triple buffer
-        let (mut writer, reader, writer_buf) = triple_buffer();
+        let (mut writer, reader, writer_buf) =
+            triple_buffer_aligned::<u8>(BUFFER_SIZE, BUFFER_ALIGN);
         let (stop_tx, stop_rx) = bounded_async(1);
         let path_buf = path.as_ref().to_path_buf();
 
@@ -396,9 +412,9 @@ fn io_thread_run(
     aligned_start: u64,
     aligned_end: u64,
     tail_len: usize,
-    writer: &mut TripleBufWriter,
+    writer: &mut TripleBufWriter<u8>,
     stop_rx: AsyncReceiver<()>,
-    write_buf: AlignedBuffer,
+    write_buf: AlignedBuffer<u8>,
 ) -> Result<()> {
     monoio::RuntimeBuilder::<FusionDriver>::new()
         .enable_timer()
@@ -408,10 +424,10 @@ fn io_thread_run(
             let mut stop_rx = pin!(stop_rx);
 
             async fn publish_until_stop(
-                writer: &mut TripleBufWriter,
-                buf: AlignedBuffer,
+                writer: &mut TripleBufWriter<u8>,
+                buf: AlignedBuffer<u8>,
                 stop: &mut AsyncReceiver<()>,
-            ) -> Option<AlignedBuffer> {
+            ) -> Option<AlignedBuffer<u8>> {
                 select! {
                     _ = stop.recv() => None,
                     next = writer.publish(buf) => Some(next),
