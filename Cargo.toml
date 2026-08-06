@@ -57,7 +57,6 @@ blake3 = "1.8"
 clap = { version = "4.6", features = ["derive"] }
 criterion = "0.8"
 crossbeam-channel = "0.5"
-cynosure = "0.2.2"
 fixedbitset = "0.5.7"
 hex-literal = "1.1.0"
 indexmap = "2.11.4"
