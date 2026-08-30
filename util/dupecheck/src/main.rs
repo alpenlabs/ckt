@@ -1,12 +1,26 @@
 //! asdas
 
+use std::path::PathBuf;
+
 use ckt_fmtv5_types::v5::a::reader::CircuitReaderV5a;
+use clap::Parser;
 use indicatif::ProgressBar;
 // use roaring::{RoaringBitmap, RoaringTreemap};
 
+#[derive(Parser)]
+#[command(name = "dupecheck")]
+#[command(about = "Verify claimed wire-usage credits against actual usage", long_about = None)]
+#[command(version)]
+struct Cli {
+    /// Input v5a CKT circuit file
+    #[arg(value_name = "INPUT")]
+    input: PathBuf,
+}
+
 #[monoio::main]
 async fn main() {
-    let mut reader = CircuitReaderV5a::open("/Users/user/g16.ckt").unwrap();
+    let cli = Cli::parse();
+    let mut reader = CircuitReaderV5a::open(cli.input).unwrap();
 
     const START: u64 = 0;
     const NUM: usize = 100000;

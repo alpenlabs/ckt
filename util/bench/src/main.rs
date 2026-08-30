@@ -1,15 +1,28 @@
 //! Circuit level size histogram analyzer
 
 use std::collections::hash_map::Entry;
+use std::path::PathBuf;
 
 use ahash::{HashMap, HashMapExt};
 use ckt_fmtv5_types::v5::a::reader::CircuitReaderV5a;
 use ckt_lvl::slab::FakeSlabAllocator;
+use clap::Parser;
 use indicatif::ProgressBar;
+
+#[derive(Parser)]
+#[command(name = "bench")]
+#[command(about = "Circuit level size histogram analyzer", long_about = None)]
+#[command(version)]
+struct Cli {
+    /// Input v5a CKT circuit file
+    #[arg(value_name = "INPUT")]
+    input: PathBuf,
+}
 
 #[monoio::main]
 async fn main() {
-    let mut reader = CircuitReaderV5a::open("/Users/user/g16.ckt").unwrap();
+    let cli = Cli::parse();
+    let mut reader = CircuitReaderV5a::open(cli.input).unwrap();
     let pb = ProgressBar::new(reader.header().total_gates());
 
     let perma_wires = reader.header().primary_inputs + 2;
