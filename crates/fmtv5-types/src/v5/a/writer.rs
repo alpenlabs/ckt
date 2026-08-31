@@ -129,8 +129,8 @@ impl BlockBuilder {
 
         // Pack gate types bitset
         // Byte 0 bit 0 => gate 0, ..., byte 31 bit 7 => gate 255
-        for i in 0..self.len {
-            if self.gate_types[i] != GateType::XOR {
+        for (i, gate_type) in self.gate_types.iter().enumerate().take(self.len) {
+            if *gate_type != GateType::XOR {
                 let byte_idx = i / 8;
                 let bit_idx = i % 8;
                 block[TYPES_OFFSET + byte_idx] |= 1u8 << bit_idx;
