@@ -653,13 +653,13 @@ mod tests {
         // First block full
         let b0 = r.next_block_soa().await.unwrap().expect("block 0");
         assert_eq!(b0.gates_in_block, GATES_PER_BLOCK);
-        for i in 0..GATES_PER_BLOCK {
+        for (i, gate_type) in b0.gate_types.iter().enumerate().take(GATES_PER_BLOCK) {
             let want = if (i as u64).is_multiple_of(2) {
                 GateType::XOR
             } else {
                 GateType::AND
             };
-            assert_eq!(b0.gate_types[i], want);
+            assert_eq!(*gate_type, want);
         }
 
         // Second block partial (10)
