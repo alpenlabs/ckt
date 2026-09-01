@@ -33,7 +33,7 @@ jobs:
         uses: dtolnay/rust-toolchain@22a6a5b0f9f487c5f5587025ae9d4a1caf2a8a78 # clippy
 
       - name: Rust cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           cache-on-failure: true
 
