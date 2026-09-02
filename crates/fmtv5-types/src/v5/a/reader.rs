@@ -350,6 +350,17 @@ impl Drop for CircuitReaderV5a {
 
 // ================= IO thread with monoio and O_DIRECT + async stop =================
 
+/// Whether the reader asked the I/O thread to stop (or went away).
+///
+/// Only consulted *between* reads. An in-flight `read_at` hands `buf` to the
+/// kernel until its CQE is reaped, so the read future must never be dropped
+/// mid-flight: the runtime teardown that follows frees the buffer while the
+/// kernel is still writing into it (heap corruption, SIGSEGV in unrelated
+/// frees). Cancelling `publish` is fine — it is an in-process handoff.
+fn stop_requested(stop: &AsyncReceiver<()>) -> bool {
+    !matches!(stop.try_recv(), Ok(None))
+}
+
 fn io_thread_run(
     path: PathBuf,
     aligned_start: u64,
@@ -396,13 +407,10 @@ fn io_thread_run(
                 let mut buf = write_buf;
 
                 while off < aligned_end {
-                    // race read with stop
-                    let read_fut = file.read_at(buf, off);
-                    let stop_fut = stop_rx.recv();
-                    let (res, b) = select! {
-                        _ = stop_fut => return Ok(()),
-                        out = read_fut => out,
-                    };
+                    if stop_requested(&stop_rx) {
+                        return Ok(());
+                    }
+                    let (res, b) = file.read_at(buf, off).await;
                     buf = b;
                     let n = res?;
                     if n == 0 {
@@ -423,16 +431,14 @@ fn io_thread_run(
 
                 // 2) Buffered tail if present (avoid O_DIRECT alignment issues)
                 if tail_len > 0 {
+                    if stop_requested(&stop_rx) {
+                        return Ok(());
+                    }
                     let mut opts = monoio::fs::OpenOptions::new();
                     opts.read(true);
                     let file_tail = opts.open(&path).await?;
 
-                    let read_fut = file_tail.read_at(buf, aligned_end);
-                    let stop_fut = stop_rx.recv();
-                    let (res, b) = select! {
-                        _ = stop_fut => return Ok(()),
-                        out = read_fut => out,
-                    };
+                    let (res, b) = file_tail.read_at(buf, aligned_end).await;
                     buf = b;
                     let n = res?;
                     if n == 0 {
@@ -454,12 +460,10 @@ fn io_thread_run(
                 let mut buf = write_buf;
 
                 while off < end {
-                    let read_fut = file.read_at(buf, off);
-                    let stop_fut = stop_rx.recv();
-                    let (res, b) = select! {
-                        _ = stop_fut => return Ok(()),
-                        out = read_fut => out,
-                    };
+                    if stop_requested(&stop_rx) {
+                        return Ok(());
+                    }
+                    let (res, b) = file.read_at(buf, off).await;
                     buf = b;
                     let n = res?;
                     if n == 0 {
