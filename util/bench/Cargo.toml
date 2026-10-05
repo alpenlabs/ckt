@@ -11,6 +11,7 @@ ckt-fmtv5-types.workspace = true
 ckt-lvl.workspace = true
 
 ahash.workspace = true
+clap.workspace = true
 indicatif.workspace = true
 monoio.workspace = true
 
