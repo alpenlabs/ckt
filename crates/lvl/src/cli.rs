@@ -5,31 +5,31 @@ use std::path::PathBuf;
 #[derive(Parser, Debug)]
 #[command(name = "lvl")]
 #[command(author, version, about, long_about = None)]
-pub struct Cli {
+pub(crate) struct Cli {
     #[command(subcommand)]
-    pub command: Command,
+    pub(crate) command: Command,
 }
 
 #[derive(Subcommand, Debug)]
-pub enum Command {
+pub(crate) enum Command {
     /// Preallocate wires and convert v5a to v5c flat format
     Prealloc(PreallocCommand),
 }
 
 #[derive(Parser, Debug)]
-pub struct PreallocCommand {
+pub(crate) struct PreallocCommand {
     /// Input v5a CKT file path
     #[arg(value_name = "INPUT")]
-    pub input: PathBuf,
+    pub(crate) input: PathBuf,
 
     /// Output v5c CKT file path
     #[arg(value_name = "OUTPUT")]
-    pub output: PathBuf,
+    pub(crate) output: PathBuf,
 }
 
 impl Cli {
     /// Parse command line arguments
-    pub fn parse_args() -> Self {
+    pub(crate) fn parse_args() -> Self {
         Cli::parse()
     }
 }

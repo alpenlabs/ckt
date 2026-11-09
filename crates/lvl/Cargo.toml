@@ -15,3 +15,6 @@ roaring.workspace = true
 [[bin]]
 name = "lvl"
 path = "src/main.rs"
+
+[lints]
+workspace = true

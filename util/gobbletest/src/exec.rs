@@ -4,6 +4,8 @@ use ckt_runner_exec::{CircuitReader, ExecTask, ReaderV5cWrapper, process_task};
 
 use crate::common::{ProgressBarTask, read_inputs};
 
+/// Executes the v5c circuit in cleartext on the inputs read from `input_file`,
+/// returning the output bits.
 pub async fn exec(circuit_file: &str, input_file: &str) -> Vec<bool> {
     let mut reader = ReaderV5cWrapper::new(ReaderV5c::open(circuit_file).unwrap());
 

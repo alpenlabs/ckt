@@ -12,18 +12,18 @@ use crate::common::{ProgressBarTask, read_inputs};
 
 /// Garbling parameters that need to be communicated to the evaluator.
 #[derive(Debug, Clone)]
-pub struct GarblingParams {
+pub(crate) struct GarblingParams {
     /// AES-128 key used for this garbling instance.
     pub aes128_key: [u8; 16],
     /// Public S value used in the CCRND hash function.
-    pub public_s: [u8; 16],
+    pub(crate) public_s: [u8; 16],
     /// Label for constant wire 0 (always false).
-    pub constant_zero_label: [u8; 16],
+    pub(crate) constant_zero_label: [u8; 16],
     /// Label for constant wire 1 (always true).
-    pub constant_one_label: [u8; 16],
+    pub(crate) constant_one_label: [u8; 16],
 }
 
-pub async fn garble(
+pub(crate) async fn garble(
     circuit_file: &str,
     input_file: &str,
     output_file: &str,
@@ -115,7 +115,7 @@ pub async fn garble(
     )
 }
 
-pub async fn garble_discard(circuit_file: &str, rng: &mut ChaCha20Rng) -> Vec<[u8; 16]> {
+pub(crate) async fn garble_discard(circuit_file: &str, rng: &mut ChaCha20Rng) -> Vec<[u8; 16]> {
     let mut reader = ReaderV5cWrapper::new(ReaderV5c::open(circuit_file).unwrap());
 
     let header = *reader.header();

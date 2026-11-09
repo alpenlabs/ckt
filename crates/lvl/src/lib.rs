@@ -14,6 +14,14 @@
 //! prealloc::prealloc("input.v5a", "output.v5c").await;
 //! ```
 
+/// Wire address preallocation (v5a to v5c conversion).
 pub mod prealloc;
+/// Slab-style allocator for wire memory addresses.
 pub mod slab;
+/// Compact wire identifier types.
 pub mod types;
+
+// Dependencies of the `lvl` binary only.
+use clap as _;
+use mimalloc as _;
+use monoio as _;

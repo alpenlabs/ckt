@@ -17,31 +17,31 @@ use crate::common::{
 
 /// Output from garbling with translation support.
 #[derive(Debug)]
-pub struct GarbleTranslationOutput {
+pub(crate) struct GarbleTranslationOutput {
     /// Global delta used for FreeXOR optimization.
-    pub delta: [u8; 16],
+    pub(crate) delta: [u8; 16],
     /// Selected byte labels corresponding to the input byte values.
-    pub selected_byte_labels: Vec<[u8; 16]>,
+    pub(crate) selected_byte_labels: Vec<[u8; 16]>,
     /// Path to the input translation material file.
-    pub translation_file: String,
+    pub(crate) translation_file: String,
     /// Path to the output translation material file.
-    pub output_translation_file: String,
+    pub(crate) output_translation_file: String,
     /// Output labels from the garbler (BitLabel: both false and true labels).
-    pub garbler_output_labels: Vec<[u8; 16]>,
+    pub(crate) garbler_output_labels: Vec<[u8; 16]>,
     /// Secrets embedded in output translation (256-bit per output).
-    pub secrets: Vec<[u8; 32]>,
+    pub(crate) secrets: Vec<[u8; 32]>,
     /// AES-128 key used for garbling.
     pub aes128_key: [u8; 16],
     /// Public S value used in CCRND hash.
-    pub public_s: [u8; 16],
+    pub(crate) public_s: [u8; 16],
     /// Label for constant wire 0 (always false).
-    pub constant_zero_label: [u8; 16],
+    pub(crate) constant_zero_label: [u8; 16],
     /// Label for constant wire 1 (always true).
-    pub constant_one_label: [u8; 16],
+    pub(crate) constant_one_label: [u8; 16],
 }
 
 /// Garbling with translation support.
-pub async fn garble_with_translation(
+pub(crate) async fn garble_with_translation(
     circuit_file: &str,
     input_file: &str,
     output_file: &str,

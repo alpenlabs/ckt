@@ -2,4 +2,5 @@
 
 #[allow(dead_code)]
 mod common;
+/// Cleartext circuit execution.
 pub mod exec;

@@ -6,6 +6,8 @@ use indicatif::ProgressBar;
 
 use crate::slab::FakeSlabAllocator;
 
+/// Converts the v5a circuit at `input` into a v5c circuit at `output`, assigning
+/// each wire a memory address.
 pub async fn prealloc(input: &str, output: &str) {
     let mut slab = FakeSlabAllocator::new();
 

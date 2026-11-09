@@ -16,3 +16,6 @@ bitvec.workspace = true
 indicatif.workspace = true
 monoio.workspace = true
 rand_chacha.workspace = true
+
+[lints]
+workspace = true

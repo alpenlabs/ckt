@@ -1,3 +1,5 @@
+//! `lvl` CLI: circuit transformation tools for the CKT format.
+
 mod cli;
 
 use ckt_lvl::prealloc;
