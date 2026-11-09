@@ -1,11 +1,13 @@
+//! Test harness for garbling, evaluating, and cleartext-executing v5c circuits.
+
 mod common;
 mod e2e;
 mod eval;
 mod eval_translate;
-mod exec;
 mod garble;
 mod garble_translate;
 
+use gobbletest::exec;
 use rand_chacha::ChaCha20Rng;
 use rand_chacha::rand_core::SeedableRng;
 

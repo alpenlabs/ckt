@@ -12,7 +12,7 @@ cynosure = { version = "0.7", optional = true, default-features = false, feature
   "triplebuffer",
   "monoio-0_2",
 ] }
-kanal = { version = "0.1.1", optional = true }
+kanal = { workspace = true, optional = true }
 libc.workspace = true
 monoio = { version = "0.2.4", features = ["sync"], optional = true }
 

@@ -1,5 +1,7 @@
 use roaring::RoaringBitmap;
 
+/// Allocator that hands out wire indices, reusing freed ones before growing.
+#[derive(Debug)]
 pub struct FakeSlabAllocator {
     next_free: usize,
     free_list: RoaringBitmap,
