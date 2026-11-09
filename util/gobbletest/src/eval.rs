@@ -9,7 +9,7 @@ use ckt_runner_exec::{CircuitReader, EvalTask, ReaderV5cWrapper, process_task};
 use crate::common::ProgressBarTask;
 use crate::garble::GarblingParams;
 
-pub async fn eval(
+pub(crate) async fn eval(
     circuit_file: &str,
     ciphertext_file: &str,
     input_values_bits: &BitVec,

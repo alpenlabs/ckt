@@ -14,31 +14,33 @@ use crate::garble::GarblingParams;
 
 /// Output from evaluation with translation support.
 #[derive(Debug)]
-pub struct EvalTranslationOutput {
+pub(crate) struct EvalTranslationOutput {
     /// Output labels from evaluation.
-    pub output_labels: Vec<[u8; 16]>,
+    pub(crate) output_labels: Vec<[u8; 16]>,
     /// Output boolean values corresponding to the labels.
-    pub output_values: Vec<bool>,
+    pub(crate) output_values: Vec<bool>,
     /// Recovered secrets for false outputs (None for true outputs).
-    pub recovered_secrets: Vec<Option<[u8; 32]>>,
+    pub(crate) recovered_secrets: Vec<Option<[u8; 32]>>,
 }
 
 /// Input configuration for evaluation with translation.
-pub struct EvalTranslationConfig<'a> {
-    pub circuit_file: &'a str,
-    pub ciphertext_file: &'a str,
-    pub translation_file: &'a str,
-    pub output_translation_file: &'a str,
-    pub input_file: &'a str,
-    pub byte_labels: &'a [[u8; 16]],
-    pub garbling_params: &'a GarblingParams,
+pub(crate) struct EvalTranslationConfig<'a> {
+    pub(crate) circuit_file: &'a str,
+    pub(crate) ciphertext_file: &'a str,
+    pub(crate) translation_file: &'a str,
+    pub(crate) output_translation_file: &'a str,
+    pub(crate) input_file: &'a str,
+    pub(crate) byte_labels: &'a [[u8; 16]],
+    pub(crate) garbling_params: &'a GarblingParams,
 }
 
 /// Evaluation with translation support.
 ///
 /// Translates byte labels to bit labels using translation material, then runs standard evaluation.
 /// Also translates output labels to recover secrets for false outputs.
-pub async fn eval_with_translation(config: EvalTranslationConfig<'_>) -> EvalTranslationOutput {
+pub(crate) async fn eval_with_translation(
+    config: EvalTranslationConfig<'_>,
+) -> EvalTranslationOutput {
     let mut reader = ReaderV5cWrapper::new(ReaderV5c::open(config.circuit_file).unwrap());
     let header = *reader.header();
 

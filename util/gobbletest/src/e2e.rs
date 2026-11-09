@@ -3,7 +3,7 @@ use crate::garble::GarblingParams;
 use crate::{eval, eval_translate, exec, garble, garble_translate};
 use rand_chacha::ChaCha20Rng;
 
-pub async fn test_end_to_end(
+pub(crate) async fn test_end_to_end(
     circuit_file: &str,
     input_file: &str,
     rng: &mut ChaCha20Rng,
@@ -92,7 +92,7 @@ fn xor_labels(a: &[u8; 16], b: &[u8; 16]) -> [u8; 16] {
     result
 }
 
-pub async fn test_end_to_end_translate(
+pub(crate) async fn test_end_to_end_translate(
     circuit_file: &str,
     input_file: &str,
     rng: &mut ChaCha20Rng,
