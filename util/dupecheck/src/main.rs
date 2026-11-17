@@ -11,8 +11,8 @@ async fn main() {
     const START: u64 = 0;
     const NUM: usize = 100000;
     let range = START..START + NUM as u64;
-    let mut claimed: [u32; NUM] = [0; NUM];
-    let mut actual: [u32; NUM] = [0; NUM];
+    let mut claimed: Vec<u32> = vec![0; NUM];
+    let mut actual: Vec<u32> = vec![0; NUM];
 
     let mut max_creds = 0;
 
