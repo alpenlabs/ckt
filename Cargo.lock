@@ -12,9 +12,9 @@ dependencies = [
 
 [[package]]
 name = "aes"
-version = "0.9.3"
+version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35f0f96ce78e38c3dc6d8948aa8163d06385be74000f3c7a95bf1eef35d3ea32"
+checksum = "fc0fc36d7440d015b45468ba08a21e80e056ebbd014c611c6298bb7503e04bd1"
 dependencies = [
  "cipher",
  "cpubits",
@@ -492,9 +492,9 @@ dependencies = [
 
 [[package]]
 name = "cynosure"
-version = "0.7.0"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "10a8e99149c775e3301ebd207d9dbd9a33bf819bfc5d3fc8d2f5b949a48f7623"
+checksum = "0917e39016c56ea6bc962f91a0bdc20cc9b641cbb2e4ac82329f6660f798c0bd"
 dependencies = [
  "monoio",
 ]
